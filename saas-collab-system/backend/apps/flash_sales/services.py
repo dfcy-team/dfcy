@@ -1,5 +1,5 @@
-from datetime import datetime, timedelta, timezone as dt_timezone
-from zoneinfo import ZoneInfo
+from datetime import date, datetime, time, timedelta, timezone as dt_timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.db import transaction
 from django.utils import timezone
@@ -9,7 +9,7 @@ from apps.audit.services import write_operation_log
 from apps.integrations.models import MarketplaceStoreAuthorization
 from .domain import TERMINAL, digest, identifier, integer
 from .models import Activity, Batch, Plan, Preview, StoreConfig, StoreLock, StoreTask, TenantControl
-from .permissions import require_stores, visible_stores
+from .permissions import require_notification_admin, require_stores, visible_stores
 
 
 def authorized_store(store):
@@ -55,6 +55,8 @@ def request_stop(batch):
 @transaction.atomic
 def save_config(user, store_id, values):
     store = require_stores(user, [store_id], "configure")[0]
+    if {"notification_mode", "recipient_ids"} & set(values):
+        require_notification_admin(user)
     authorized_store(store)
     if set(values) - {"stock", "runs", "enabled", "notification_mode", "recipient_ids", "version"}:
         raise ValidationError("店铺配置包含不支持的字段。")
@@ -73,7 +75,7 @@ def save_config(user, store_id, values):
         raise ValidationError("启用状态无效。")
     config.enabled = False if is_new else values.get("enabled", config.enabled)
     mode = values.get("notification_mode", config.notification_mode)
-    if mode not in {"owner", "custom", "fallback"}:
+    if mode not in {"owner", "custom", "fallback", "disabled"}:
         raise ValidationError("通知方式无效。")
     from .notifications import validate_recipients
     recipients = values.get("recipient_ids", list(config.recipients.values_list("id", flat=True)) if config.pk else [])
@@ -105,7 +107,7 @@ def delete_config(user, store_id, version):
 
 @transaction.atomic
 def submit(user, *, request_id, store_ids, operation="run", preview_id=None, activity_id=None, desired_status=None,
-           confirmed=False, plan=None, due=None, activity_ids=None):
+           confirmed=False, plan=None, due=None, activity_ids=None, sync_scope=None, date_from=None, date_to=None):
     if operation not in {"run", "copy", "sync", "toggle", "delete"}:
         raise ValidationError("操作无效。")
     if not isinstance(request_id, str) or not 1 <= len(request_id) <= 120:
@@ -122,6 +124,19 @@ def submit(user, *, request_id, store_ids, operation="run", preview_id=None, act
         if not Activity.objects.filter(tenant=user.tenant, store=stores[0], platform_id=activity_id).exists():
             raise ValidationError("活动不属于所选店铺，请先同步。")
     selected = []
+    history_dates = None
+    if sync_scope is not None or date_from is not None or date_to is not None:
+        if operation != "sync" or activity_ids is not None or sync_scope not in {"active", "history"}:
+            raise ValidationError("同步范围无效。")
+        if sync_scope == "history":
+            try:
+                history_dates = (date.fromisoformat(date_from), date.fromisoformat(date_to))
+                if history_dates[0] > history_dates[1]:
+                    raise ValueError()
+            except (TypeError, ValueError):
+                raise ValidationError("历史同步须填写有效的开始和结束日期。") from None
+        elif date_from is not None or date_to is not None:
+            raise ValidationError("当前及未来活动同步不使用历史日期范围。")
     if activity_ids is not None:
         if operation != "sync" or not isinstance(activity_ids, list) or not activity_ids or len(activity_ids) > 500 or any(type(pk) is not int for pk in activity_ids):
             raise ValidationError("请选择有效的待同步活动。")
@@ -130,6 +145,8 @@ def submit(user, *, request_id, store_ids, operation="run", preview_id=None, act
             raise ValidationError("活动超出所选店铺范围。")
     payload = {"stores": sorted(set(store_ids)), "operation": operation, "preview": str(preview_id or ""),
                "activity": str(activity_id or ""), "desired_status": desired_status, "activity_ids": sorted(activity_ids or [])}
+    if sync_scope is not None:
+        payload.update(sync_scope=sync_scope, date_from=date_from, date_to=date_to)
     previous = Batch.objects.filter(tenant=user.tenant, request_id=request_id).first()
     if previous:
         if previous.payload_hash != digest(payload):
@@ -143,6 +160,15 @@ def submit(user, *, request_id, store_ids, operation="run", preview_id=None, act
     snapshots = []
     for store in sorted(stores, key=lambda row: row.pk):
         authorized_store(store)
+        sync_window = None
+        if history_dates:
+            try:
+                zone = ZoneInfo(store.timezone)
+                start = datetime.combine(history_dates[0], time.min, zone)
+                end = datetime.combine(history_dates[1] + timedelta(days=1), time.min, zone)
+            except (ZoneInfoNotFoundError, ValueError, OverflowError):
+                raise ValidationError("店铺时区或历史日期范围无效。") from None
+            sync_window = [int(start.timestamp()), int(end.timestamp()) - 1]
         StoreLock.objects.get_or_create(tenant=user.tenant, store=store)
         StoreLock.objects.select_for_update().get(store=store)
         config = StoreConfig.objects.filter(tenant=user.tenant, store=store, deleted_at__isnull=True).first()
@@ -154,6 +180,8 @@ def submit(user, *, request_id, store_ids, operation="run", preview_id=None, act
             "config_version": config.version if config else None, "preview_id": str(preview_id or ""),
             "activity_id": str(activity_id or ""), "desired_status": desired_status,
             "activity_ids": [row.platform_id for row in selected if row.store_id == store.id],
+            "sync_scope": "selected" if selected else sync_scope or "active", "sync_window": sync_window,
+            "date_from": date_from, "date_to": date_to,
             "recipients": recipient_snapshot(store, config),
         }))
     # A competing request may have committed while this transaction waited for a store lock.

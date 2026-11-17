@@ -4,7 +4,7 @@ import pytest
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
-from apps.flash_sales.models import Activity, Batch, Plan, StoreTask
+from apps.flash_sales.models import Activity, Batch, Plan, StoreTask, StoreConfig
 from apps.flash_sales.services import delete_plan, enable_plan, save_plan
 from tests.test_flash_sales import shop
 
@@ -14,6 +14,7 @@ URL = "/api/internal/marketing/flash-sales/workspace/"
 
 def activity(shop, key, start, end):
     user, store, _ = shop
+    StoreConfig.objects.get_or_create(tenant=user.tenant, store=store, defaults={"stock":1})
     return Activity.objects.create(tenant=user.tenant, store=store, platform_id=str(key), slot_id=str(key),
         starts_at=start, ends_at=end, platform_status=1, item_count=2, enabled_count=1, synced_at=timezone.now())
 

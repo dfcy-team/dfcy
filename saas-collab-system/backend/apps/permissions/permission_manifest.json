@@ -36851,7 +36851,7 @@
         "IsAuthenticated"
       ],
       "owner": "flash_sales",
-      "guard_source_sha256": "cf29ec6db312e1a38d29300d77d9bfd1da670c7c28732be48adae754dbbde0e6"
+      "guard_source_sha256": "aab3567376319f208a03043f7d2253af67ca3304e1214915e0f0f3248df4ab24"
     },
     {
       "route": "api/internal/marketing/flash-sales/configs/<int:store_id>/",
@@ -36909,7 +36909,7 @@
         "IsAuthenticated"
       ],
       "owner": "flash_sales",
-      "guard_source_sha256": "b10510f928f668b87c2122668736103a33181418ca0ad3e036367e5e9d72720e"
+      "guard_source_sha256": "e458a81f9819ac7dededf029dc395edede39d93e68eb041840cfebebb0696370"
     },
     {
       "route": "api/internal/marketing/flash-sales/plans/",
@@ -37014,7 +37014,7 @@
         "IsAuthenticated"
       ],
       "owner": "flash_sales",
-      "guard_source_sha256": "91f9fc929c0bdf94b1ff5e1694487fe8f55ddb3bff67040b418689f6c3b28bfb"
+      "guard_source_sha256": "0614b4340ea3c92674dc06b3ee2472c97eaf14e0f39d7cfd8ac1eb46f5b57e52"
     },
     {
       "route": "api/internal/marketing/flash-sales/workspace/",
@@ -37026,7 +37026,7 @@
         "IsAuthenticated"
       ],
       "owner": "flash_sales",
-      "guard_source_sha256": "91f9fc929c0bdf94b1ff5e1694487fe8f55ddb3bff67040b418689f6c3b28bfb"
+      "guard_source_sha256": "0614b4340ea3c92674dc06b3ee2472c97eaf14e0f39d7cfd8ac1eb46f5b57e52"
     },
     {
       "route": "api/internal/marketing/flash-sales/workspace/",
@@ -57327,5 +57327,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "45fa6fb455e5c121f3d349f877046cf5a7ef60134bbcaa2e1b363918a0c1a0aa"
+  "catalog_hash": "13846df9a491882d6ed7dc74ed76f375be1fb054296bd2d76bf7d9ee5a1db22f"
 }

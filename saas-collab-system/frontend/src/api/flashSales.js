@@ -6,6 +6,14 @@ export async function flashRequest(path, method = 'get', data, params) {
   return result.data;
 }
 export const taskLabels = { queued: '排队中', running: '处理中', waiting: '等待重试', confirming: '待核对', succeeded: '已完成', failed: '未完成', stopped: '已停止', missed: '已错过，未补跑' };
+export function taskLabel(task) {
+  if (task?.retry_paused) return '已暂停，需人工继续';
+  if (task?.status === 'waiting') {
+    if (/HTTP 429|频率限制|限流|冷却/.test(task.message || '')) return '限流等待';
+    if ((task.message || '').includes('请求排队')) return '请求排队';
+  }
+  return taskLabels[task?.status] || '待核对';
+}
 export const finished = (task) => ['succeeded', 'failed', 'stopped', 'missed'].includes(task.status);
 export function flashTime(value, zone = 'Asia/Shanghai') {
   if (!value) return '—';
