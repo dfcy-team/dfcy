@@ -4,18 +4,21 @@ from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
+from django.utils import timezone
 
 from apps.commerce.supply_pipeline import open_demand_breakdown
 from apps.sales_management.operating_models import OperatingOrder
 from apps.supply_chain.dates import business_date
-from apps.supply_chain.models import ReplenishmentStrategy, domain_write
+from apps.supply_chain import replenishment_jobs
+from apps.supply_chain.models import (ReplenishmentCalculationJob, ReplenishmentStrategy,
+                                      domain_write)
 from tests.test_supply_chain_v2_foundation import internal_user, world
 from tests.test_supply_chain_v2_logistics import client
 
 
 OPS = '/api/internal/commerce/operating-orders/'
 STRATEGY = '/api/internal/supply-chain/v2/replenishment-strategies/'
-REFERENCES = '/api/internal/supply-chain/v2/replenishment-references/'
+DAILY = '/api/internal/supply-chain/v2/replenishment-daily/'
 CODES = ('supply.v2.view', 'supply.v2.manage', 'sales_management.operating_orders.view',
          'sales_management.operating_orders.manage', 'sales_management.view',
          'sales_management.skus.view', 'sales_management.supply_summary.view')
@@ -53,8 +56,31 @@ def configured(world):
                     'supply_basis_signature': 'stable-synthetic-supply'}})
         return rows
     with patch('apps.commerce.country_decisions.decision_rows', side_effect=facts), \
-            patch('apps.commerce.country_decisions.sales_platform_options', return_value=[]):
+            patch('apps.commerce.country_decisions.sales_platform_options', return_value=[]), \
+            patch('apps.supply_chain.replenishment.country_listing_evidence',
+                  side_effect=lambda actor, country_code, skus: {sku.pk: ['on'] for sku in skus}):
         yield actor, strategy, state
+
+
+def materialize_daily_snapshot(actor, strategy, country, capture_on_commit_callbacks):
+    """Run the production daily generator/worker against this test's concrete fixture facts."""
+    from apps.supply_chain.daily_replenishment import generate_daily_replenishments
+
+    day = business_date()
+    with patch('apps.supply_chain.daily_replenishment._within_schedule', return_value=True), \
+            patch.object(replenishment_jobs, '_enqueue'), \
+            capture_on_commit_callbacks(execute=True):
+        generated = generate_daily_replenishments(now=timezone.now(), business_day=day)
+    assert generated['queued'] + generated['reused'] >= 1
+    job = ReplenishmentCalculationJob.objects.filter(requested_by=actor, country=country,
+        strategy=strategy, config__daily__day=day.isoformat()).order_by('-created_at').first()
+    assert job is not None
+    if job.status != 'completed':
+        with patch.object(replenishment_jobs, '_enqueue'):
+            replenishment_jobs.run_replenishment_calculation(job.pk)
+        job.refresh_from_db()
+    assert job.status == 'completed' and job.processed == job.total
+    return job
 
 
 def preview(api, world, strategy, key='preview', **extra):
@@ -69,8 +95,11 @@ def order_body(world, token, quantity=1184):
         'lines': [{'sku_id': world['sku'].pk, 'quantity': quantity}]}
 
 
-def test_preview_create_edit_same_token_and_submit_preserves_own_reservation(world, configured):
+def test_preview_create_edit_same_token_and_submit_preserves_own_reservation(world, configured,
+        django_capture_on_commit_callbacks):
     actor, strategy, _ = configured
+    daily = materialize_daily_snapshot(actor, strategy, world['country'], django_capture_on_commit_callbacks)
+    assert daily.rows.filter(sku_id=world['sku'].pk, suggested_quantity=1184).exists()
     api = client(actor)
     response = preview(api, world, strategy)
     assert response.status_code == 200, response.data
@@ -119,15 +148,21 @@ def test_strategy_update_has_version_check_and_invalidates_preview(world, config
     assert stale.status_code >= 400
 
 
-def test_procurement_reference_without_operating_permission_is_read_only(world, configured):
-    _, strategy, _ = configured
+def test_procurement_reference_without_operating_permission_is_read_only(world, configured,
+        django_capture_on_commit_callbacks):
+    owner, strategy, _ = configured
+    materialize_daily_snapshot(owner, strategy, world['country'], django_capture_on_commit_callbacks)
     actor = internal_user(world, 'procurement-reference', codes=('supply.v2.view',
         'sales_management.view', 'sales_management.skus.view', 'sales_management.supply_summary.view'))
     api = client(actor)
-    out = api.post(REFERENCES, {'country_id': world['country'].pk, 'strategy_id': strategy.pk,
-        'source_kind': 'cycle', 'quantity_filter': 'all'}, format='json')
-    assert out.status_code == 200, out.data
-    assert out.data['data']['lines'][0]['suggested_quantity'] == 1184
+    with patch('apps.commerce.country_decisions.decision_rows',
+            side_effect=AssertionError('daily reads recalculated facts')):
+        out = api.get(DAILY, {'country_id': world['country'].pk, 'strategy_id': strategy.pk})
+        assert out.status_code == 200, out.data
+        daily_id = out.data['data']['id'].removeprefix('daily:')
+        rows = api.get(DAILY + f'{daily_id}/rows/', {'quantity_filter': 'all'})
+        assert rows.status_code == 200, rows.data
+        assert rows.data['data']['rows'][0]['suggested_quantity'] == 1184
     assert api.get(STRATEGY).data['data']['can_manage'] is False
     assert api.get(OPS).status_code == 403
     assert OperatingOrder.objects.count() == 0

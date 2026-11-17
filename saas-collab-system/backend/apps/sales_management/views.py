@@ -1349,14 +1349,14 @@ class InventoryWorkbenchView(APIView):
 
 
 def _inventory_source(request, permission_code):
-    run_ids = list(SyncRun.objects.filter(
-        tenant=request.user.tenant,
-        sync_job__integration_config__platform="jifeng_wms",
-        sync_job__resource_type="inventory_snapshot",
-    ).values_list("pk", flat=True))
     return filter_inventory_queryset(
         request.user, permission_code,
-        InventorySnapshot.objects.filter(tenant=request.user.tenant, source_run_id__in=run_ids),
+        InventorySnapshot.objects.filter(
+            tenant=request.user.tenant,
+            source_run__tenant=request.user.tenant,
+            source_run__sync_job__integration_config__platform="jifeng_wms",
+            source_run__sync_job__resource_type="inventory_snapshot",
+        ),
         getattr(request, "_permission_resolution_cache", None),
     ).order_by()
 

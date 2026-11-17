@@ -5,8 +5,13 @@ from tests.test_replenishment_strategy_flow import configured, order_body, previ
 from tests.test_supply_chain_v2_foundation import world
 
 
-def test_manual_quantity_adjustment_requires_and_snapshots_reason(world, configured):
+def test_manual_quantity_adjustment_requires_and_snapshots_reason(world, configured,
+        django_capture_on_commit_callbacks):
+    from tests.test_replenishment_strategy_flow import materialize_daily_snapshot
+
     actor, strategy, _ = configured
+    daily = materialize_daily_snapshot(actor, strategy, world['country'], django_capture_on_commit_callbacks)
+    assert daily.rows.filter(sku_id=world['sku'].pk, suggested_quantity=1184).exists()
     api = client(actor)
     result = preview(api, world, strategy).data['data']
     suggested = result['lines'][0]['suggested_quantity']

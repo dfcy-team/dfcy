@@ -57,10 +57,10 @@ def test_later_chunk_serializes_typed_evidence(world, configured, django_capture
     assert job.rows.count() == 21
 
 
-def create_job(api, world, strategy, callbacks):
+def create_job(api, world, strategy, callbacks, **parameters):
     with patch.object(jobs, '_enqueue') as enqueue, callbacks(execute=True):
         response = api.post(BASE, {'country_id': world['country'].pk,
-            'strategy_id': strategy.pk, 'source_kind': 'cycle'}, format='json')
+            'strategy_id': strategy.pk, 'source_kind': 'cycle', **parameters}, format='json')
     assert response.status_code == 202, response.data
     return response.data['data']
 
@@ -85,7 +85,9 @@ def test_full_country_filters_later_chunks_and_reads_never_recalculate(world, co
 
     api = client(actor)
     with patch.object(country_decisions, 'decision_rows', side_effect=variable_facts):
-        result = create_job(api, world, strategy, django_capture_on_commit_callbacks)
+        result = create_job(api, world, strategy, django_capture_on_commit_callbacks,
+            source_kind='season', activity_start=(business_date() + timedelta(days=10)).isoformat(),
+            activity_end=(business_date() + timedelta(days=20)).isoformat(), activity_factor='1.25')
         assert batches == []  # enqueue endpoint does not calculate facts
         for _ in range(3):
             with patch.object(jobs, '_enqueue'), django_capture_on_commit_callbacks(execute=True):
