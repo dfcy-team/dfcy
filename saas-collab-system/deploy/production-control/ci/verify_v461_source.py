@@ -8,11 +8,11 @@ from pathlib import Path
 
 CI = Path(__file__).with_name("v461-source-identity.json")
 identity = json.loads(CI.read_text(encoding="utf-8"))
-assert identity["source_sha"] == "1d071c80601f6b4cc23f6dd564ffb3271addbab5"
+assert identity["source_sha"] == "dea372bd8827f9c564e93b6b5e55df4a68587303"
 assert identity["parent_sha"] == "0a677d00f468ad28d482f298615753dbc170799f"
 assert identity["pull_request"] == 594 and identity["version"] == "2.44.461"
-assert identity["source_commit_count"] == 6
-assert len(identity["source_commits"]) == 6
+assert identity["source_commit_count"] == 7
+assert len(identity["source_commits"]) == 7
 
 
 def git(*args):
@@ -30,8 +30,8 @@ assert len(os.environ["EXPECTED_CONTROL_SHA"]) == 40 and os.environ["EXPECTED_CO
 assert os.environ["REQUESTED_ACTION"] == "deploy"
 assert os.environ["REQUESTED_TRANSPORT"] == "ssh"
 assert git("rev-parse", "HEAD") == identity["source_sha"]
-assert git("rev-parse", "HEAD~6") == identity["parent_sha"]
-assert git("rev-list", "--count", identity["parent_sha"] + "..HEAD") == "6"
+assert git("rev-parse", "HEAD~7") == identity["parent_sha"]
+assert git("rev-list", "--count", identity["parent_sha"] + "..HEAD") == "7"
 assert git("rev-list", "--reverse", "--first-parent", identity["parent_sha"] + "..HEAD").splitlines() == identity["source_commits"]
 rehearsal = identity["migration_rehearsal"]
 assert rehearsal["status"] == "PASS" and rehearsal["network"] == "none"
@@ -85,7 +85,7 @@ def api(path):
         return json.load(response)
 
 
-assert identity['release_generation']=='r1'
+assert identity['release_generation']=='r2'
 assert len(identity['baseline_file_sha256'])==64 and identity['baseline_file_sha256']==os.environ['EXPECTED_BASELINE_SHA']
 
 pr = api("pulls/" + str(identity["pull_request"]))
@@ -93,7 +93,7 @@ assert pr["head"]["sha"] == identity["source_sha"]
 assert pr["head"]["repo"]["full_name"] == "dfcy-team/dfcy"
 assert pr["base"]["ref"] == "release/v435-v447-vm" and pr["base"]["sha"] == identity["parent_sha"]
 assert pr["base"]["repo"]["full_name"] == "dfcy-team/dfcy"
-assert identity["source_ci_runs"] == {'phase2-ci.yml': 44053571230, 'phase3-ci.yml': 44053571257}
+assert identity["source_ci_runs"] == {'phase2-ci.yml': 44070020564, 'phase3-ci.yml': 44070020569}
 verified = set()
 for workflow, run_id in identity["source_ci_runs"].items():
     run = api(f"actions/runs/{run_id}")
