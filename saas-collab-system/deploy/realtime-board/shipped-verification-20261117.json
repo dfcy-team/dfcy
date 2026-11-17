@@ -36,7 +36,7 @@
     "2026-11-16": 250
   },
   "note": "Collector continues running; observations change as records arrive. Counts are distinct orders on first dispatch, not packages or fully shipped orders.",
-  "manual_acceptance": "rendered; user reported low counts; independent read-only reconciliation confirms partial ingestion coverage",
+  "manual_acceptance": "passed: observed-synced scope label, blue bars and pointer values",
   "version_registered": false,
   "readonly_reconciliation": {
     "status": "PASS",
@@ -46,5 +46,6 @@
     "warehouse_sync_tasks_started": 0,
     "warehouse_sync_config_changes": 0
   },
-  "historical_backfill_owner": "existing scheduled dispatcher; explicitly outside board scope"
+  "historical_backfill_owner": "existing scheduled dispatcher; explicitly outside board scope",
+  "public_static_verification": "PASS: current homepage mapping and root/chart assets match deployed artifacts"
 }
