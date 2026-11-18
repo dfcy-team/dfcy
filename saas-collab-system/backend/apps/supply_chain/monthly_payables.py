@@ -31,6 +31,7 @@ class MonthlyQuery(serializers.Serializer):
     party_id = serializers.IntegerField(min_value=1, required=False)
     unassigned_party = serializers.BooleanField(default=False)
     view = serializers.ChoiceField(choices=('parties', 'documents', 'payments'), default='documents')
+    payment_status = serializers.ChoiceField(choices=('all', 'unpaid', 'paid', 'unknown'), default='all')
     limit = serializers.IntegerField(min_value=1, max_value=50, default=20)
     offset = serializers.IntegerField(min_value=0, default=0)
 
@@ -179,6 +180,7 @@ def monthly_data(actor, values):
         row = {k: v for k, v in obj.items() if k != 'due'}
         row.update({key: D0 for key in AMOUNTS})
         row.update(paid_amount=current_cash, applied_amount=current_applied, historical_paid_amount=current_history)
+        row['_paid_by_month_end'] = before_cash + current_cash + before_applied + current_applied + before_history + current_history
         summary['paid_amount'] += current_cash
         summary['applied_amount'] += current_applied
         summary['historical_paid_amount'] += current_history
@@ -203,6 +205,21 @@ def monthly_data(actor, values):
             for key in ('opening_payable', 'opening_credit', 'new_payable', 'remaining_amount', 'credit_balance'):
                 summary[key] += row[key]
         document_rows.append(row)
+    document_status_counts = {'all': len(document_rows), 'unpaid': 0, 'paid': 0, 'unknown': 0}
+    for row in document_rows:
+        if row['remaining_amount'] is None:
+            row['payment_status'] = 'unknown'
+        elif row['remaining_amount'] == D0:
+            row['payment_status'] = 'paid'
+        elif row['_paid_by_month_end'] > D0:
+            row['payment_status'] = 'partial'
+        else:
+            row['payment_status'] = 'unpaid'
+        if row['payment_status'] in ('unpaid', 'partial'):
+            document_status_counts['unpaid'] += 1
+        else:
+            document_status_counts[row['payment_status']] += 1
+        row.pop('_paid_by_month_end')
     document_rows.sort(key=lambda r: (r['document_time'] or '', r['id']), reverse=True)
     parties = _party_totals(document_rows)
     if queue == 'supplier':
@@ -210,7 +227,14 @@ def monthly_data(actor, values):
         summary = {key: sum((p[key] for p in parties.values()), D0) for key in AMOUNTS}
         summary.update({key: sum(p[key] for p in parties.values()) for key in ('unknown_documents', 'undated_documents')})
     offset, limit = values['offset'], values['limit']
-    rows = document_rows[offset:offset + limit]; count = len(document_rows)
+    filtered_documents = document_rows
+    status_filter = values.get('payment_status', 'all')
+    if values['view'] == 'documents' and status_filter != 'all':
+        if status_filter == 'unpaid':
+            filtered_documents = [r for r in document_rows if r['payment_status'] in ('unpaid', 'partial')]
+        else:
+            filtered_documents = [r for r in document_rows if r['payment_status'] == status_filter]
+    rows = filtered_documents[offset:offset + limit]; count = len(filtered_documents)
     if values['view'] == 'parties':
         ordered = sorted(parties.values(), key=lambda p: (-p['remaining_amount'], p['party_name'], p['party_id'] or 0))
         count = len(ordered)
@@ -244,6 +268,7 @@ def monthly_data(actor, values):
     else:
         rows = [{k: str(v) if isinstance(v, Decimal) else v for k, v in row.items()} for row in rows]
     return {'month': month, 'queue': queue, 'summary': {k: str(v) if isinstance(v, Decimal) else v for k, v in summary.items()},
+        'document_status_counts': document_status_counts,
         'rows': rows, 'count': count, 'available_months': sorted(months, reverse=True),
         'notices': ['按当前确认应付金额及单据业务日期回溯，不是已锁定的历史月结快照；未作汇率换算。',
             '月期初、月末应付与预付/超付分列；本月新增应付、实际付款、定金抵扣及历史已付登记分别列示。',
