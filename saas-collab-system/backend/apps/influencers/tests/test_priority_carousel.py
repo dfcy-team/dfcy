@@ -11,12 +11,14 @@ from apps.influencers.services import transition_outreach_task
 from apps.influencers.tests.test_import_compatibility import sample_records
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.masterdata.models import PlatformMaster, StoreMaster, WarehouseMaster
+from apps.accounts.models import CustomUser
 
 pytestmark = pytest.mark.django_db
 
 
 def test_priority_tasks_keep_tenant_and_store_scope(sample_records):
-    user = sample_records['executor']
+    # Isolate this scope from any seeded default BD role in a migrated CI DB.
+    user = CustomUser.objects.create_user(tenant=sample_records['tenant'], username='priority-only-reader', user_type='internal')
     role = Role.objects.create(tenant=user.tenant, name='Priority reader', code='priority-reader')
     permission, _ = Permission.objects.get_or_create(code='influencers.outreach.view')
     role.permissions.add(permission)
