@@ -352,7 +352,8 @@ def test_supplier_nature_includes_deposit_and_classified_reversal(world):
             idempotency_key='deposit-reversal', reverses=deposit, reversal_reason='test')
     result = monthly(api, view='payments')
     amounts = result['summary']['paid_nature_by_currency']
-    assert amounts == [{'currency':'CNY','corporate':'0','personal':'3.0000','unknown':'0'}]
+    assert [{key: row[key] for key in ('currency', 'corporate', 'personal', 'unknown')}
+            for row in amounts] == [{'currency':'CNY','corporate':'0','personal':'3.0000','unknown':'0'}]
     assert Decimal(result['summary']['paid_amount']) == Decimal('3')
     assert all(row['nature']=='personal' for row in result['rows'])
     assert all(row['currency']=='CNY' for row in result['rows'])

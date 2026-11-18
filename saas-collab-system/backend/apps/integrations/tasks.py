@@ -64,7 +64,15 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
         if existing.status != SyncRun.Status.QUEUED or int(budget.get("sequence", 0)) != resume_sequence:
             return {"status": "not_executed", "created": False}
     delivery = getattr(self.request, "delivery_info", None) or {}
-    if segment and delivery.get("routing_key") in {"sync", "celery"}:
+    if (getattr(sync_job, 'resource_type', None) == 'warehouse_order_lookup'
+            and delivery.get('routing_key') not in {None, 'warehouse-orders'}):
+        run_readonly_sync_job.apply_async(args=(sync_job.pk, idempotency_key, resume_sequence),
+                                          queue='warehouse-orders', retry=False)
+        return {'status': 'relayed', 'created': False}
+    video_history = bool(segment and sync_job.resource_type == "video_metrics")
+    history_queue = "sync-video" if video_history else "sync-history"
+    relay_queues = {"sync", "celery", "sync-history"} if video_history else {"sync", "celery"}
+    if segment and delivery.get("routing_key") in relay_queues:
         # Legacy messages already on a normal queue only relay their durable
         # run/segment fence; provider work belongs to the dedicated consumer.
         # Do not purge Redis, replace keys, or create another SyncRun.

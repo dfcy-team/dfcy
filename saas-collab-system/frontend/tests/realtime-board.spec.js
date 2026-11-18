@@ -576,7 +576,7 @@ describe('国家范围和整店ROI', () => {
     ] } });
     wrapper = mount(RealtimeBoard); await flushPromises();
     await wrapper.find('[aria-label="国家／站点"]').setValue('PH');
-    const storeSelect = wrapper.findAll('select')[2];
+    const storeSelect = wrapper.find('.store-options');
     expect(storeSelect.text()).toContain('菲律宾店');
     expect(storeSelect.text()).not.toContain('马来店');
     expect(fetchRealtimeBoard).toHaveBeenCalledTimes(1);
@@ -584,6 +584,20 @@ describe('国家范围和整店ROI', () => {
     expect(fetchRealtimeBoard.mock.calls.at(-1)[0].region).toBe('PH');
     await wrapper.find('.trend-footer button').trigger('click');
     expect(push).toHaveBeenLastCalledWith(expect.objectContaining({query: expect.objectContaining({region:'PH'})}));
+  });
+  it('applies multiple stores together and clears them on country changes', async () => {
+    fetchBoardFilters.mockResolvedValueOnce({ success: true, data: { platforms: ['shopee'], stores: [
+      { id: 2, name: '菲律宾店', region: 'PH', platform: 'shopee' },
+      { id: 3, name: '马来店', region: 'MY', platform: 'shopee' }
+    ] } });
+    wrapper = mount(RealtimeBoard); await flushPromises();
+    for (const input of wrapper.findAll('.store-options input')) await input.setValue(true);
+    expect(wrapper.find('.store-filter summary').text()).toBe('已选 2 家店铺');
+    expect(fetchRealtimeBoard).toHaveBeenCalledTimes(1);
+    await wrapper.find('form').trigger('submit'); await flushPromises();
+    expect(fetchRealtimeBoard.mock.calls.at(-1)[0]).toMatchObject({ store_ids: '2,3', store_id: '' });
+    await wrapper.find('[aria-label="国家／站点"]').setValue('PH');
+    expect(wrapper.find('.store-filter summary').text()).toBe('全部授权店铺');
   });
   it('shows server-authorized ROI and country without calculating missing ROI locally', async () => {
     const response = payload(10);

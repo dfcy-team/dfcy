@@ -58,6 +58,7 @@ def plan_data(actor, kind, pk):
     return {'version': record.version if record else 0, 'source_version': obj.version,
             'lines': enriched_lines(record) if record else [],
             'remaining_amount': state['summary']['remaining_amount'],
+            'corporate_payment': state['summary'].get('corporate_payment'),
             'currency': currency, 'currency_requires_confirmation': not bool(currency),
             'can_manage': can_manage, 'party_name': party['name'],
             'party_changed': bool(record and record.party_snapshot != party),
@@ -109,7 +110,9 @@ def save_plan(actor, kind, pk, payload, request_key):
     source_currency = _source_currency(kind, obj)
     if source_currency and source_currency != currency:
         raise ValidationError('付款计划币种必须与来源单据一致。')
-    remaining = costs.payment_summary(actor, kind, pk)['summary']['remaining_amount']
+    payment_state = costs.payment_summary(actor, kind, pk)
+    summary = payment_state['summary']
+    remaining = summary['remaining_amount']
     if remaining is None:
         raise ValidationError('来源单据应付金额尚未确认，暂不能维护付款计划。')
     balances = line_balances(record) if record else {}
@@ -137,10 +140,30 @@ def save_plan(actor, kind, pk, payload, request_key):
     new_ids = {row['line_id'] for row in normalized_lines}
     if set(referenced) - new_ids:
         raise ValidationError({'lines': '已被付款申请引用的计划明细不能删除。'})
+    prospective_tax = Decimal(0)
     for row in normalized_lines:
         line_id = row['line_id']
         old = next((item for i, item in enumerate(record.lines or [])
                     if (item.get('line_id') or f'legacy-{record.pk}-{i}') == line_id), None) if record else None
+        basis = row.pop('amount_basis', 'gross')
+        if basis == 'net':
+            if kind != 'shipment' or row['nature'] != 'corporate':
+                raise ValidationError({'lines': '只有对公供应商货款可按未税金额安排。'})
+            from .payment_requests import corporate_request_amount
+            old_tax = (old or {}).get('corporate_tax')
+            if old_tax and Decimal(old_tax['net_amount']) == Decimal(row['amount']):
+                breakdown = old_tax
+            else:
+                breakdown = corporate_request_amount(Decimal(row['amount']), summary)
+            row['corporate_tax'] = breakdown
+            row['amount'] = breakdown['gross_amount']
+            terms = summary.get('corporate_payment') or {}
+            if terms.get('needs_confirmation') and breakdown.get('confirm_tax_rate'):
+                if breakdown['source_tax_amount'] != terms['added_tax_amount'] or breakdown['source_net_basis'] != terms['net_basis'] or breakdown['confirm_tax_rate'] != terms['supplier_tax_rate']:
+                    raise ValidationError({'lines': '对公税点或应付已变化，请重新填写未税金额。'})
+                prospective_tax = Decimal(terms['added_tax_amount'])
+        elif old and old.get('corporate_tax'):
+            raise ValidationError({'lines': '已按未税口径保存的安排须从未税金额编辑。'})
         if line_id in referenced and old:
             identity = (old.get('nature'), old.get('currency') or record.currency, str(old.get('fee_item_id') or ''))
             candidate = (row.get('nature'), row.get('currency') or currency, str(row.get('fee_item_id') or ''))
@@ -151,9 +174,8 @@ def save_plan(actor, kind, pk, payload, request_key):
             if Decimal(str(row['amount'])) < paid + reserved:
                 raise ValidationError({'lines': '计划金额不能低于已入账及已占用金额。'})
     total = sum((max(Decimal(0), Decimal(str(row['amount'])) - balances.get(row['line_id'], {}).get('paid_amount', Decimal(0))) for row in normalized_lines), Decimal(0))
-    if total > Decimal(str(remaining)):
+    if total > Decimal(str(remaining)) + prospective_tax:
         raise ValidationError('付款计划合计不能超过当前剩余应付。')
-    payment_state = costs.payment_summary(actor, kind, pk)
     fee_items = {str(item['fee_item_id']): item for item in payment_state.get('fee_items', [])}
     item_totals = {}
     for row in normalized_lines:

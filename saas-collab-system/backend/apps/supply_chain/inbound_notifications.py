@@ -1,5 +1,8 @@
 """Automatic, snapshot-based inbound completion messages to the tenant operations group."""
 import json
+from collections import defaultdict
+from hashlib import sha256
+from time import monotonic
 import uuid
 from datetime import timedelta
 from django.db import transaction
@@ -75,12 +78,11 @@ def safe_text(value):
     return str(value or '').replace('<','＜').replace('>','＞')[:MAX_CARD_TEXT_FIELD_CHARS]
 
 
-MAX_INBOUND_DETAIL_ROWS = 15
-MAX_TRANSIT_STYLE_ROWS = 20
+MAX_INBOUND_DETAIL_ROWS = 10
 MAX_CARD_TEXT_FIELD_CHARS = 48
 
 
-def _transit_styles(inbound, limit=None):
+def _transit_styles(inbound, limit=None, spu_id=None):
     """Return stable SPUs in active same-country transit batches."""
     from .models import DispatchAllocation
 
@@ -102,6 +104,8 @@ def _transit_styles(inbound, limit=None):
         'shipment_line__sku__spu__spu_code',
         'shipment_line__sku__spu__legacy_spu_code',
     ).distinct()
+    if spu_id is not None:
+        rows = rows.filter(shipment_line__sku__spu_id=spu_id)
     total = rows.count()
     ordered_rows = rows.order_by(
         'shipment_line__sku__spu__product_name',
@@ -111,6 +115,35 @@ def _transit_styles(inbound, limit=None):
     if limit is not None:
         ordered_rows = ordered_rows[:limit]
     return list(ordered_rows), total
+
+
+def _sku_fields(sku):
+    from .supplier_products import safe_image_url
+    return {
+        'spu_id': sku.spu_id,
+        'spu_name': sku.spu.product_name,
+        'spu_code': sku.spu.spu_code,
+        'legacy_spu_code': sku.spu.legacy_spu_code or '未维护',
+        'image_sku_id': sku.pk if safe_image_url(sku.image_url, sku.tenant_id) else None,
+    }
+
+
+def _transit_images(inbound, spu_ids):
+    from apps.products.models import ProductSKU
+    from .supplier_products import safe_image_url
+    choices = defaultdict(lambda: ([], []))
+    for sku in ProductSKU.objects.filter(
+        tenant_id=inbound.tenant_id, spu_id__in=spu_ids,
+    ).exclude(image_url__isnull=True).exclude(image_url='').only('id', 'spu_id', 'image_url', 'is_active').order_by('pk'):
+        if safe_image_url(sku.image_url, inbound.tenant_id):
+            choices[sku.spu_id][0 if sku.is_active else 1].append(sku.pk)
+    result = {}
+    for spu_id, (active, archived) in choices.items():
+        ids = active or archived
+        # Stable random choice per notification, so a refresh does not reshuffle photos.
+        seed = sha256(f'{inbound.tenant_id}:{inbound.pk}:{spu_id}'.encode()).digest()
+        result[spu_id] = ids[int.from_bytes(seed[:8], 'big') % len(ids)]
+    return result
 
 
 def notice_detail_data(inbound, *, line_limit=None, transit_limit=None):
@@ -138,6 +171,7 @@ def notice_detail_data(inbound, *, line_limit=None, transit_limit=None):
         source = line.shipment_line
         combined_rows.append((0, line.pk, {
             'product_name': source.product_name_snapshot or '',
+            **_sku_fields(source.sku),
             'sku_code': source.sku_code_snapshot,
             'legacy_sku_code': source.sku.legacy_sku_code or '未维护',
             'expected_quantity': line.expected_quantity,
@@ -148,6 +182,7 @@ def notice_detail_data(inbound, *, line_limit=None, transit_limit=None):
     for line in ordered_extras:
         combined_rows.append((1, line.pk, {
             'product_name': line.product_name_snapshot or '',
+            **_sku_fields(line.sku),
             'sku_code': line.sku_code_snapshot,
             'legacy_sku_code': line.legacy_sku_code_snapshot or line.sku.legacy_sku_code or '未维护',
             'expected_quantity': 0,
@@ -161,6 +196,7 @@ def notice_detail_data(inbound, *, line_limit=None, transit_limit=None):
     line_rows = [row for _, _, row in combined_rows]
 
     transit_rows, transit_total = _transit_styles(inbound, limit=transit_limit)
+    transit_images = _transit_images(inbound, [row['shipment_line__sku__spu_id'] for row in transit_rows])
     country = CountrySiteMaster.objects.filter(
         tenant_id=inbound.tenant_id, country_code=inbound.batch.country_code_snapshot
     ).first()
@@ -168,6 +204,7 @@ def notice_detail_data(inbound, *, line_limit=None, transit_limit=None):
         'inbound': {
             'id': inbound.pk,
             'number': inbound.number,
+            'receipt_mode': inbound.receipt_mode,
             'batch_number': inbound.batch.number,
             'warehouse_name': inbound.warehouse.name,
             'country_code': inbound.batch.country_code_snapshot,
@@ -183,6 +220,7 @@ def notice_detail_data(inbound, *, line_limit=None, transit_limit=None):
         'line_total': line_total,
         'transit_styles': [{
             'product_name': row['shipment_line__sku__spu__product_name'] or '',
+            'image_sku_id': transit_images.get(row['shipment_line__sku__spu_id']),
             'spu_code': row['shipment_line__sku__spu__spu_code'],
             'legacy_spu_code': row['shipment_line__sku__spu__legacy_spu_code'] or '未维护',
         } for row in transit_rows],
@@ -191,35 +229,106 @@ def notice_detail_data(inbound, *, line_limit=None, transit_limit=None):
     }
 
 
+def _plain(content):
+    return {'tag': 'plain_text', 'content': content}
+
+
+def _style_text(name, row):
+    return (f"{safe_text(name) or '未命名款式'}\n"
+            f"新SPU {safe_text(row['spu_code'])} · 旧SPU {safe_text(row['legacy_spu_code'])}")
+
+
 def snapshot(inbound, actor):
-    data = notice_detail_data(
-        inbound, line_limit=MAX_INBOUND_DETAIL_ROWS, transit_limit=MAX_TRANSIT_STYLE_ROWS
-    )
-    inbound_data = data['inbound']
-    summary = data['summary']
-    rows = [
-        f"{safe_text(line['product_name'])} / {safe_text(line['sku_code'])}（旧SKU：{safe_text(line['legacy_sku_code'])}） · "
-        + (f"额外实收 {line['received_quantity']}" if line['is_extra'] else
-           f"发货 {line['expected_quantity']} · 实收 {line['received_quantity']} · 差异 {line['difference']:+d}")
-        for line in data['lines']
-    ]
-    detail='\n'.join(rows)
-    elements=[{'tag':'div','text':{'tag':'plain_text','content':f'入库单：{inbound.number}\n发运批次：{inbound.batch.number}\n目的仓：{inbound.warehouse.name}\n完成时间：{timezone.localtime(inbound.confirmed_at).strftime("%Y-%m-%d %H:%M")}'}},
-        {'tag':'div','text':{'tag':'plain_text','content':f'发货 {summary["expected_quantity"]} 件 ｜ 实收 {summary["received_quantity"]} 件 ｜ 差异 {summary["difference_quantity"]:+d} 件'}},
-        {'tag':'div','text':{'tag':'plain_text','content':detail or '无商品明细'}}]
-    if data['line_total']>MAX_INBOUND_DETAIL_ROWS:elements.append({'tag':'note','elements':[{'tag':'plain_text','content':f'共 {data["line_total"]} 行，优先展示差异商品；完整清单请查看到货明细。'}]})
-    transit_lines=[f"{safe_text(row['product_name']) or '未命名款式'} / 新SPU：{safe_text(row['spu_code'])} / 旧SPU：{safe_text(row['legacy_spu_code'])}" for row in data['transit_styles']]
-    transit_count=data['transit_style_total']
-    if transit_count>MAX_TRANSIT_STYLE_ROWS:
-        transit_lines.append(f'另有 {transit_count-MAX_TRANSIT_STYLE_ROWS} 个款式未展示。')
-    elements.append({'tag':'div','text':{'tag':'plain_text','content':'同目的国家在途款式预告：\n'+('\n'.join(transit_lines) if transit_lines else '暂无在途款式。')}})
+    data = notice_detail_data(inbound, transit_limit=0)
+    received = {}
+    for row in data['lines']:
+        quantity = row['received_quantity'] or 0
+        if quantity <= 0:
+            continue
+        style = received.setdefault(row['spu_id'], {**row, 'received_total': 0})
+        style['received_total'] += quantity
+        if not style['image_sku_id']:
+            style['image_sku_id'] = row['image_sku_id']
+    styles = sorted(received.values(), key=lambda row: (-row['received_total'], row['spu_code'], row['spu_id']))
+    header = data['inbound']
+    elements = []
+    image_rows = {}
+
+    def add(text, sku_id=None):
+        if sku_id:
+            image_rows[str(len(elements))] = sku_id
+        elements.append({'tag': 'div', 'text': _plain(text)})
+
+    add(f"入库单：{header['number']}\n发运批次：{header['batch_number']}\n"
+        f"目的仓：{header['warehouse_name']}\n完成时间：{timezone.localtime(inbound.confirmed_at):%Y-%m-%d %H:%M}")
+    add(f"到货款式 · 实收合计 {data['summary']['received_quantity']} 件")
+    for row in styles[:MAX_INBOUND_DETAIL_ROWS]:
+        add(f"{_style_text(row['spu_name'], row)} · 实收 {row['received_total']} 件", row['image_sku_id'])
+    if not styles:
+        add('暂无实收到货款式。')
+    if len(styles) > MAX_INBOUND_DETAIL_ROWS:
+        add(f'另有 {len(styles) - MAX_INBOUND_DETAIL_ROWS} 款到货，详见明细。')
     try:
-        url=system_url(f'/inbound-notices/{inbound.pk}')
-        elements.append({'tag':'action','actions':[{'tag':'button','text':{'tag':'plain_text','content':'查看到货明细与预告'},'url':url,'type':'primary'}]})
-    except ValidationError:pass
-    country=CountrySiteMaster.objects.filter(tenant_id=inbound.tenant_id,country_code=inbound.batch.country_code_snapshot).first()
-    country_label=country.name if country else inbound.batch.country_code_snapshot
-    return {'header':{'title':{'tag':'plain_text','content':f'{country_label} · 入库清点完成'},'template':'purple'},'elements':elements}
+        url = system_url(f'/inbound-notices/{inbound.pk}')
+        elements.append({'tag': 'action', 'actions': [
+            {'tag': 'button', 'text': _plain('查看到货明细与预告'), 'url': url, 'type': 'primary'},
+        ]})
+    except ValidationError:
+        pass
+    payload = {'header': {'title': _plain(f"{header['country_name']} · 入库清点完成"),
+                         'template': 'purple'}, 'elements': elements}
+    if image_rows:
+        payload['_image_rows'] = image_rows
+    return payload
+
+
+def _resolve_card_images(payload, tenant_id, service, connection):
+    """Upload thumbnails outside the receipt transaction and freeze the resulting card."""
+    from io import BytesIO
+    from PIL import Image
+    from billiard.exceptions import SoftTimeLimitExceeded
+    from apps.products.models import ProductSKU
+    from .supplier_product_images import load_product_images
+    from .supplier_products import safe_image_url
+
+    card = dict(payload)
+    rows = card.pop('_image_rows', {})
+    if not rows:
+        return card
+    deadline = monotonic() + 45
+    try:
+        skus = ProductSKU.objects.filter(tenant_id=tenant_id, pk__in=set(rows.values()))
+        images = load_product_images({'lines': [
+            {'sku_id': sku.pk, 'product_details': {'image_url': safe_image_url(sku.image_url, tenant_id)}}
+            for sku in skus
+        ]}, tenant_id)
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception:
+        return card
+    keys = {}
+    for sku_id in dict.fromkeys(rows.values()):
+        body = images.get(sku_id, {}).get('body')
+        if not body or monotonic() >= deadline:
+            continue
+        try:
+            with Image.open(BytesIO(body)) as image:
+                buffer = BytesIO()
+                image.save(buffer, format='PNG')
+            keys[sku_id] = service.upload_image(connection, buffer.getvalue())
+        except SoftTimeLimitExceeded:
+            raise
+        except Exception:
+            continue
+    elements = []
+    for index, element in enumerate(card['elements']):
+        key = keys.get(rows.get(str(index)))
+        if key:
+            element = {**element, 'extra': {'tag': 'img', 'img_key': key,
+                                           'alt': _plain('商品图片')}}
+        elements.append(element)
+    card['elements'] = elements
+    return card
 
 
 def prepare(inbound,actor):
@@ -268,7 +377,14 @@ def dispatch_due(limit=20):
             if not connection or connection.app_id!=row.app_id or connection.domain!=row.app_domain:
                 Outbox.objects.filter(pk=pk,status='pending').update(status='needs_review',lease_until=None,error_code='application_changed')
                 continue
-            receipt=GroupMessageService().send_group(connection,row.chat_id,row.payload,row.event_key)
+            service = GroupMessageService()
+            payload = row.payload
+            if '_image_rows' in payload:
+                payload = _resolve_card_images(payload, row.tenant_id, service, connection)
+                updated = Outbox.objects.filter(pk=pk, status='pending', attempts=row.attempts).update(payload=payload)
+                if not updated:
+                    continue
+            receipt = service.send_group(connection, row.chat_id, payload, row.event_key)
         except Exception:
             # Never persist secrets or raw provider responses in UI errors.
             Outbox.objects.filter(pk=pk,status='pending').update(lease_until=None,next_attempt_at=timezone.now()+timedelta(seconds=60),error_code='delivery_failed_retrying')

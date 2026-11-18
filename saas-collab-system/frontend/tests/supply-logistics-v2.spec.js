@@ -7,6 +7,7 @@ vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({authorizationStale:false,h
 vi.mock('element-plus',async original=>({...await original(),ElMessageBox:{confirm:mocks.confirm},ElMessage:{success:vi.fn()}}));
 import * as api from '../src/api/supplyLogisticsV2';
 import {flushPromises,mount} from '@vue/test-utils';
+import ManualInboundCreateV2 from '../src/components/supply-chain/ManualInboundCreateV2.vue';
 import SupplyLogisticsV2 from '../src/views/purchasing/SupplyLogisticsV2.vue';
 
 const stubs={
@@ -131,7 +132,7 @@ describe('dispatch and inbound workbench',()=>{
    const saved=mocks.requestApi.mock.calls.find(([r])=>r.method==='patch'&&r.url.endsWith('/inbound-orders/15/'))[0];expect(saved.data.lines[0].received_quantity).toBe(0);w.unmount();
  });
  it('loads the batch country warehouse before generating an inbound draft',async()=>{
-   const arrived={...batch,stage:'arrived_warehouse',version:7,inbound_id:null};
+   const arrived={...batch,stage:'arrived_warehouse',version:7,inbound_id:null,inbound_progress:{available_quantity:5},inbound_candidates:[{shipment_line_id:2,sku:'A',available_quantity:5}]};
    mocks.requestApi.mockImplementation(async r=>{
      if(r.url.endsWith('/dispatch-options/'))return {success:true,data:{countries:[{code:'US',name:'United States'}],freight_companies:[],warehouses:r.params?.country_code==='US'?[{id:12,code:'W',name:'US warehouse',country_code:'US'}]:[]}};
      if(r.url.endsWith('/dispatch-batches/8/'))return {success:true,data:arrived};
@@ -143,7 +144,7 @@ describe('dispatch and inbound workbench',()=>{
    });
    const w=mountPage();await flushPromises();await w.vm.openBatch(batch);await flushPromises();
    expect(mocks.requestApi.mock.calls.some(([r])=>r.url.endsWith('/dispatch-options/')&&r.params?.country_code==='US')).toBe(true);
-   w.vm.warehouseId=12;await w.vm.makeInbound();await flushPromises();
+   await w.vm.makeInbound();await flushPromises();expect(w.vm.manualInboundOpen).toBe(true);expect(mocks.requestApi.mock.calls.some(([r])=>r.url.endsWith('/inbound/'))).toBe(false);await w.vm.createManualInbound({warehouse_id:12,lines:[{shipment_line_id:2,quantity:2}]});await flushPromises();expect(mocks.requestApi.mock.calls.find(([r])=>r.url.endsWith('/inbound/'))[0].data.lines).toEqual([{shipment_line_id:2,quantity:2}]);
    expect(mocks.requestApi.mock.calls.some(([r])=>r.url.endsWith('/dispatch-batches/8/inbound/'))).toBe(true);
    expect(mocks.requestApi.mock.calls.some(([r])=>r.url.endsWith('/confirm/'))).toBe(false);w.unmount();
  });
@@ -212,14 +213,14 @@ describe('dispatch and inbound workbench',()=>{
  it('defaults the planned destination and requires a reason when generating at another warehouse',async()=>{
    const original=mocks.requestApi.getMockImplementation(),writes=[];
    mocks.requestApi.mockImplementation(async r=>{
-     if(r.url.endsWith('/dispatch-batches/8/')&&r.method==='get')return {success:true,data:{...batch,stage:'arrived_warehouse',planned_warehouse_id:12,planned_warehouse_name:'Plan warehouse'}};
+     if(r.url.endsWith('/dispatch-batches/8/')&&r.method==='get')return {success:true,data:{...batch,stage:'arrived_warehouse',planned_warehouse_id:12,planned_warehouse_name:'Plan warehouse',inbound_progress:{available_quantity:5},inbound_candidates:[{shipment_line_id:2,available_quantity:5}]}};
      if(r.url.endsWith('/dispatch-options/'))return {success:true,data:{warehouses:[{id:12,name:'Plan warehouse',country_code:'US'},{id:13,name:'Actual warehouse',country_code:'US'}],freight_companies:[]}};
      if(r.url.endsWith('/dispatch-batches/8/inbound/')){writes.push(r);return {success:true,data:{...inbound,warehouse_id:13}};}
      return original(r);
    });
    const w=mountPage();await flushPromises();await w.vm.openBatch(batch);await flushPromises();expect(w.vm.warehouseId).toBe(12);
-   w.vm.warehouseId=13;await w.vm.makeInbound();expect(writes).toHaveLength(0);expect(w.text()).toContain('改仓原因');
-   w.vm.makeInboundReason='计划仓预约满，改用同国合作仓';await w.vm.makeInbound();expect(writes[0].data).toMatchObject({warehouse_id:13,reason:'计划仓预约满，改用同国合作仓'});w.unmount();
+   await w.vm.makeInbound();await flushPromises();await w.vm.createManualInbound({warehouse_id:13,lines:[{shipment_line_id:2,quantity:2}]});expect(writes).toHaveLength(0);expect(w.text()).toContain('改仓原因');
+   await w.vm.createManualInbound({warehouse_id:13,reason:'计划仓预约满，改用同国合作仓',lines:[{shipment_line_id:2,quantity:2}]});expect(writes[0].data).toMatchObject({warehouse_id:13,reason:'计划仓预约满，改用同国合作仓'});w.unmount();
  });
  it('requires date correction reason and sends a timezone-aware timestamp without changing the stage',async()=>{
    const dated={...batch,status:'active',stage:'arrived_port',version:9,logistics_dates:{departed_at:'2026-10-01T02:00:00Z',arrived_port_at:'2026-10-05T04:00:00Z'}};let write;
@@ -269,4 +270,25 @@ it('updates receipt totals from editable quantities and flags unpriced extras', 
   expect(w.vm.receiptTotals.receivedAmount).toBe('0.3003');
   expect(w.vm.receiptLineAmount(w.vm.inboundForm.lines[0], 'received_quantity')).toBe('0.3003');
   w.unmount();
+});
+
+describe('manual inbound lifecycle',()=>{
+ beforeEach(()=>{mocks.requestApi.mockClear();setupResponses();mocks.canManage=true;});
+ it('searches eligible arrived batches remotely and rejects closed history',async()=>{
+  const original=mocks.requestApi.getMockImplementation();const arrived={...batch,status:'active',stage:'arrived_warehouse',inbound_progress:{available_quantity:5},inbound_candidates:[{shipment_line_id:2,available_quantity:5}]};
+  mocks.requestApi.mockImplementation(async r=>r.url.endsWith('/dispatch-batches/')?{success:true,data:[arrived,{...arrived,id:9,inbound_progress:{available_quantity:5,closed:true}},{...arrived,id:10,status:'cancelled'}]}:r.url.endsWith('/dispatch-batches/8/')?{success:true,data:arrived}:original(r));
+  const w=mountPage();await flushPromises();await w.vm.openInboundBatchPicker();await w.vm.searchInboundBatches('DB-8');expect(w.vm.eligibleBatches.map(b=>b.id)).toEqual([8]);expect(mocks.requestApi.mock.calls.some(([r])=>r.params?.search==='DB-8'&&r.params.stage==='arrived_warehouse')).toBe(true);
+  w.vm.selectedInboundBatchId=8;await w.vm.chooseInboundBatch();await flushPromises();expect(w.vm.manualInboundOpen).toBe(true);w.vm.manualInboundOpen=false;w.vm.startManualInbound({...arrived,inbound_progress:{available_quantity:5,closed:true}});expect(w.vm.manualInboundOpen).toBe(false);w.unmount();
+ });
+ it('requires a reason and manage permission to cancel only drafts then removes mutations',async()=>{
+  const original=mocks.requestApi.getMockImplementation();const writes=[];
+  mocks.requestApi.mockImplementation(async r=>{if(r.url.endsWith('/inbound-orders/15/cancel/')){writes.push(r);return {success:true,data:{...inbound,status:'cancelled',version:2}};}return original(r);});
+  const w=mountPage();await flushPromises();await w.vm.openInbound(inbound);await w.vm.cancelInbound();expect(writes).toHaveLength(0);w.vm.cancelInboundReason='重复草稿';await w.vm.cancelInbound();await flushPromises();expect(writes[0].data).toEqual({expected_version:1,reason:'重复草稿'});expect(writes[0].headers['Idempotency-Key']).toBeTruthy();expect(w.text()).toContain('已作废');expect(w.findAll('button').some(b=>b.text()==='保存核对'||b.text()==='作废草稿'||b.text()==='确认入库并记账')).toBe(false);await w.vm.cancelInbound();expect(writes).toHaveLength(1);w.unmount();
+  mocks.canManage=false;const read=mountPage();await flushPromises();await read.vm.openInbound(inbound);read.vm.cancelInboundReason='无权限';await read.vm.cancelInbound();expect(writes).toHaveLength(1);read.unmount();
+ });
+});
+
+it('manual receipt begins with zero quantities and emits only selected SKU quantities',async()=>{
+ const w=mount(ManualInboundCreateV2,{props:{modelValue:true,batch:{id:8,planned_warehouse_id:12,inbound_candidates:[{shipment_line_id:2,sku:'A',available_quantity:5},{shipment_line_id:7,sku:'B',available_quantity:3}]},warehouses:[{id:12,name:'US'}]},global:{stubs}});
+ const nums=w.findAll('input[type="number"]');expect(nums.map(n=>n.element.value)).toEqual(['0','0']);expect(w.findAll('button').find(b=>b.text()==='创建草稿').element.disabled).toBe(true);await nums[0].setValue(2);await w.findAll('button').find(b=>b.text()==='创建草稿').trigger('click');expect(w.emitted('create')[0][0].lines).toEqual([{shipment_line_id:2,quantity:2}]);w.unmount();
 });

@@ -27,3 +27,13 @@ export function validateAllocations(rows, total) {
   if (sum !== expected) throw new Error('各收款账户的累计金额合计须等于累计已结算金额');
   return output;
 }
+
+export function taxedPaymentUnits(value, terms) {
+  const net = amountUnits(value);
+  const basis = amountUnits(terms.net_basis);
+  if (net <= 0n || basis <= 0n || net > basis) throw new Error('未税金额超过未税应付或无效');
+  if (terms.requires_full && net !== basis) throw new Error('部分付款前请先维护本单对公与对私的应付分类');
+  const fullTax = amountUnits(terms.added_tax_amount);
+  const tax = (2n * net * fullTax + basis) / (2n * basis);
+  return { tax, gross: net + tax };
+}

@@ -14,8 +14,8 @@ def source_links(kind, obj):
         return [
             {'label': f'发货单 {obj.number}', 'href': f'/supply-chain/supplier-shipments?shipment_id={obj.pk}'},
             *[{'label': f'采购单 {order.number}', 'href': f'/supply-chain/purchase-orders?order_id={order.pk}'} for order in source_orders],
-            *([{'label': '关联采购定金', 'href': f'/supply-chain/costs?kind=purchase&id={source_orders[0].pk}'}] if len(source_orders) == 1 else [
-                {'label': f'采购定金 {order.number}', 'href': f'/supply-chain/costs?kind=purchase&id={order.pk}'} for order in source_orders]),
+            *([{'label': '关联采购预付款', 'href': f'/supply-chain/costs?kind=purchase&id={source_orders[0].pk}'}] if len(source_orders) == 1 else [
+                {'label': f'采购预付款 {order.number}', 'href': f'/supply-chain/costs?kind=purchase&id={order.pk}'} for order in source_orders]),
             {'label': '货款、国内费用与分摊', 'href': f'/supply-chain/costs?kind=shipment&id={obj.pk}'},
         ]
     if kind == 'batch':

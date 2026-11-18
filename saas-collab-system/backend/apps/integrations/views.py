@@ -2762,10 +2762,14 @@ def _validate_advertising_policy(job, values):
 
 
 def _set_job_scope(job, values):
+    if "warehouse_order_limit" in values and job.resource_type != SyncJob.ResourceType.WAREHOUSE_ORDER_LOOKUP:
+        raise ValidationError({"warehouse_order_limit": "仅仓库查询任务支持订单处理上限。"})
     if 'include_logistics' in values and (job.integration_config.platform != 'shopee'
             or job.resource_type not in {'sales_order', 'refund_return'}):
         raise ValidationError({'include_logistics': '仅 Shopee 订单／售后任务支持独立物流采集。'})
     scope = dict(job.sync_scope or {})
+    if "warehouse_order_limit" in values:
+        scope["warehouse_order_limit"] = values["warehouse_order_limit"]
     schedule = scope.get("schedule") if isinstance(scope.get("schedule"), dict) else {}
     query = scope.get("query") if isinstance(scope.get("query"), dict) else {}
     if "execution_mode" in values:
@@ -2828,11 +2832,12 @@ def _set_job_scope(job, values):
         resolve_scope(job.ads_mapping, scope)
 
 
-def _validated_job_policy(data):
+def _validated_job_policy(data, *, warehouse_order=False):
     from datetime import time
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
     from django.utils.dateparse import parse_datetime
     allowed = {
+        "warehouse_order_limit",
         "include_logistics",
         "advertising_datasets",
         "schedule_type", "max_retry_count", "backoff_base_seconds", "execution_mode",
@@ -2866,7 +2871,8 @@ def _validated_job_policy(data):
     limits = {
         "max_retry_count": (0, 10),
         "backoff_base_seconds": (1, 5),
-        "interval_minutes": (15, 10080),
+        "interval_minutes": (1 if warehouse_order else 15, 10080),
+        "warehouse_order_limit": (1, 100),
         "interval_offset_seconds": (0, 86399),
         "lookback_days": (1, 3650),
         "overlap_minutes": (0, 1440),
@@ -2880,7 +2886,7 @@ def _validated_job_policy(data):
             continue
         if key == "interval_offset_seconds" and values[key] is None:
             continue
-        if key in {"lookback_days", "execution_budget_seconds", "overlap_minutes", "interval_offset_seconds"} and isinstance(values[key], (bool, float)):
+        if key in {"lookback_days", "execution_budget_seconds", "overlap_minutes", "interval_offset_seconds", "warehouse_order_limit"} and isinstance(values[key], (bool, float)):
             raise ValidationError({key: "必须为整数。"})
         try:
             values[key] = int(values[key])
@@ -2960,7 +2966,9 @@ def _validated_job_policy(data):
 def preview_sync_schedule(request, pk):
     from .scheduler import preview_schedule
     job = _scoped_sync_job(request, pk)
-    values = _validated_job_policy(request.data)
+    values = _validated_job_policy(
+        request.data, warehouse_order=job.resource_type == SyncJob.ResourceType.WAREHOUSE_ORDER_LOOKUP,
+    )
     from .sync_policy import prepare_policy, resolve_job_scope
     values = prepare_policy(job, values)
     _validate_advertising_policy(job, values)
@@ -3000,7 +3008,9 @@ def sync_job_detail(request, pk):
         status=SyncRun.Status.QUEUED, history_segment__batch__status="paused",
     ).exists():
         raise ValidationError("排队中或运行中的同步任务不能修改。")
-    values = _validated_job_policy(request.data)
+    values = _validated_job_policy(
+        request.data, warehouse_order=job.resource_type == SyncJob.ResourceType.WAREHOUSE_ORDER_LOOKUP,
+    )
     from .sync_policy import prepare_policy, resolve_job_scope
     values = prepare_policy(job, values)
     _validate_advertising_policy(job, values)
@@ -3435,7 +3445,11 @@ def enqueue_sync_job(request, pk):
     try:
         task = None
         if created:
-            if sync_job.resource_type == "video_metrics":
+            if sync_job.resource_type == SyncJob.ResourceType.WAREHOUSE_ORDER_LOOKUP:
+                task = run_readonly_sync_job.apply_async(
+                    args=(sync_job.id, run.idempotency_key), queue="warehouse-orders",
+                )
+            elif sync_job.resource_type == "video_metrics":
                 task = run_readonly_sync_job.apply_async(
                     args=(sync_job.id, run.idempotency_key), queue="sync-video",
                     soft_time_limit=3500, time_limit=3600,

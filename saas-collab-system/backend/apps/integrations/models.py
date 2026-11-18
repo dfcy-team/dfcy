@@ -1382,6 +1382,7 @@ class SyncJob(models.Model):
         VIDEO_METRICS = "video_metrics", "TikTok video metrics"
         REFUND_RETURN = "refund_return", "Refund or return"
         INVENTORY_SNAPSHOT = "inventory_snapshot", "Inventory snapshot"
+        WAREHOUSE_ORDER_LOOKUP = "warehouse_order_lookup", "Order warehouse lookup"
         INBOUND = "inbound", "Inbound"
         SHIPMENT = "shipment", "Shipment"
         SETTLEMENT_BILL = "settlement_bill", "Settlement bill"

@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from . import costs
 from .cost_models import PaymentApplication, PaymentRecord, SettlementRecord
 from .models import (BusinessEvent, DispatchAllocation, DispatchMembership, InboundLine,
-    InboundOrder, PurchaseOrder, ShipmentLine, SupplierShipment)
+    InboundOrder, InboundShortageTermination, PurchaseOrder, ShipmentLine, SupplierShipment)
 from .monthly_drill_payments import difference_choices, payment_details
 from .shipment_sources import source_order_ids
 from .permissions import VIEW, internal_orders
@@ -44,11 +44,11 @@ def _signed_total(rows):
                 for row in rows), Decimal("0"))
 
 
-def _line_data(line, inbound_lines, expected):
+def _line_data(line, inbound_lines, expected, terminated=None):
     receipts = inbound_lines.get(line.pk, [])
     counted = [row for row in receipts if row.received_quantity is not None]
     received = sum(row.received_quantity for row in counted)
-    checked = sum(row.expected_quantity for row in counted)
+    checked = sum(min(row.expected_quantity, row.received_quantity) for row in counted) + (terminated or {}).get(line.pk, 0)
     pending = max(0, line.quantity - checked)
     difference = received - checked if not pending else None
     return {
@@ -110,17 +110,33 @@ class MonthlyShipmentDrilldown(InternalAPI):
         for allocation in allocations:
             expected_by_line[allocation.shipment_line_id] = (
                 expected_by_line.get(allocation.shipment_line_id, 0) + allocation.quantity)
-        lines_data = [_line_data(line, by_line, expected_by_line) for line in lines]
+        terminated = {}
+        for row in InboundShortageTermination.objects.filter(tenant_id=request.user.tenant_id,
+                batch_id__in=batch_ids, shipment_line_id__in=line_ids).values('shipment_line_id').annotate(total=Sum('quantity')):
+            terminated[row['shipment_line_id']] = row['total']
+        lines_data = [_line_data(line, by_line, expected_by_line, terminated) for line in lines]
 
         orders_data = [{"id": row.pk, "number": row.number, "order_date": str(row.order_date)}
                        for row in orders.filter(pk__in=source_order_ids(shipment)).order_by("id")]
 
         batches_data = []
-        inbound_by_batch = {row.batch_id: row for row in inbounds}
+        inbound_by_batch = {}
+        for row in inbounds:
+            if row.status != 'cancelled':
+                inbound_by_batch.setdefault(row.batch_id, []).append(row)
+        def receipt_data(inbound):
+            return {'id':inbound.pk, 'number':inbound.number, 'status':inbound.status,
+                'warehouse':inbound.warehouse.name, 'confirmed_at':inbound.confirmed_at,
+                'after_cutoff':bool(inbound.confirmed_at and inbound.confirmed_at.date()>cutoff),
+                'receipt_reference':inbound.stock_receipt.receipt_ref if hasattr(inbound,'stock_receipt') else '',
+                'lines':[{'shipment_line_id':row.shipment_line_id, 'expected_quantity':row.expected_quantity,
+                    'received_quantity':row.received_quantity,'difference_note':row.difference_note}
+                    for row in inbound_lines if row.inbound_id==inbound.pk]}
         for membership in memberships:
             batch = membership.batch
             batch_allocations = [a for a in allocations if a.membership_id == membership.pk]
-            inbound = inbound_by_batch.get(batch.pk)
+            batch_inbounds = inbound_by_batch.get(batch.pk, [])
+            inbound = batch_inbounds[0] if len(batch_inbounds) == 1 else None
             batches_data.append({
                 "id": batch.pk, "number": batch.number,
                 "freight_number": batch.freight_number,
@@ -129,6 +145,7 @@ class MonthlyShipmentDrilldown(InternalAPI):
                 "arrived_warehouse_at": batch.arrived_warehouse_at,
                 "allocations": [{"shipment_line_id": a.shipment_line_id,
                                  "quantity": a.quantity} for a in batch_allocations],
+                "inbounds": [receipt_data(doc) for doc in batch_inbounds],
                 "inbound": None if inbound is None else {
                     "id": inbound.pk, "number": inbound.number, "status": inbound.status,
                     "warehouse": inbound.warehouse.name,

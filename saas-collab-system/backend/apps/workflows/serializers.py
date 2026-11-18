@@ -193,7 +193,7 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
                     _payment_owner(request.user, kind, source_id, 'supply.v2.manage')
             except APIException:
                 data['can_upload'] = False
-        return {**identity, **{key: data.get(key, [] if key == 'attachments' else None) for key in ('version', 'amount', 'vouchers', 'attachments', 'can_upload', 'account_snapshot', 'status')},
+        return {**identity, **{key: data.get(key, [] if key == 'attachments' else None) for key in ('version', 'amount', 'currency', 'corporate_tax', 'vouchers', 'attachments', 'can_upload', 'account_snapshot', 'status')},
                 'can_post': bool(data['can_upload'] and finance_allowed(request.user,row.currency))}
 
     def get_audit_events(self, obj):

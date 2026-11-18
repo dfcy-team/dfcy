@@ -26,6 +26,10 @@ def execution_lane(run):
 
 
 def queue_for_run(job_id, key):
+    if SyncJob.objects.filter(pk=job_id, resource_type="warehouse_order_lookup").exists():
+        return "warehouse-orders"
+    if SyncJob.objects.filter(pk=job_id, resource_type="video_metrics").exists():
+        return "sync-video"
     # A caller-controlled prefix is not authorization to enter the history lane.
     if SyncRun.objects.filter(
         sync_job_id=job_id, idempotency_key=key, history_segment__isnull=False).exists():
@@ -83,6 +87,7 @@ class DispatchAdmission:
         self.occupied = defaultdict(int)
         self.subjects = set()
         self.video_occupied = 0
+        self.warehouse_occupied = 0
         self.complete = True
         runs = list(SyncRun.objects.filter(status__in=["queued", "running"])
                     .exclude(history_segment__batch__status="paused")
@@ -97,6 +102,8 @@ class DispatchAdmission:
             self.complete = False
             return
         for run in runs:
+            if run.sync_job.resource_type == 'warehouse_order_lookup' and not run.sync_job.is_enabled:
+                continue
             budget = (run.masked_log or {}).get("runtime_budget") or {}
             segment = run.history_segment if run.history_segment_id else None
             last = segment.submitted_at if segment else parse_datetime(str(budget.get("submitted_at") or ""))
@@ -107,6 +114,8 @@ class DispatchAdmission:
                     or (last and (state == "unknown" or last > now - timedelta(seconds=180)))):
                 self._occupy(run.sync_job, execution_lane(run))
         for dispatch in dispatches:
+            if dispatch.sync_job.resource_type == 'warehouse_order_lookup' and not dispatch.sync_job.is_enabled:
+                continue
             state = snapshot.state(dispatch.sync_job_id, f"scheduled:{dispatch.sync_job_id}:{dispatch.pk}", 0)
             if (dispatch.status == "running" or state == "present"
                     or not dispatch.enqueued_at or state == "unknown"
@@ -117,10 +126,14 @@ class DispatchAdmission:
         self.occupied[lane] += 1
         if lane == "daily" and job.resource_type == "video_metrics":
             self.video_occupied += 1
+        if job.resource_type == "warehouse_order_lookup":
+            self.warehouse_occupied += 1
         self.subjects.add((lane, _subject(job)))
 
     def claim(self, job, lane):
-        if lane == "daily" and job.resource_type == "video_metrics" and self.video_occupied:
+        if job.resource_type == "video_metrics" and self.video_occupied:
+            return False
+        if job.resource_type == "warehouse_order_lookup" and self.warehouse_occupied:
             return False
         if (not self.complete or not self.remaining or self.occupied[lane] >= self.capacities[lane]
                 or (lane, _subject(job)) in self.subjects):

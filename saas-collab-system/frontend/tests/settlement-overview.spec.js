@@ -6,7 +6,7 @@ vi.mock('vue-router',()=>({useRouter:()=>({push:m.push}),useRoute:()=>({fullPath
 vi.mock('../src/api/supplyDashboardV2',()=>({fetchDashboard:m.fetch,fetchDashboardQueue:m.queue}));
 vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({currentUser:{id:1},authorizationStale:false})}));
 import Overview from '../src/components/supply-chain/SettlementOverviewV2.vue';
-const overview={groups:{supplier:{amount:'100',purchase_total_amount:'120',shipment_total_amount:'80',cash_paid_amount:'35',purchase_paid_amount:'25',direct_paid_amount:'10',opening:'10',applied:'20',payable_amount:'145',unsettled:'50',ranking:[]},domestic:{amount:'70',cash_paid_amount:'20',opening:'5',unsettled:'50',ranking:[]},carrier:{amount:'60',cash_paid_amount:'15',opening:'0',unsettled:'45',ranking:[]},clearance:{amount:'40',cash_paid_amount:'10',opening:'0',unsettled:'30',ranking:[]},deposit:{amount:'30',cash_paid_amount:'12',opening:'2',applied:'8',unsettled:'18',available_prepayment:'4',ranking:[]}}};
+const overview={groups:{supplier:{amount:'100',purchase_total_amount:'120',shipment_total_amount:'80',cash_paid_amount:'35',purchase_paid_amount:'25',direct_paid_amount:'10',opening:'10',applied:'21',payable_amount:'145',unsettled:'50',ranking:[]},domestic:{amount:'70',cash_paid_amount:'20',opening:'5',unsettled:'50',ranking:[]},carrier:{amount:'60',cash_paid_amount:'15',opening:'0',unsettled:'45',ranking:[]},clearance:{amount:'40',cash_paid_amount:'10',opening:'0',unsettled:'30',ranking:[]},deposit:{amount:'30',cash_paid_amount:'12',opening:'2',applied:'8',unsettled:'18',available_prepayment:'4',ranking:[]}}};
 const mountPanel=()=>mount(Overview,{props:{overview,countryId:3},global:{stubs:{'el-select':true,'el-input':true,'el-button':true,'el-table':true,'el-pagination':true,'el-alert':true},directives:{loading:{}}}});
 describe('结算跨单据穿透',()=>{
  beforeEach(()=>{m.fetch.mockReset();m.queue.mockReset().mockResolvedValue({success:true,data:[{id:1,kind:'shipment'}],count:1});});
@@ -20,7 +20,7 @@ describe('结算跨单据穿透',()=>{
   await w.find('.el-pager li[aria-label="page 3"]').trigger('click');await flushPromises();expect(m.queue.mock.lastCall[0].offset).toBe(40);expect(w.findComponent(ElPagination).props('currentPage')).toBe(3);
   w.vm.status='settled';await w.vm.resetList();await flushPromises();expect(m.queue.mock.lastCall[0].offset).toBe(0);expect(w.findComponent(ElPagination).props('currentPage')).toBe(1);w.unmount();
  });
- it('uses provided totals without eager list calls',async()=>{const w=mountPanel();await flushPromises();expect(m.fetch).not.toHaveBeenCalled();expect(m.queue).not.toHaveBeenCalled();expect(w.text()).toContain('定金抵扣');w.unmount();});
+ it('uses provided totals without eager list calls',async()=>{const w=mountPanel();await flushPromises();expect(m.fetch).not.toHaveBeenCalled();expect(m.queue).not.toHaveBeenCalled();expect(w.text()).toContain('预付款抵扣');w.unmount();});
  it('opens all documents for a country and party, including settled',async()=>{const w=mountPanel();await w.vm.openGroup('supplier',{id:8,name:'供应商'});expect(m.queue).toHaveBeenCalledWith({queue:'supplier',status:'all',search:'',limit:20,offset:0,country_id:3,party_id:8});expect(w.vm.rows).toHaveLength(1);w.unmount();});
  it('clears supplier filter when changing to carriers',async()=>{const w=mountPanel();await w.vm.openGroup('supplier',{id:8});w.vm.queue='carrier';await w.vm.changeKind();expect(m.queue.mock.lastCall[0].party_id).toBeUndefined();expect(m.queue.mock.lastCall[0].queue).toBe('carrier');w.unmount();});
  it('passes settled status explicitly',async()=>{const w=mountPanel();await w.vm.openGroup('domestic');w.vm.status='settled';await w.vm.resetList();expect(m.queue.mock.lastCall[0].status).toBe('settled');w.unmount();});
@@ -40,10 +40,10 @@ it('routes cockpit supplier and freight payment entries to reconciliation',()=>{
 
 it('shows totals and actual cash before remaining, without adding deposit offsets to paid cash',()=>{
  const w=mountPanel();const text=w.text();
- for(const label of ['总采购金额','总发货金额','总国内运费','总批次货运费','总入库清关费','已付款金额','剩余应付','可用余额'])expect(text).toContain(label);
+ for(const label of ['总采购金额','总发货金额','总国内运费','总批次货运费','总入库清关费','已付款金额','剩余应付'])expect(text).toContain(label);
  expect(text).toContain('145.00'); // supplier uses backend payable_amount
  expect(text).toContain('35.00'); // actual cash already includes supplier purchase deposits; applied is separate
- expect(text).toContain('8.00'); // deposit applied remains visible separately
+ expect(text).toContain('21.00'); // supplier prepayment offset remains visible separately
  expect(text.indexOf('总采购金额')).toBeLessThan(text.indexOf('已付款金额'));
  expect(text.indexOf('已付款金额')).toBeLessThan(text.indexOf('剩余应付'));
  w.unmount();

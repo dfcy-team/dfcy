@@ -2,8 +2,8 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
-const api = vi.hoisted(() => ({ strategy: vi.fn(), references: vi.fn(), rows: vi.fn(), status: vi.fn(), cancel: vi.fn() }));
-vi.mock('../src/api/replenishmentStrategyV2', () => ({ fetchReplenishmentStrategy: api.strategy, fetchDailyReplenishment: async () => ({ success: false, status: 404 }), createReplenishmentJob: api.references, fetchReplenishmentJob: api.status, fetchReplenishmentJobRows: api.rows, cancelReplenishmentJob: api.cancel }));
+const api = vi.hoisted(() => ({ strategy: vi.fn(), references: vi.fn(), daily: vi.fn(), rows: vi.fn(), status: vi.fn(), cancel: vi.fn() }));
+vi.mock('../src/api/replenishmentStrategyV2', () => ({ fetchReplenishmentStrategy: api.strategy, fetchDailyReplenishment: api.daily, createReplenishmentJob: api.references, fetchReplenishmentJob: api.status, fetchReplenishmentJobRows: api.rows, cancelReplenishmentJob: api.cancel }));
 
 import CockpitReplenishmentV2 from '../src/components/supply-chain/CockpitReplenishmentV2.vue';
 import OperatingReferenceV2 from '../src/components/supply-chain/OperatingReferenceV2.vue';
@@ -11,6 +11,7 @@ import { useAuthStore } from '../src/stores/auth';
 
 const strategy = { id: 8, version: 2, country_id: 3, name: 'PH strategy', cycle_days: 10, lead_days: 45, safety_days: 35, sales_model: 'weighted', sales_weights: { 7: 50, 15: 30, 30: 20 }, active: true };
 const stubs = {
+  'el-cascader': true, 'el-popover': true, 'el-checkbox-group': true,
   'el-select': { props: ['modelValue'], emits: ['update:modelValue', 'change'], template: '<select :value="modelValue" @change="$emit(\'update:modelValue\',$event.target.value);$emit(\'change\',$event.target.value)"><slot/></select>' },
   'el-option': { props: ['label', 'value'], template: '<option :value="value">{{label}}</option>' },
   'el-date-picker': true, 'el-input-number': true, 'el-switch': true, 'el-input': true,
@@ -28,7 +29,7 @@ const mountCockpit = countryId => mount(CockpitReplenishmentV2, { props: { count
 describe('cockpit replenishment reference', () => {
   beforeEach(() => {
     setup(); api.strategy.mockReset().mockResolvedValue(success({ configured: true, strategy, sales_end: '2026-10-22' }));
-    api.references.mockReset().mockResolvedValue(success({ id: 'job-cockpit', status: 'completed', total: 1, processed: 1, counts: { positive: 1, zero: 0, unknown: 0, awaiting_procurement: 0, arrival_gap: 0 }, strategy_version: 2, created_at:'2026-10-23T10:00:00Z', updated_at:'2026-10-23T10:00:05Z', parameters:{sales_end:'2026-10-22'}, formula:'ceil(max(0,T-I-P-O-Q))', revalidation_note:'revalidate', platform_options:[] }));
+    api.references.mockReset(); api.daily.mockReset().mockResolvedValue(success({ id: 'job-cockpit', status: 'completed', total: 1, processed: 1, counts: { positive: 1, zero: 0, unknown: 0, awaiting_procurement: 0, arrival_gap: 0 }, strategy_version: 2, created_at:'2026-10-23T10:00:00Z', updated_at:'2026-10-23T10:00:05Z', parameters:{sales_end:'2026-10-22'}, formula:'ceil(max(0,T-I-P-O-Q))', revalidation_note:'revalidate', platform_options:[] }));
     api.rows.mockReset().mockResolvedValue(success({ rows: [line], count: 1, total: 1, processed: 1, counts:{positive:1,zero:0,unknown:0,awaiting_procurement:0,arrival_gap:0}, status:'completed', offset:0, limit:20, has_more:false, quantity_filter:'positive' }));api.status.mockReset();api.cancel.mockReset();
   });
 
@@ -37,8 +38,8 @@ describe('cockpit replenishment reference', () => {
     expect(api.strategy).toHaveBeenCalledWith('3'); expect(api.references).not.toHaveBeenCalled();
     const reference = wrapper.findComponent(OperatingReferenceV2); expect(reference.props('audience')).toBe('procurement');
     await reference.vm.generate(); await flushPromises();
-    expect(api.references).toHaveBeenCalledWith(expect.objectContaining({ country_id: 3, strategy_id: 8, source_kind: 'cycle' }));
-    expect(api.rows).toHaveBeenCalledWith('job-cockpit', expect.objectContaining({ quantity_filter: 'positive', limit: 20 } ), expect.any(Object));
+    expect(api.daily).toHaveBeenCalledWith(expect.objectContaining({ country_id: 3, strategy_id: 8, source_kind: 'cycle' }));
+    expect(api.rows).toHaveBeenCalledWith('job-cockpit', expect.objectContaining({ quantity_filter: 'observed', limit: 20 } ), expect.any(Object));
     expect(reference.vm.rows[0].submitted_demand).toBe(2); expect(reference.vm.rows[0].draft_reserved_demand).toBe(1); expect(reference.vm.etaDate(line.next_eta)).toBe('2026-11-02');
     await wrapper.findAll('button').find(button => button.text().includes('前往采购协同')).trigger('click');
     expect(wrapper.emitted('procurement')).toHaveLength(1); wrapper.unmount();
@@ -47,6 +48,7 @@ describe('cockpit replenishment reference', () => {
   it('keeps cockpit queries country scoped when changing country and clears old rows', async () => {
     const wrapper = mountCockpit('3'); await flushPromises(); const reference = wrapper.findComponent(OperatingReferenceV2);
     await reference.vm.generate(); await flushPromises(); expect(reference.vm.rows).toHaveLength(1);
+    api.daily.mockResolvedValueOnce({ success: false, status: 404 });
     await wrapper.setProps({ countryId: '4' }); await flushPromises();
     expect(api.strategy).toHaveBeenLastCalledWith('4'); expect(reference.vm.rows).toEqual([]); expect(reference.vm.selectedRows).toEqual([]);
     wrapper.unmount();

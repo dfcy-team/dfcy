@@ -14,6 +14,7 @@ class FreightChannel(Record):
     transport_mode = models.CharField(max_length=12, choices=[('sea', '海运'), ('air', '空运'), ('road', '陆运'), ('rail', '铁路'), ('other', '其他')])
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
+    load_type = models.CharField(max_length=12, choices=[('fcl', '整柜'), ('lcl', '散货')], blank=True, default='')
     container_records = models.JSONField(default=list, blank=True)
 
     class Meta:

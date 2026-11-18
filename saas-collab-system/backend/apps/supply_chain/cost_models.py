@@ -329,3 +329,20 @@ class PayeeAccount(Record):
         ]
         indexes = [models.Index(fields=['tenant', 'supplier', 'active']),
                    models.Index(fields=['tenant', 'freight_company', 'active'])]
+
+
+class ShipmentPayableTax(AppendOnlyRecord):
+    shipment = models.OneToOneField(
+        'supply_chain.SupplierShipment', on_delete=models.PROTECT, related_name='payable_tax_snapshot')
+    taxable_amount = models.DecimalField(max_digits=24, decimal_places=4)
+    tax_rate = models.DecimalField(max_digits=6, decimal_places=3)
+    added_tax_amount = models.DecimalField(max_digits=24, decimal_places=4)
+    reason = models.CharField(max_length=255)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(tax_rate__gte=0, tax_rate__lte=100,
+                                   taxable_amount__gte=0, added_tax_amount__gte=0),
+                name='sc2_shipment_payable_tax_range'),
+        ]

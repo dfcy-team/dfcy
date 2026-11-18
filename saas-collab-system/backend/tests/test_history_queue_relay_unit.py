@@ -20,7 +20,7 @@ def test_relay_preserves_continuation_fence_and_retries_without_provider(queue, 
          patch.object(run_readonly_sync_job, "apply_async", side_effect=RuntimeError("synthetic broker failure") if failed else None) as relay, \
          patch.object(run_readonly_sync_job, "retry", return_value=RuntimeError("retry without fetching")) as retry, \
          patch("apps.integrations.tasks.run_sync_job") as provider:
-        jobs.select_related.return_value.get.return_value = SimpleNamespace(pk=7)
+        jobs.select_related.return_value.get.return_value = SimpleNamespace(pk=7, resource_type="sales_order")
         runs.filter.return_value.first.return_value = run
         run_readonly_sync_job.push_request(delivery_info={"routing_key": queue})
         try:

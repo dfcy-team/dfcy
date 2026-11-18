@@ -32,6 +32,9 @@ class AllocationInput(serializers.Serializer):
 
 
 class BatchCreateInput(serializers.Serializer):
+    estimated_freight_amount = serializers.DecimalField(max_digits=16, decimal_places=4, min_value=Decimal('0.0001'), required=False)
+    freight_billed_cbm = serializers.DecimalField(max_digits=16, decimal_places=6, min_value=Decimal('0.000001'), required=False)
+    freight_cost_currency = serializers.RegexField(r'^[A-Z]{3}$', required=False)
     shipment_ids = serializers.ListField(child=serializers.IntegerField(min_value=1), allow_empty=False, max_length=100)
     shipment_versions = ShipmentVersionInput(many=True, allow_empty=False)
     allocations = AllocationInput(many=True, allow_empty=False, required=False)
@@ -89,7 +92,14 @@ class CorrectDatesInput(StageInput):
     reason = serializers.CharField(max_length=10000)
 
 
+class ManualInboundSourceInput(serializers.Serializer):
+    shipment_line_id = serializers.IntegerField(min_value=1)
+    quantity = serializers.IntegerField(min_value=1, max_value=2147483647)
+
+
 class GenerateInput(VersionInput):
+    lines = ManualInboundSourceInput(many=True, allow_empty=False, required=False)
+    notes = serializers.CharField(max_length=10000, allow_blank=True, default='')
     warehouse_id = serializers.IntegerField(min_value=1, allow_null=True, required=False, default=None)
     reason = serializers.CharField(max_length=10000, allow_blank=True, required=False)
 
@@ -243,6 +253,13 @@ class DispatchExpectedWarehouseDate(InternalAPI):
         obj = logistics.update_expected_warehouse_date(request.user, pk,
             validated(ExpectedWarehouseDateInput, request), key(request))
         return Response({'data': {**logistics.batch_data(obj), 'history': history(request.user, obj)}})
+
+
+class CancelInbound(InternalAPI):
+    def post(self, request, pk):
+        from .inbound_cancellation import cancel_inbound
+        obj = cancel_inbound(request.user, pk, validated(ReasonInput, request), key(request))
+        return Response({'data': logistics.inbound_data(obj)})
 
 
 class GenerateInbound(InternalAPI):

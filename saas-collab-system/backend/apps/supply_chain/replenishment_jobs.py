@@ -102,7 +102,17 @@ def _serialize(job):
 def _enqueue(job_id):
     if getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False):
         raise RuntimeError("补货计算队列处于同步执行模式，已拒绝在请求内执行。")
-    current_app.send_task("apps.supply_chain.tasks.run_replenishment_calculation", args=[str(job_id)], retry=False)
+    meta = ReplenishmentCalculationJob.objects.filter(pk=job_id).values_list("config", flat=True).first() or {}
+    options = {}
+    if meta.get("daily"):
+        from .replenishment_schedule import DAILY_QUEUE, daily_task_budget, night_deadline
+        now = timezone.now()
+        budget = daily_task_budget(now)
+        if budget < 15:
+            return
+        options = {"queue": DAILY_QUEUE, "soft_time_limit": max(10, budget - 30), "time_limit": budget, "countdown": 2,
+                   "expires": night_deadline(now)}
+    current_app.send_task("apps.supply_chain.tasks.run_replenishment_calculation", args=[str(job_id)], retry=False, **options)
 
 
 def _validated_config(actor, payload):
@@ -183,7 +193,7 @@ class ReplenishmentJobs(ReadAPI):
                 requested_by=actor, country=country, strategy=strategy, strategy_version=strategy.version,
                 business_date=business_date(), config={**config, "fingerprint": fingerprint}, candidate_ids=candidate_ids,
                 permission_signature=signature, total=len(candidate_ids), counts={"positive": 0, "zero": 0, "unknown": 0,
-                    "awaiting_procurement": 0, "arrival_gap": 0},
+                    "awaiting_procurement": 0, "arrival_gap": 0, "observed": 0},
                 expires_at=now + JOB_DEADLINE, hard_deadline=now + JOB_DEADLINE)
             transaction.on_commit(lambda: self._dispatch(job.pk))
         job.refresh_from_db()
@@ -237,6 +247,14 @@ class ReplenishmentJobDetail(ReadAPI):
 
 
 class ReplenishmentJobRows(ReplenishmentJobDetail):
+    default_quantity_filter = "positive"
+
+    def row_queryset(self, request, job):
+        return ReplenishmentCalculationRow.objects.filter(job=job)
+
+    def result_identity(self, job):
+        return {}
+
     def get(self, request, pk):
         job = self.get_job(request, pk)
         if job.status != "completed":
@@ -247,13 +265,15 @@ class ReplenishmentJobRows(ReplenishmentJobDetail):
             raise ValidationError("分页参数无效。")
         if not 1 <= limit <= 20 or offset < 0:
             raise ValidationError("每页最多20条，offset须为非负数。")
-        quantity_filter = request.query_params.get("quantity_filter", "positive")
-        if quantity_filter not in {"positive", "all", "zero", "unknown"}:
+        quantity_filter = request.query_params.get("quantity_filter", self.default_quantity_filter)
+        if quantity_filter not in {"positive", "all", "zero", "unknown", "observed"}:
             raise ValidationError({"quantity_filter": "筛选值无效。"})
-        qs = ReplenishmentCalculationRow.objects.filter(job=job)
+        qs = self.row_queryset(request, job)
         if quantity_filter == "positive": qs = qs.filter(suggested_quantity__gt=0)
         elif quantity_filter == "zero": qs = qs.filter(suggested_quantity=0)
         elif quantity_filter == "unknown": qs = qs.filter(suggested_quantity__isnull=True)
+        elif quantity_filter == "observed":
+            qs = qs.filter(Q(suggested_quantity__gt=0) | Q(payload__recognized_reference__has_observed_basis=True))
         risk = request.query_params.get("risk_filter", "").strip()
         if risk and risk not in {"awaiting_procurement", "arrival_gap", "data_check", "new_or_zero_sales",
                 "out_of_stock", "replenish", "normal", "manual_review"}:
@@ -268,7 +288,7 @@ class ReplenishmentJobRows(ReplenishmentJobDetail):
         return Response({"data": {"status": job.status, "rows": rows, "count": count,
             "total": job.total, "processed": job.processed, "counts": job.counts,
             "limit": limit, "offset": offset, "has_more": offset + len(rows) < count,
-            "quantity_filter": quantity_filter}})
+            "quantity_filter": quantity_filter, **self.result_identity(job)}})
 
 
 def _daily_calculation(job):
@@ -290,9 +310,16 @@ def _active_job(job, token):
 
 def run_replenishment_calculation(job_id):
     now = timezone.now(); token = uuid.uuid4()
+    meta = ReplenishmentCalculationJob.objects.filter(pk=job_id).values_list("config", flat=True).first() or {}
+    lease_duration = LEASE_DURATION
+    if meta.get("daily"):
+        from .replenishment_schedule import in_night_window, DAILY_LEASE_SECONDS
+        if not in_night_window(now):
+            return
+        lease_duration = timedelta(seconds=DAILY_LEASE_SECONDS)
     claimed = ReplenishmentCalculationJob.objects.filter(pk=job_id, status__in=["queued", "running"],
         hard_deadline__gt=now).filter(Q(lease_expires_at__isnull=True) | Q(lease_expires_at__lte=now)).update(
-            status="running", lease_token=token, lease_expires_at=now + LEASE_DURATION, updated_at=now)
+            status="running", lease_token=token, lease_expires_at=now + lease_duration, updated_at=now)
     if not claimed:
         return
     job = ReplenishmentCalculationJob.objects.select_related("requested_by", "country", "strategy", "tenant").get(pk=job_id)
@@ -306,7 +333,8 @@ def run_replenishment_calculation(job_id):
         if not _valid_calculation_day(job):
             raise ValidationError("业务日期已变化。")
         offset = job.next_offset
-        batch_size = 500 if _daily_calculation(job) else CHUNK_SIZE
+        from .replenishment_schedule import DAILY_CHUNK_SIZE
+        batch_size = DAILY_CHUNK_SIZE if _daily_calculation(job) else CHUNK_SIZE
         ids = job.candidate_ids[offset:offset + batch_size]
         if not ids:
             with transaction.atomic():
@@ -332,11 +360,13 @@ def run_replenishment_calculation(job_id):
         if response.status_code >= 400 or len(lines) != len(ids):
             raise ValidationError("商品授权或有效状态变化，请重新生成全量清单。")
         creates = []
-        counts = {"positive": 0, "zero": 0, "unknown": 0, "awaiting_procurement": 0, "arrival_gap": 0}
+        counts = {"positive": 0, "zero": 0, "unknown": 0, "awaiting_procurement": 0, "arrival_gap": 0, "observed": 0}
         for line in lines:
             qty = line.get("suggested_quantity")
             bucket = "unknown" if qty is None else ("positive" if int(qty) > 0 else "zero")
             counts[bucket] += 1
+            if bucket == "positive" or (line.get("recognized_reference") or {}).get("has_observed_basis"):
+                counts["observed"] += 1
             if Decimal(str(line.get("submitted_demand") or "0")) > 0:
                 counts["awaiting_procurement"] += 1
             if line.get("risk_level") == "arrival_gap":

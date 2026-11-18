@@ -637,7 +637,45 @@ def create_dispatch_batch(actor, payload, *, idempotency_key):
         )
         reserve(actor, batch, shipments, quantities)
         _event(actor, batch, "created", key, {"shipment_ids": ids})
+    if any(payload.get(field) is not None for field in (
+        'estimated_freight_amount', 'freight_billed_cbm', 'freight_cost_currency',
+    )):
+        batch = _save_initial_freight_estimate(actor, batch, payload, key)
     return batch
+
+
+def _save_initial_freight_estimate(actor, batch, payload, key):
+    from . import costs
+    from .freight_channels import freight_reference
+    from .payment_item_models import PaymentItem
+
+    amount = payload.get('estimated_freight_amount')
+    cbm = payload.get('freight_billed_cbm')
+    currency = payload.get('freight_cost_currency')
+    load_type = (batch.freight_quote_snapshot or {}).get('load_type')
+    if load_type == 'fcl' and amount is not None and cbm is None:
+        amount = costs.decimal(amount)
+        reason = '创建整柜批次时录入议定运费'
+    elif load_type == 'lcl' and cbm is not None and amount is None and not currency:
+        reference = freight_reference(batch, cbm)
+        if not reference or reference['reference_amount'] is None:
+            raise ValidationError('散货暂估需要有效的按方报价。')
+        amount = costs.decimal(reference['reference_amount'])
+        reason = '创建散货批次时按冻结报价试算'
+    else:
+        raise ValidationError('整柜请填写议定运费，散货请填写计费体积。')
+    estimate = {'expected_source_version': batch.version, 'expected_version': 0,
+                'amount': amount, 'state': 'estimated', 'method': 'volume',
+                'volume_percent': Decimal(100), 'billed_cbm': cbm, 'reason': reason}
+    if currency and currency != 'CNY':
+        estimate['cost_exchange'] = {'currency': currency}
+    main_item = PaymentItem.objects.filter(
+        tenant_id=actor.tenant_id, name='主运费', party_type__in=['carrier', 'both'], is_active=True,
+    ).first()
+    if main_item and amount > 0:
+        estimate['item_breakdown'] = [{'fee_item_id': main_item.pk, 'amount': amount,
+                                      'nature': main_item.default_nature}]
+    return costs.save_fee(actor, 'batch', batch.pk, estimate, key, initial_batch_estimate=True)
 
 
 def _batch(actor, batch_id):
@@ -679,7 +717,10 @@ def mark_logistics_stage(actor, batch_id, *, stage, occurred_at, expected_versio
 
 
 @transaction.atomic
-def generate_inbound_draft(actor, batch_id, *, warehouse_id=None, expected_version, idempotency_key, reason=''):
+def generate_inbound_draft(actor, batch_id, *, warehouse_id=None, expected_version, idempotency_key, reason='', lines=None, notes=''):
+    if lines is not None:
+        from .inbound_split import create_manual_inbound
+        return create_manual_inbound(actor,batch_id,warehouse_id=warehouse_id,expected_version=expected_version,idempotency_key=idempotency_key,reason=reason,notes=notes,lines=lines)
     from .numbering import number_for
     _internal(actor)
     _tenant_lock(actor)
@@ -687,8 +728,12 @@ def generate_inbound_draft(actor, batch_id, *, warehouse_id=None, expected_versi
     payload = {"warehouse_id": warehouse_id, "expected_version": expected_version}
     if reason:
         payload['reason'] = reason
-    if _prior_event(actor, batch, "inbound_generated", idempotency_key, payload):
-        return batch.inbound_order
+    prior = _prior_event(actor, batch, "inbound_generated", idempotency_key, payload)
+    if prior:
+        prior_inbound = InboundOrder.objects.filter(batch=batch).order_by("pk").first()
+        if prior_inbound is None:
+            raise ValidationError("原入库单不存在，请核对历史记录。")
+        return prior_inbound
     _version(batch, expected_version)
     if batch.status != DispatchBatch.Status.ACTIVE or batch.stage != DispatchBatch.Stage.ARRIVED_WAREHOUSE:
         raise ValidationError("Inbound draft requires a batch marked arrived-warehouse.")
@@ -704,7 +749,7 @@ def generate_inbound_draft(actor, batch_id, *, warehouse_id=None, expected_versi
         raise ValidationError("An inbound order already exists for this batch.")
     with domain_write():
         inbound = InboundOrder.objects.create(tenant=actor.tenant, created_by=actor,
-            number=number_for(actor, "inbound_order", f"IN-{batch.pk}", batch.country_code_snapshot), batch=batch, warehouse=warehouse)
+            number=number_for(actor, "inbound_order", f"IN-{batch.pk}", batch.country_code_snapshot), batch=batch, warehouse=warehouse, receipt_mode="legacy_full")
         from .dispatch_allocations import batch_quantities
         quantities = batch_quantities(batch)
         lines = ShipmentLine.objects.filter(is_active=True, pk__in=quantities)

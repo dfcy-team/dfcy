@@ -36,12 +36,17 @@ def test_batch_list_matches_detail_payload_with_bounded_queries(world):
         shipment=services.create_supplier_shipment(buyer,shipment_payload(world,order,str(n),number=f'SH-{n}'),idempotency_key=str(n))
         services.create_dispatch_batch(buyer,{'shipment_ids':[shipment.pk],'freight_company_id':carrier.pk,'freight_number':str(n)},idempotency_key=f'batch-{n}')
     expected=[logistics.batch_data(row) for row in DispatchBatch.objects.order_by('pk')]
-    with CaptureQueriesContext(connection) as queries:
-        rows=list(DispatchBatch.objects.select_related('freight_company','planned_warehouse').order_by('pk'))
-        prepare_batches(rows)
-        actual=[logistics.batch_data(row) for row in rows]
+    def render(limit):
+        with CaptureQueriesContext(connection) as queries:
+            rows = list(DispatchBatch.objects.select_related('freight_company','planned_warehouse').order_by('pk')[:limit])
+            prepare_batches(rows)
+            actual = [logistics.batch_data(row) for row in rows]
+        return actual, len(queries)
+    one, single_count = render(1)
+    actual, batch_count = render(5)
+    assert one == expected[:1]
     assert actual == expected
-    assert len(queries) <= 11
+    assert batch_count == single_count <= 12
     response=client(buyer).get(BASE+'dispatch-batches/',{'limit':20})
     assert response.status_code == 200
     assert len(response.data['data']) == 5

@@ -157,8 +157,17 @@ class ProductCostLedgerOptions(InternalAPI):
                 options = options.filter(Q(name__icontains=search) | Q(country_code__icontains=search))
             return _page(request, options, lambda obj: {'id': obj.pk, 'name': obj.name, 'country_code': obj.country_code})
         if kind == 'warehouses':
+            from .models import InternalStockReceiptLine
+            matching_costs = rows.filter(
+                cost_version__batch_id=OuterRef('receipt__inbound__batch_id'),
+                shipment_line_id=OuterRef('inbound_line__shipment_line_id'),
+                cost_version__created_at__gte=OuterRef('receipt__created_at'))
+            partial_receipts = InternalStockReceiptLine.objects.filter(
+                tenant=request.user.tenant, receipt__inbound__status='confirmed',
+                inbound_line__isnull=False).annotate(_cost_visible=Exists(matching_costs)).filter(_cost_visible=True)
             options = WarehouseMaster.objects.filter(tenant=request.user.tenant,
-                pk__in=rows.values('receipt_line__receipt__warehouse_id'))
+                ).filter(Q(pk__in=rows.values('receipt_line__receipt__warehouse_id')) |
+                    Q(pk__in=partial_receipts.values('receipt__warehouse_id')))
             if search:
                 options = options.filter(Q(name__icontains=search) | Q(code__icontains=search))
             return _page(request, options, lambda obj: {'id': obj.pk, 'name': obj.name, 'country_code': obj.country_code})
@@ -247,6 +256,7 @@ class CostPaymentTerms(InternalAPI):
 class PaymentPlanLine(serializers.Serializer):
     line_id = serializers.CharField(max_length=64, required=False)
     nature = serializers.ChoiceField(choices=['corporate','personal'])
+    amount_basis = serializers.ChoiceField(('net', 'gross'), required=False)
     amount = serializers.DecimalField(max_digits=24, decimal_places=4, min_value=Decimal('0.0001'))
     currency = serializers.CharField(max_length=3, required=False, allow_blank=True)
     due_date = serializers.DateField(required=False, allow_null=True)

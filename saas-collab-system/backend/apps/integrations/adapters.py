@@ -1331,6 +1331,10 @@ class JifengInventoryAdapter(ProductionReadonlyAdapter):
 
 
 def get_adapter_for_config(config, resource_type=None):
+    if (resource_type == "warehouse_order_lookup" and config.platform in {"jifeng_wms", "best_ecapi"}
+            and config.environment in {"pilot", "production"}):
+        from .warehouse_order_job import WarehouseOrderLookupAdapter
+        return WarehouseOrderLookupAdapter(config)
     if (resource_type in {"creator_profile", "video_metrics"} and config.platform == "tiktok"
             and config.environment in {"pilot", "production"}):
         from .collection_sync import TikTokCollectionAdapter

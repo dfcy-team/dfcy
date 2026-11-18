@@ -1,7 +1,7 @@
 """Scoped monthly reconstruction from current obligations and dated cash events."""
 from collections import defaultdict
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP, localcontext
 from types import SimpleNamespace
 
 from django.db.models import Case, F, Q, Sum, When
@@ -9,11 +9,11 @@ from rest_framework import serializers
 from rest_framework.response import Response
 from django.http import HttpResponse
 
-from .dashboard import MONEY, ZERO, _money_targets, scope
+from .dashboard import MONEY, ZERO, _money_targets, _with_fee_activity, scope
 from .dates import business_date
 from .document_time import document_time
 from .models import PaymentApplication, PaymentRecord, PaymentVoucher, SettlementRecord
-from .cost_models import PaymentClassification, PaymentPlanRecord, PaymentCurrencyConfirmation
+from .cost_models import PaymentClassification, PaymentPlanRecord, PaymentCurrencyConfirmation, PayableClassificationRecord
 from .views import InternalAPI
 
 KINDS = {'supplier': 'shipment', 'domestic': 'domestic_freight', 'carrier': 'batch',
@@ -22,7 +22,7 @@ OWNERS = {'supplier': 'shipment_id', 'domestic': 'shipment_id', 'carrier': 'batc
           'clearance': 'inbound_id', 'deposit': 'purchase_order_id'}
 AMOUNTS = ('opening_payable', 'new_payable', 'paid_amount', 'applied_amount',
            'historical_paid_amount', 'remaining_amount', 'opening_credit', 'credit_balance',
-           'unknown_payment_amount')
+           'unknown_payment_amount', 'transferred_prepayment_amount')
 D0 = Decimal('0')
 
 
@@ -98,7 +98,7 @@ def _party_totals(document_rows):
     return parties
 
 
-def _supplier_balances(parties, document_rows, docs, cash, historical, purchase_docs, purchase_cash, start, end):
+def _supplier_balances(parties, document_rows, docs, cash, historical, purchase_docs, purchase_cash, start, end, purchase_transfers=None):
     """Supplier-level cash includes PO deposits; applications are informational."""
     states = defaultdict(lambda: defaultdict(lambda: D0))
     for row in document_rows:
@@ -116,7 +116,9 @@ def _supplier_balances(parties, document_rows, docs, cash, historical, purchase_
     for pk, (before, current) in purchase_cash.items():
         obj = purchase_docs[pk]; party_id = obj['party_id']
         party = parties.setdefault(party_id, _party_row(party_id, obj['party_name']))
-        party['paid_amount'] += current
+        transferred = (purchase_transfers or {}).get(pk, (D0, D0))[1]
+        party['paid_amount'] += current - transferred
+        party['transferred_prepayment_amount'] += transferred
         states[party_id]['before_cash'] += before; states[party_id]['current_cash'] += current
     for party_id, party in parties.items():
         state = states[party_id]
@@ -126,6 +128,31 @@ def _supplier_balances(parties, document_rows, docs, cash, historical, purchase_
             new_payable=state['new_due'], remaining_amount=max(ending, D0), credit_balance=max(-ending, D0))
 
 
+
+def _legacy_cash_tax_context(tenant_id, payments, docs):
+    from .monthly_nature_balances import corporate_tax_breakdown, matches_party
+
+    shipment_ids = {shipment_id for shipment_id, _ in payments.values() if shipment_id}
+    confirmed = corporate_tax_breakdown(tenant_id, shipment_ids)
+    splits = {row.shipment_id: row for row in PayableClassificationRecord.objects.filter(
+        tenant_id=tenant_id, kind='shipment', shipment_id__in=shipment_ids)}
+    estimates = {}
+    for payment_id, (shipment_id, rate) in payments.items():
+        if shipment_id in confirmed:
+            tax, corporate = confirmed[shipment_id]
+            doc = docs.get(shipment_id) or {}
+            due = doc.get('due')
+            split = splits.get(shipment_id)
+            if split and due == split.payable_amount and matches_party(split.party_snapshot, doc, 'supplier'):
+                due = split.corporate_amount
+            if corporate and tax is not None and due is not None and due > tax:
+                estimates[payment_id] = (tax, due - tax, Decimal('.0001'))
+            elif corporate and tax == D0:
+                estimates[payment_id] = (D0, Decimal(1), Decimal('.0001'))
+        elif rate is not None:
+            estimates[payment_id] = (rate, Decimal(100), Decimal('.01'))
+    return estimates
+
 def monthly_data(actor, values):
     month = values.get('month') or business_date().strftime('%Y-%m')
     year, month_number = map(int, month.split('-'))
@@ -133,7 +160,7 @@ def monthly_data(actor, values):
     end = date(year + (month_number == 12), 1 if month_number == 12 else month_number + 1, 1)
     queue = values['queue']; kind = KINDS[queue]; owner = OWNERS[queue]
     scoped = scope(actor, values.get('country_id'))
-    query = _money_targets(queue, scoped)
+    query = _with_fee_activity(_money_targets(queue, scoped), queue)
     if values.get('party_id'):
         query = query.filter(_party_id=values['party_id'])
         if queue == 'domestic':
@@ -145,6 +172,7 @@ def monthly_data(actor, values):
     payments = PaymentRecord.objects.filter(tenant_id=actor.tenant_id,
         **{owner + '__in': query.values('pk')}, purpose='domestic_freight' if queue == 'domestic' else 'goods')
     cash = _period_totals(payments, owner, start, end)
+    transfers = _period_totals(payments.filter(supplier_deposit_transfer__isnull=False), owner, start, end) if queue == 'deposit' else {}
     plan_current = defaultdict(lambda: {'corporate': D0, 'personal': D0, 'unknown': D0})
     plan_rows = []
     plan_query = PaymentPlanRecord.objects.filter(tenant_id=actor.tenant_id, kind=kind,
@@ -185,7 +213,7 @@ def monthly_data(actor, values):
                     'reserved_amount':str(balance['reserved_amount']),'available_amount':str(balance['available_amount']),
                     'label':line.get('note') or line.get('label') or line.get('name') or ''})
     display_payments = payments
-    purchase_docs = {}; purchase_cash = {}; purchase_payments = PaymentRecord.objects.none()
+    purchase_docs = {}; purchase_cash = {}; purchase_transfers = {}; purchase_payments = PaymentRecord.objects.none()
     if queue == 'supplier':
         purchase_query = _money_targets('deposit', scoped)
         if values.get('party_id'):
@@ -196,16 +224,48 @@ def monthly_data(actor, values):
         purchase_payments = PaymentRecord.objects.filter(tenant_id=actor.tenant_id, purpose='goods',
             purchase_order_id__in=purchase_query.values('pk'))
         purchase_cash = _period_totals(purchase_payments, 'purchase_order_id', start, end)
+        purchase_transfers = _period_totals(purchase_payments.filter(supplier_deposit_transfer__isnull=False), 'purchase_order_id', start, end)
         display_payments = PaymentRecord.objects.filter(tenant_id=actor.tenant_id, purpose='goods').filter(
             Q(shipment_id__in=query.values('pk')) | Q(purchase_order_id__in=purchase_query.values('pk')))
     # Nature cash is actual dated cash only. Unknown stays separate; reversal
     # follows the original payment's saved classification.
     cash_nature = defaultdict(lambda: {'corporate': D0, 'personal': D0, 'unknown': D0})
-    payment_rows = list(display_payments.filter(date__gte=start, date__lt=end).select_related('reverses'))
+    payment_rows = list(display_payments.filter(date__gte=start, date__lt=end, supplier_deposit_transfer__isnull=True).select_related('reverses'))
     ids = {p.pk for p in payment_rows} | {p.reverses_id for p in payment_rows if p.reverses_id}
     classifications = {x.payment_id: x.allocations for x in PaymentClassification.objects.filter(
         tenant_id=actor.tenant_id, payment_id__in=ids)}
     confirmed_currencies={r.payment_id:r.currency for r in PaymentCurrencyConfirmation.objects.filter(tenant_id=actor.tenant_id,payment_id__in=ids)}
+    corporate_net = defaultdict(lambda: D0)
+    corporate_gross = defaultdict(lambda: D0)
+    unverified_net = set()
+    unverified_gross = set()
+    tax_snapshots = dict(SupplyPaymentRequest.objects.filter(
+        tenant_id=actor.tenant_id, kind='shipment', payment_id__in=ids
+    ).values_list('payment_id', 'item_snapshot')) if queue == 'supplier' else {}
+    legacy_tax = {}
+    if queue == 'supplier':
+        legacy_ids = ids - {pk for pk, snapshot in tax_snapshots.items() if (snapshot or {}).get('corporate_tax')}
+        sources = PaymentRecord.objects.filter(tenant_id=actor.tenant_id, pk__in=legacy_ids).values_list(
+            'pk', 'shipment_id', 'shipment__order__supplier__default_tax_rate',
+            'purchase_order__supplier__default_tax_rate')
+        legacy_tax = _legacy_cash_tax_context(actor.tenant_id, {
+            pk: (shipment_id, shipment_rate if shipment_id else purchase_rate)
+            for pk, shipment_id, shipment_rate, purchase_rate in sources
+        }, docs)
+    estimated_corporate = set()
+
+    def add_legacy_corporate(payment_id, currency, amount):
+        corporate_net[currency] += amount
+        if payment_id not in legacy_tax:
+            unverified_gross.add(currency)
+            return
+        numerator, denominator, quantum = legacy_tax[payment_id]
+        with localcontext() as context:
+            context.prec = 60
+            tax = (amount * numerator / denominator).quantize(quantum, rounding=ROUND_HALF_UP)
+        corporate_gross[currency] += amount + tax
+        estimated_corporate.add(currency)
+
     covered = set()
     if kind == 'batch':
         from .batch_cash_classification import confirmed_groups
@@ -225,12 +285,30 @@ def monthly_data(actor, values):
         currency = monthly_currency(kind, snapshot.get('currency'), confirmed_currencies.get(source_id))
         if nature in ('corporate','personal'):
             cash_nature[currency][nature] += signed
+            if queue == 'supplier' and nature == 'corporate':
+                tax = (tax_snapshots.get(source_id) or {}).get('corporate_tax')
+                if not tax:
+                    add_legacy_corporate(source_id, currency, signed)
+                    continue
+                try:
+                    net = Decimal(tax['net_amount'])
+                    gross = Decimal(tax['gross_amount'])
+                    if not D0 <= net <= gross or gross != original.amount:
+                        raise ValueError('Tax snapshot differs from original payment')
+                    corporate_net[currency] += -net if payment.reverses_id else net
+                    corporate_gross[currency] += signed
+                except (ArithmeticError, KeyError, TypeError, ValueError):
+                    unverified_net.add(currency)
+                    unverified_gross.add(currency)
         elif allocations:
             total = sum((Decimal(str(a.get('amount','0'))) for a in allocations), D0)
             if total == (original.amount if original else payment.amount):
                 for a in allocations:
                     if a.get('nature') in ('corporate','personal'):
-                        cash_nature[currency][a['nature']] += signed * Decimal(str(a['amount'])) / total
+                        amount = signed * Decimal(str(a['amount'])) / total
+                        cash_nature[currency][a['nature']] += amount
+                        if queue == 'supplier' and a['nature'] == 'corporate' and amount:
+                            add_legacy_corporate(source_id, currency, amount)
                     else: cash_nature[currency]['unknown'] += signed * Decimal(str(a.get('amount','0'))) / total
             else: cash_nature[currency]['unknown'] += signed
         else: cash_nature[currency]['unknown'] += signed
@@ -265,9 +343,11 @@ def monthly_data(actor, values):
             continue
         row = {k: v for k, v in obj.items() if k != 'due'}
         row.update({key: D0 for key in AMOUNTS})
-        row.update(paid_amount=current_cash, applied_amount=current_applied, historical_paid_amount=current_history)
+        transferred = transfers.get(pk, (D0, D0))[1]
+        row.update(paid_amount=current_cash - transferred, transferred_prepayment_amount=transferred, applied_amount=current_applied, historical_paid_amount=current_history)
         row['_paid_by_month_end'] = before_cash + current_cash + before_applied + current_applied + before_history + current_history
-        summary['paid_amount'] += current_cash
+        summary['paid_amount'] += current_cash - transferred
+        summary['transferred_prepayment_amount'] += transferred
         summary['applied_amount'] += current_applied
         summary['historical_paid_amount'] += current_history
         reasons = []
@@ -309,7 +389,7 @@ def monthly_data(actor, values):
     document_rows.sort(key=lambda r: (r['document_time'] or '', r['id']), reverse=True)
     parties = _party_totals(document_rows)
     if queue == 'supplier':
-        _supplier_balances(parties, document_rows, docs, cash, historical, purchase_docs, purchase_cash, start, end)
+        _supplier_balances(parties, document_rows, docs, cash, historical, purchase_docs, purchase_cash, start, end, purchase_transfers)
         summary = {key: sum((p[key] for p in parties.values()), D0) for key in AMOUNTS}
         summary.update({key: sum(p[key] for p in parties.values()) for key in ('unknown_documents', 'undated_documents')})
     offset, limit = values['offset'], values['limit']
@@ -326,7 +406,7 @@ def monthly_data(actor, values):
         count = len(ordered)
         rows = ordered[offset:offset + limit]
     if values['view'] == 'payments':
-        monthly_payments = display_payments.filter(date__gte=start, date__lt=end)
+        monthly_payments = display_payments.filter(date__gte=start, date__lt=end, supplier_deposit_transfer__isnull=True)
         count = monthly_payments.count()
         page = list(monthly_payments.select_related('reverses').order_by('-date', '-pk')[offset:offset + limit])
         voucher_ids = [p.reverses_id or p.pk for p in page]
@@ -364,7 +444,11 @@ def monthly_data(actor, values):
     from .monthly_nature_balances import nature_balances
     summary['nature_balances'] = nature_balances(actor, kind, query, docs, display_payments, purchase_docs, start, end, plan_balance_cache=plan_balance_cache)
     summary['paid_nature_by_currency'] = [
-        {'currency': currency, **{key: str(value) for key, value in nature.items()}}
+        {'currency': currency, **{key: str(value) for key, value in nature.items()},
+         **({'corporate_paid_net': None if currency in unverified_net else str(corporate_net[currency]),
+             'corporate_paid_tax': None if currency in unverified_gross or currency in unverified_net else str(corporate_gross[currency] - corporate_net[currency]),
+             'corporate_paid_gross': None if currency in unverified_gross else str(corporate_gross[currency]),
+             'corporate_paid_tax_estimated': currency in estimated_corporate} if queue == 'supplier' else {})}
         for currency, nature in sorted(cash_nature.items())]
     summary['current_plan_by_currency'] = [
         {'currency': currency, **{key: str(value) for key, value in nature.items()}}
@@ -374,11 +458,12 @@ def monthly_data(actor, values):
         'rows': rows, 'count': count, 'available_months': sorted(months, reverse=True),
         'current_plan_rows': plan_rows,
         'notices': ['按当前确认应付金额及单据业务日期回溯，不是已锁定的历史月结快照；未作汇率换算。',
-            '月期初、月末应付与预付/超付分列；本月新增应付、实际付款、定金抵扣及历史已付登记分别列示。',
-            '付款按付款业务日期归月，冲销按冲销业务日期负数计入。供应商付款含采购定金和发货单直接付款，抵扣不重复作为现金付款；采购定金页为同笔资金视角，不相加。',
+            '月期初、月末应付与预付/超付分列；本月新增应付、实际付款、预付款抵扣及历史已付登记分别列示。',
+            '付款按付款业务日期归月，冲销按冲销业务日期负数计入。供应商付款含采购预付款和发货单直接付款，抵扣不重复作为现金付款；采购预付款页为同笔资金视角，不相加。',
             '供应商对象余额按发货金额扣除累计现金付款及历史已付；单据余额按实际付款与抵扣归属显示。',
             '对公/对私现金仅按付款账户快照或已审核的分类记录汇总；供应商货款和国内运费缺少币种时按人民币（CNY）展示，其他款项保留“币种未记录”；不同币种分行展示。当前付款计划按计划到期日及币种统计，扣除已关联申请的净付款；审批占用仍属于待付款，冲销恢复余额。未关联的历史或直接付款不自动核销计划，需人工核对。计划不是历史冻结快照。',
             '分类余额按当前确认的应付性质回溯，非历史冻结值；付款性质或币种缺失时单列待核对，不跨性质或币种抵扣。分类付款超出应付不代表可退款。有未分类或币种缺失项目时，月末应付不提供确定值，参考应付仅供核对。',
+            '供应商历史正报按原录入未税金额和单据计税口径或当前档案税点测算，按币种汇总；测算结果不回写付款流水。',
             '缺日期或未确认应付单据不计入已知余额，其本月付款仍列入付款额并单列待核对付款；各业务类型不相加。']}
 
 
@@ -397,7 +482,12 @@ class MonthlyPayables(InternalAPI):
             # Keep unlike currencies and cash versus current plan on separate rows.
             for row in summary.get('paid_nature_by_currency', []):
                 for nature in ('corporate','personal','unknown'):
-                    ws.append([data['month'],data['queue'],row['currency'],{'corporate':'对公/正报','personal':'对私','unknown':'性质待确认'}[nature],'本月实际付款',row[nature]])
+                    if nature == 'corporate' and data['queue'] == 'supplier':
+                        ws.append([data['month'],data['queue'],row['currency'],'对公/正报','本月实付（未税）',row['corporate_paid_net'] if row['corporate_paid_net'] is not None else '待核对'])
+                        ws.append([data['month'],data['queue'],row['currency'],'对公/正报','本月实付税额',row['corporate_paid_tax'] if row['corporate_paid_tax'] is not None else '待核对'])
+                        ws.append([data['month'],data['queue'],row['currency'],'对公/正报','本月实付（含税）',row['corporate_paid_gross'] if row['corporate_paid_gross'] is not None else '待核对'])
+                    else:
+                        ws.append([data['month'],data['queue'],row['currency'],{'corporate':'对公/正报','personal':'对私','unknown':'性质待确认'}[nature],'本月实际付款',row[nature]])
             for row in summary.get('current_plan_by_currency', []):
                 for nature in ('corporate','personal','unknown'):
                     ws.append([data['month'],data['queue'],row['currency'],{'corporate':'对公/正报','personal':'对私','unknown':'性质待确认'}[nature],'本月当前计划',row[nature]])

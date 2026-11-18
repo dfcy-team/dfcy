@@ -7,16 +7,31 @@
       <el-alert v-if="notice" :title="notice" type="info" :closable="false"/>
       <el-form v-if="editable" label-position="top" :disabled="busy||disabled" class="request-form" @submit.prevent>
         <el-form-item label="付款币种" required><el-input v-model="form.currency" maxlength="3" placeholder="按原单确认，如 CNY、USD"/></el-form-item>
-        <el-form-item label="申请金额" required><el-input v-model="form.amount" inputmode="decimal"/></el-form-item>
+        <el-form-item v-if="props.kind==='shipment'" label="付款性质" required>
+          <el-select v-model="form.payment_nature" placeholder="选择对公或对私" @change="form.payee_account_id=null">
+            <el-option value="corporate" label="对公（正报）"/><el-option value="personal" label="对私"/>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="收款账户" required><el-select v-model="form.payee_account_id" :disabled="props.kind==='shipment'&&!form.payment_nature" filterable placeholder="选择所属供应商或货运公司账户"><el-option v-for="a in availableAccounts" :key="a.id" :value="a.id" :label="`${a.account_name} · ${natureLabel(a.nature)} · 尾号${String(a.account_number||'').slice(-4)}`"/></el-select></el-form-item>
+        <el-form-item :label="props.kind==='shipment'?'申请金额（未税）':'申请金额'" required><el-input v-model="form.amount" inputmode="decimal"/></el-form-item>
+        <template v-if="corporateShipment">
+          <el-form-item label="本次税额"><el-input :model-value="requestPreview?.tax ?? '待计算'" readonly/></el-form-item>
+          <el-form-item label="正报应付（含税）"><el-input :model-value="requestPreview?.gross ?? '待计算'" readonly/></el-form-item>
+          <p class="hint">
+            供应商税点 {{corporateTerms.supplier_tax_rate == null ? '未维护' : corporateTerms.supplier_tax_rate+'%'}}
+            <span v-if="!useNetAmount"> · 本单缺少可确认的计税依据，请先核对税点和应付分类。</span>
+            <span v-else-if="corporateTerms.needs_confirmation"> · 提交审批时确认单据税额。</span>
+            <span v-if="corporateTerms.requires_full"> · 部分付款前请先维护本单对公与对私的应付分类。</span>
+          </p>
+        </template>
         <el-form-item v-if="planLines.length" label="付款计划（可选，明确选择）"><el-select v-model="form.plan_line_id" clearable placeholder="不关联计划"><el-option v-for="line in planLines" :key="line.line_id" :value="line.line_id" :disabled="Number(line.available_amount)<=0" :label="`${line.due_date||'日期待定'} · ${line.nature==='corporate'?'对公':'对私'} · ${line.currency||form.currency} · 可用 ${line.available_amount}`"/></el-select></el-form-item>
-        <el-form-item label="收款账户" required><el-select v-model="form.payee_account_id" filterable placeholder="选择所属供应商或货运公司账户"><el-option v-for="a in accounts.filter(a=>a.active)" :key="a.id" :value="a.id" :label="`${a.account_name} · ${natureLabel(a.nature)} · 尾号${String(a.account_number||'').slice(-4)}`"/></el-select></el-form-item>
         <el-form-item v-if="context.itemized" label="费用项目" required><el-select v-model="form.fee_item_id"><el-option v-for="item in context.fee_items||[]" :key="item.fee_item_id" :value="item.fee_item_id" :label="`${item.name} · 剩余 ${item.remaining_amount}`"/></el-select></el-form-item>
         <el-form-item label="申请理由" required><el-input v-model="form.reason" maxlength="1000"/></el-form-item>
         <el-button :disabled="busy||disabled" @click="create">保存付款申请草稿</el-button>
       </el-form>
       <div class="toolbar"><el-button :disabled="busy" @click="load">刷新审批与付款状态</el-button><el-button v-if="filterId" :disabled="busy" @click="showAll">查看本单全部申请</el-button></div>
       <el-table :data="rows" border empty-text="暂无付款申请">
-        <el-table-column label="申请" width="90"><template #default="{row}">#{{row.id}}</template></el-table-column><el-table-column prop="amount" label="金额" width="120"/><el-table-column prop="currency" label="币种" width="90"/>
+        <el-table-column label="申请" width="90"><template #default="{row}">#{{row.id}}</template></el-table-column><el-table-column v-if="props.kind==='shipment'" label="申请金额（未税）" width="140"><template #default="{row}">{{row.corporate_tax?.net_amount ?? (row.account_snapshot?.nature==='personal' ? row.amount : '—')}}</template></el-table-column><el-table-column v-if="props.kind==='shipment'" label="本次税额" width="115"><template #default="{row}">{{row.corporate_tax?.tax_amount ?? (row.account_snapshot?.nature==='personal' ? '0' : '—')}}</template></el-table-column><el-table-column prop="amount" label="付款金额" width="125"/><el-table-column prop="currency" label="币种" width="90"/>
         <el-table-column label="收款账户" min-width="180"><template #default="{row}">{{row.account_snapshot?.account_name}} · {{natureLabel(row.account_snapshot?.nature)}}<small>尾号{{String(row.account_snapshot?.account_number||'').slice(-4)}}</small></template></el-table-column>
         <el-table-column label="状态 / 通知" min-width="150"><template #default="{row}">{{statusName(row.status)}}<small>{{notificationName(row.notification_status)}}</small><small v-if="row.notification_error">{{row.notification_error}}</small></template></el-table-column>
         <el-table-column prop="reason" label="申请理由" min-width="160"/>
@@ -25,6 +40,7 @@
       <el-pagination layout="total,prev,pager,next" :total="total" :page-size="20" :current-page="page" :disabled="busy" @current-change="p=>{page=p;load()}"/>
       <section v-if="selected" class="selected-request"><h4>申请 #{{selected.id}} · {{statusName(selected.status)}} · {{selected.amount}} {{selected.currency || '币种未记录'}}</h4><p>收款人：{{selected.account_snapshot?.account_holder}} · 银行：{{selected.account_snapshot?.bank_name}} · 账户：{{selected.account_snapshot?.account_number}}</p>
         <p>费用项目：{{selected.item_snapshot?.name || '整单款项'}} · 申请理由：{{selected.reason}}</p>
+        <p v-if="selected.item_snapshot?.corporate_tax">未税金额 {{selected.item_snapshot.corporate_tax.net_amount}} · 税额 {{selected.item_snapshot.corporate_tax.tax_amount}} · 正报金额 {{selected.amount}}</p>
         <p v-if="selected.plan_line_id">关联付款计划：{{selected.plan_snapshot.due_date||'日期待定'}} · {{selected.plan_snapshot.note||'无说明'}} · 原计划金额 {{selected.plan_snapshot.amount}}</p>
         <p v-if="selected.payment_id">已生成付款记录 #{{selected.payment_id}}，可在本页付款流水查看。</p>
         <h5>申请附件（供审批查看，不作为转账凭证）</h5><div v-for="file in selected.attachments||[]" :key="file.id">{{file.file_name}} <el-button link :disabled="busy" @click="previewAttachment(file)">预览</el-button><el-button link :disabled="busy" @click="downloadAttachment(file)">下载</el-button></div>
@@ -44,14 +60,27 @@ import {useRoute} from 'vue-router';
 import {ElMessageBox} from 'element-plus';
 import {useAuthStore} from '../../stores/auth';
 import {cockpitActorKey} from '../../utils/cockpitDraft';
-import {amountUnits,natureLabel} from '../../utils/payeeSettlement';
+import {amountUnits,natureLabel,taxedPaymentUnits} from '../../utils/payeeSettlement';
 import {fetchPayeeAccounts} from '../../api/supplyCostsV2';
 import * as api from '../../api/paymentRequestsV2';
 import * as plansApi from '../../api/paymentPlansV2';
 const props=defineProps({kind:String,id:[String,Number],context:{type:Object,default:()=>({})},disabled:Boolean}),emit=defineEmits(['updated']);
 const auth=useAuthStore(),route=useRoute(),editable=computed(()=>!auth.authorizationStale&&auth.hasPermission('supply.v2.manage'));
 const opened=ref(false),busy=ref(false),loading=ref(false),error=ref(''),notice=ref(''),rows=ref([]),total=ref(0),page=ref(1),accounts=ref([]),selected=ref(null),filterId=ref(route?.query?.payment_request_id||null),chosenFile=ref(null),chosenAttachment=ref(null);
-const form=reactive({amount:'',currency:'',payee_account_id:null,fee_item_id:null,plan_line_id:null,reason:''}),payment=reactive({date:'',reference_number:'',notes:''});const planLines=ref([]),planVersion=ref(null);
+const form=reactive({amount:'',currency:'',payment_nature:'',payee_account_id:null,fee_item_id:null,plan_line_id:null,reason:''}),payment=reactive({date:'',reference_number:'',notes:''});const planLines=ref([]),planVersion=ref(null);
+const corporateTerms=computed(()=>props.context.summary?.corporate_payment||{});
+const availableAccounts=computed(()=>accounts.value.filter(a=>a.active&&(props.kind!=='shipment'||a.nature===form.payment_nature)));
+const corporateShipment=computed(()=>props.kind==='shipment'&&form.payment_nature==='corporate');
+const useNetAmount=computed(()=>corporateShipment.value&&corporateTerms.value.net_basis!=null);
+const requestPreview=computed(()=>{
+  if(!useNetAmount.value||!form.amount)return null;
+  try{
+    const {tax,gross}=taxedPaymentUnits(form.amount,corporateTerms.value);
+    const format=units=>units/10000n+'.'+String(units%10000n).padStart(4,'0');
+    return {tax:format(tax),gross:format(gross)};
+  }catch{return null;}
+});
+
 const previewOpen=ref(false),previewUrl=ref(''),previewType=ref('');let generation=0,attempts=new Map(),fileAttempt=null,attachmentAttempt=null;
 const statusName=value=>({draft:'草稿',submitted:'待审批',pending:'待审批',approved:'已通过待付款',rejected:'已驳回',withdrawn:'已撤回',cancelled:'已取消',paid:'已入账',reversed:'已冲销'}[value]||value);
 const notificationName=value=>({disabled:'此流程已关闭飞书通知',queued:'通知已入队（未代表送达）',no_matching_rule:'无匹配的飞书通知规则',error:'通知失败，可重试',failed:'通知失败，可重试',not_queued:'尚未通知',not_requested:'尚未通知'}[value]||value||'尚未通知');
@@ -61,8 +90,8 @@ async function loadPlans(token,kind,id){if(!['shipment','domestic_freight','batc
 async function toggle(){if(busy.value||props.disabled)return;opened.value=!opened.value;if(!opened.value){generation++;loading.value=false;return;}const kind=props.kind,id=props.id,pending=load(),token=generation;await pending;if(token!==generation)return;try{const value=unwrap(await fetchPayeeAccounts(kind,id));if(token===generation)accounts.value=value.accounts||[];}catch(e){if(token===generation)error.value=e.message;}}
 function select(row){selected.value=row;chosenFile.value=null;chosenAttachment.value=null;fileAttempt=null;attachmentAttempt=null;Object.assign(payment,{date:'',reference_number:'',notes:''});}
 function showAll(){filterId.value=null;page.value=1;load();}
-async function mutate(action,row,body){if(busy.value||props.disabled)return;const token=generation,id=props.id,kind=props.kind,signature=JSON.stringify([kind,id,row?.id,action,body]);if(!attempts.has(signature))attempts.set(signature,api.createIdempotencyKey());busy.value=true;error.value='';notice.value='';try{const r=action==='create'?await api.createRequest(kind,id,body,attempts.get(signature)):await api.requestAction(kind,id,row.id,action,body,attempts.get(signature));const value=unwrap(r);if(token!==generation)return;attempts.delete(signature);if(action==='create'){Object.assign(form,{amount:'',currency:'',payee_account_id:null,fee_item_id:null,plan_line_id:null,reason:''});page.value=1;filterId.value=null;}selected.value=value;await load();emit('updated');if(action==='submit'||action==='notify')notice.value=notificationName(value.notification_status);return value;}catch(e){if(token===generation)error.value=e.message;}finally{busy.value=false;}}
-function create(){if(!editable.value)return;try{if(amountUnits(form.amount)<=0n||!form.payee_account_id||!form.reason.trim()||(props.context.itemized&&!form.fee_item_id))throw new Error('请填写有效金额、收款账户、申请理由及费用项目');if(!/^[A-Z]{3}$/.test(form.currency))throw new Error('请明确本次付款币种');const line=planLines.value.find(x=>String(x.line_id)===String(form.plan_line_id));if(form.plan_line_id&&!line)throw new Error('所选付款计划已失效，请刷新后重选');if(line&&(line.currency!==form.currency||line.nature!==accounts.value.find(a=>a.id===form.payee_account_id)?.nature||String(line.fee_item_id||'')!==String(form.fee_item_id||'')||amountUnits(form.amount)>amountUnits(line.available_amount)))throw new Error('所选计划的币种、性质、费用项目或可用金额与申请不符');return mutate('create',null,{currency:form.currency,amount:form.amount,payee_account_id:form.payee_account_id,...(form.fee_item_id?{fee_item_id:form.fee_item_id}:{}),...(line?{plan_line_id:line.line_id,plan_version:planVersion.value}:{}),reason:form.reason.trim()});}catch(e){error.value=e.message;}}
+async function mutate(action,row,body){if(busy.value||props.disabled)return;const token=generation,id=props.id,kind=props.kind,signature=JSON.stringify([kind,id,row?.id,action,body]);if(!attempts.has(signature))attempts.set(signature,api.createIdempotencyKey());busy.value=true;error.value='';notice.value='';try{const r=action==='create'?await api.createRequest(kind,id,body,attempts.get(signature)):await api.requestAction(kind,id,row.id,action,body,attempts.get(signature));const value=unwrap(r);if(token!==generation)return;attempts.delete(signature);if(action==='create'){Object.assign(form,{amount:'',currency:'',payment_nature:'',payee_account_id:null,fee_item_id:null,plan_line_id:null,reason:''});page.value=1;filterId.value=null;}selected.value=value;await load();emit('updated');if(action==='submit'||action==='notify')notice.value=notificationName(value.notification_status);return value;}catch(e){if(token===generation)error.value=e.message;}finally{busy.value=false;}}
+function create(){if(!editable.value)return;try{if(props.kind==='shipment'&&!form.payment_nature)throw new Error('请先选择付款性质');if(amountUnits(form.amount)<=0n||!form.payee_account_id||!form.reason.trim()||(props.context.itemized&&!form.fee_item_id))throw new Error('请填写有效金额、收款账户、申请理由及费用项目');if(!/^[A-Z]{3}$/.test(form.currency))throw new Error('请明确本次付款币种');const line=planLines.value.find(x=>String(x.line_id)===String(form.plan_line_id));if(form.plan_line_id&&!line)throw new Error('所选付款计划已失效，请刷新后重选');if(corporateShipment.value&&!useNetAmount.value)throw new Error('请先核对本单计税依据再申请对公付款');if(line&&(line.currency!==form.currency||line.nature!==accounts.value.find(a=>a.id===form.payee_account_id)?.nature||String(line.fee_item_id||'')!==String(form.fee_item_id||'')||amountUnits(requestPreview.value?.gross??form.amount)>amountUnits(line.available_amount)))throw new Error('所选计划的币种、性质、费用项目或可用金额与申请不符');if(useNetAmount.value&&corporateTerms.value.requires_full&&amountUnits(form.amount)!==amountUnits(corporateTerms.value.net_basis))throw new Error('部分付款前请先维护本单对公与对私的应付分类');if(useNetAmount.value&&!requestPreview.value)throw new Error('未税申请金额超过本单未税应付');return mutate('create',null,{currency:form.currency,amount:form.amount,...(form.payment_nature?{payment_nature:form.payment_nature}:{}),...(useNetAmount.value?{amount_basis:'net',expected_gross_amount:requestPreview.value.gross}:{}),payee_account_id:form.payee_account_id,...(form.fee_item_id?{fee_item_id:form.fee_item_id}:{}),...(line?{plan_line_id:line.line_id,plan_version:planVersion.value}:{}),reason:form.reason.trim()});}catch(e){error.value=e.message;}}
 function act(row,action){if(!row[action==='submit'?'can_submit':'can_notify'])return;return mutate(action,row,{expected_version:row.version});}
 async function cancel(row){if(!row.can_cancel)return;let result;try{result=await ElMessageBox.prompt('请输入取消原因；取消后不会生成付款。','取消付款申请',{inputValidator:v=>!!v?.trim()||'请输入原因'});}catch{return;}return mutate('cancel',row,{expected_version:row.version,reason:result.value.trim()});}
 async function confirmPayment(){if(!selected.value?.can_confirm||!selected.value.vouchers?.length||!payment.date)return;try{await ElMessageBox.confirm(`确认已向此账户转账 ${selected.value.amount} 并将凭证登记入账？此操作用于历史已批准但未入账的申请。`,'财务确认');}catch{return;}return mutate('confirm',selected.value,{...payment,expected_version:selected.value.version});}
@@ -75,7 +104,7 @@ async function downloadAttachment(file){if(busy.value)return;busy.value=true;try
 function clearPreview(){if(previewUrl.value)URL.revokeObjectURL(previewUrl.value);previewUrl.value='';previewType.value='';}
 async function preview(file){if(busy.value)return;const token=generation;busy.value=true;try{const r=await api.previewVoucher(props.kind,props.id,selected.value.id,file);unwrap(r);if(token!==generation)return;clearPreview();previewUrl.value=URL.createObjectURL(r.blob);previewType.value=file.media_type;previewOpen.value=true;}catch(e){if(token===generation)error.value=e.message;}finally{busy.value=false;}}
 async function download(file){if(busy.value)return;busy.value=true;try{unwrap(await api.downloadVoucher(props.kind,props.id,selected.value.id,file));}catch(e){error.value=e.message;}finally{busy.value=false;}}
-watch(()=>[props.kind,props.id,cockpitActorKey(auth.currentUser),auth.authorizationStale],()=>{generation++;opened.value=false;rows.value=[];selected.value=null;accounts.value=[];planLines.value=[];planVersion.value=null;chosenFile.value=null;chosenAttachment.value=null;fileAttempt=null;attachmentAttempt=null;attempts.clear();Object.assign(form,{amount:'',currency:'',payee_account_id:null,fee_item_id:null,plan_line_id:null,reason:''});previewOpen.value=false;clearPreview();},{flush:'sync'});
+watch(()=>[props.kind,props.id,cockpitActorKey(auth.currentUser),auth.authorizationStale],()=>{generation++;opened.value=false;rows.value=[];selected.value=null;accounts.value=[];planLines.value=[];planVersion.value=null;chosenFile.value=null;chosenAttachment.value=null;fileAttempt=null;attachmentAttempt=null;attempts.clear();Object.assign(form,{amount:'',currency:'',payment_nature:'',payee_account_id:null,fee_item_id:null,plan_line_id:null,reason:''});previewOpen.value=false;clearPreview();},{flush:'sync'});
 onMounted(()=>{if(filterId.value)toggle();});onUnmounted(()=>{generation++;clearPreview();});
 defineExpose({toggle,load,create,act,select,upload,confirmPayment,form,payment,rows,selected,error,chosenFile,opened,planLines,planVersion});
 </script>

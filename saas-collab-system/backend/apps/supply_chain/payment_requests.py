@@ -1,5 +1,5 @@
 import hashlib
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP, localcontext
 from django.db import transaction
 from django.db.models import Sum, Prefetch
 from rest_framework.exceptions import ValidationError, NotFound, PermissionDenied
@@ -79,7 +79,8 @@ def request_data(actor, row):
     can_confirm = bool(row.approval_id and approval_status=='approved' and vouchers and not row.payment_id and row.status!='cancelled' and allowed_manage and finance_allowed(actor,row.currency))
     result = {'id':row.pk,'version':row.version,'status':'reversed' if reversed_payment else 'paid' if row.payment_id else ('cancelled' if row.status=='cancelled' else approval_status if (row.approval_id or (row.batch_id and row.batch.approval_id)) else row.status),
         'amount':str(row.amount),'reason':row.reason,'item_snapshot':row.item_snapshot,'account_snapshot':{**row.account_snapshot,'account_number':costs._mask_account_number(row.account_snapshot.get('account_number',''))},'approval_id':row.approval_id,
-        'currency':row.currency,'plan_id':row.plan_id or None,'plan_line_id':row.plan_line_id or None,'plan_snapshot':row.plan_snapshot,
+        'currency':row.currency,'corporate_tax':row.item_snapshot.get('corporate_tax') if row.kind=='shipment' else None,
+        'plan_id':row.plan_id or None,'plan_line_id':row.plan_line_id or None,'plan_snapshot':row.plan_snapshot,
         'payment_id':row.payment_id,'vouchers':vouchers,'attachments':attachments,'notification_status':row.notification_status,'notification_error':row.notification_error,
         'can_attach':bool(row.created_by_id==actor.pk and allowed_manage and
             (row.status=='draft' or row.status=='submitted' and row.approval_id and approval_status=='pending')),
@@ -92,9 +93,56 @@ def request_data(actor, row):
     return result
 
 
+def corporate_request_amount(amount, summary):
+    tax = summary.get('corporate_payment') or {}
+    if tax.get('net_basis') is None:
+        raise ValidationError({'amount': '本单尚未确认对公计税口径，请先核对税额。'})
+    basis = Decimal(tax['net_basis'])
+    if basis <= 0 or amount > basis:
+        raise ValidationError({'amount': '未税申请金额超过本单未税应付。'})
+    if tax.get('requires_full') and amount != basis:
+        raise ValidationError({'amount': '部分付款前请先维护本单对公与对私的应付分类。'})
+    total_tax = Decimal(tax['added_tax_amount'])
+    with localcontext() as context:
+        context.prec = 60
+        allocated = (amount * total_tax / basis).quantize(Decimal('.0001'), rounding=ROUND_HALF_UP)
+    return {'net_amount': str(amount), 'tax_amount': str(allocated), 'gross_amount': str(amount + allocated),
+            'source_net_basis': tax['net_basis'], 'source_tax_amount': tax['added_tax_amount'],
+            **({'confirm_tax_rate': tax['supplier_tax_rate']} if tax.get('needs_confirmation') else {})}
+
+
+def confirm_corporate_tax(actor, shipment, row, breakdown, summary, keyval):
+    from . import payable_classifications
+    from .cost_models import PayableClassificationRecord, ShipmentPayableTax
+
+    rate = Decimal(breakdown['confirm_tax_rate'])
+    basis = Decimal(breakdown['source_net_basis'])
+    tax = Decimal(breakdown['source_tax_amount'])
+    previous = PayableClassificationRecord.objects.filter(
+        tenant_id=actor.tenant_id, kind='shipment', shipment=shipment).first()
+    reason = '对公付款审批自动确认供应商税额'
+    with domain_write():
+        snapshot = ShipmentPayableTax.objects.create(
+            tenant=actor.tenant, created_by=actor, shipment=shipment, taxable_amount=basis,
+            tax_rate=rate, added_tax_amount=tax, reason=reason)
+        services._event(actor, snapshot, 'shipment_payable_tax_confirmed', keyval,
+            {'request_id': row.pk, 'tax_rate': str(rate), 'taxable_amount': str(basis), 'added_tax_amount': str(tax)})
+    payable_classifications.save_classification(actor, 'shipment', shipment.pk, {
+        'corporate_amount': basis + tax,
+        'personal_amount': previous.personal_amount if previous else Decimal(0),
+        'currency': row.currency or 'CNY', 'reason': reason,
+        'expected_version': previous.version if previous else 0,
+        'expected_source_version': shipment.version,
+        'expected_payable_amount': Decimal(summary['due_amount']) + tax,
+    }, keyval)
+
+
 class CreateInput(serializers.Serializer):
     currency=serializers.RegexField(r'^[A-Z]{3}$',required=False)
     amount=serializers.DecimalField(max_digits=24,decimal_places=4,min_value=Decimal('.0001'))
+    payment_nature=serializers.ChoiceField(('corporate','personal'),required=False)
+    amount_basis=serializers.ChoiceField(('gross','net'),required=False)
+    expected_gross_amount=serializers.DecimalField(max_digits=24,decimal_places=4,min_value=Decimal('.0001'),required=False)
     payee_account_id=serializers.IntegerField(min_value=1)
     fee_item_id=serializers.IntegerField(min_value=1,required=False)
     reason=serializers.CharField(max_length=10000)
@@ -124,6 +172,8 @@ class RequestAPI(InternalAPI):
             return Response({'data':request_data(actor,replay)})
         account=costs.PayeeAccount.objects.filter(tenant_id=actor.tenant_id,active=True,pk=p['payee_account_id'],**costs._payee_owner(kind,obj)).first()
         if not account: raise ValidationError('收款账户无效或不属于当前业务对象。')
+        if p.get('payment_nature') and p['payment_nature'] != account.nature:
+            raise ValidationError({'payee_account_id': '收款账户与选择的付款性质不一致。'})
         confirmed_currency=costs.validate_payment_currency(actor,kind,obj,p.get('currency',''))
         fee_item=None; item={}; amt=p['amount']
         if kind in ('batch','inbound'):
@@ -136,9 +186,20 @@ class RequestAPI(InternalAPI):
                 reserved=PR.objects.filter(tenant_id=actor.tenant_id,kind=kind,source_id=pk,fee_item=fee_item,status='submitted',payment__isnull=True).exclude(approval__status__in=['rejected','withdrawn']).exclude(batch__approval__status__in=['rejected','withdrawn']).aggregate(s=Sum('amount'))['s'] or Decimal(0)
                 if amt + paid + reserved > Decimal(item['amount']): raise ValidationError('申请金额超过该费用项目剩余应付金额。')
         summary=costs.payment_summary(actor,kind,pk)['summary']
-        if summary['remaining_amount'] is None or amt>Decimal(summary['remaining_amount']): raise ValidationError('申请金额超过当前应付余额。')
+        if p.get('amount_basis') == 'net':
+            if kind != 'shipment' or account.nature != 'corporate':
+                raise ValidationError({'amount_basis': '只有对公供应商货款可按未税金额计税申请。'})
+            item['corporate_tax'] = corporate_request_amount(amt, summary)
+            amt = Decimal(item['corporate_tax']['gross_amount'])
+            if p.get('expected_gross_amount', amt) != amt:
+                raise ValidationError('正报金额已变化，请刷新货款后重新申请。')
+        remaining = Decimal(summary['remaining_amount']) if summary['remaining_amount'] is not None else None
+        breakdown = item.get('corporate_tax', {})
+        if remaining is not None and 'confirm_tax_rate' in breakdown:
+            remaining += Decimal(breakdown['source_tax_amount'])
+        if remaining is None or amt > remaining: raise ValidationError('申请金额超过当前应付余额。')
         reserved=PR.objects.filter(tenant_id=actor.tenant_id,kind=kind,source_id=pk,status='submitted',payment__isnull=True).exclude(approval__status__in=['rejected','withdrawn']).exclude(batch__approval__status__in=['rejected','withdrawn']).aggregate(s=Sum('amount'))['s'] or Decimal(0)
-        if amt+reserved>Decimal(summary['remaining_amount']): raise ValidationError('已有未结申请占用余额。')
+        if amt + reserved > remaining: raise ValidationError('已有未结申请占用余额。')
         plan = None; plan_line = None
         if p.get('plan_line_id') is not None or p.get('plan_version') is not None:
             if kind not in ('shipment', 'domestic_freight', 'batch') or not p.get('plan_line_id') or p.get('plan_version') is None:
@@ -180,6 +241,15 @@ class RequestAction(InternalAPI):
                 reserved_item=PR.objects.filter(tenant_id=actor.tenant_id,kind=kind,source_id=pk,fee_item_id=row.fee_item_id,status='submitted',payment__isnull=True).exclude(pk=row.pk).exclude(approval__status__in=['rejected','withdrawn']).exclude(batch__approval__status__in=['rejected','withdrawn']).aggregate(s=Sum('amount'))['s'] or Decimal(0)
                 if row.amount+paid+reserved_item>item_amount: raise ValidationError('申请金额超过该费用项目剩余应付金额。')
             summary=costs.payment_summary(actor,kind,pk)['summary']
+            breakdown = row.item_snapshot.get('corporate_tax')
+            if breakdown:
+                current = corporate_request_amount(Decimal(breakdown['net_amount']), summary)
+                comparable = {k: v for k, v in breakdown.items() if k != 'confirm_tax_rate'}
+                if current not in (breakdown, comparable) or Decimal(current['gross_amount']) != row.amount:
+                    raise ValidationError('单据计税口径已变化，请取消草稿后重新申请。')
+                if 'confirm_tax_rate' in current:
+                    confirm_corporate_tax(actor, obj, row, current, summary, keyval)
+                    summary = costs.payment_summary(actor, kind, pk)['summary']
             reserved=PR.objects.filter(tenant_id=actor.tenant_id,kind=kind,source_id=pk,status='submitted',payment__isnull=True).exclude(pk=row.pk).exclude(approval__status__in=['rejected','withdrawn']).exclude(batch__approval__status__in=['rejected','withdrawn']).aggregate(s=Sum('amount'))['s'] or Decimal(0)
             if summary['remaining_amount'] is None or row.amount+reserved>Decimal(summary['remaining_amount']): raise ValidationError('申请金额超过可用余额（含其他未结申请）。')
             number=obj.number; suffix=row.account_snapshot.get('account_number','')[-4:]
@@ -188,7 +258,8 @@ class RequestAction(InternalAPI):
             flow, flows = resolve_payment_flow(actor=actor, sources=[(kind, pk, row.amount, nature, True)])
             snapshot = {'rule_id': flow.pk, 'flow_key': flow.flow_key, 'version': flow.version, 'payment_kind': kind, 'nature': nature, 'department_key': flow.department_key, 'notify_feishu': flow.notify_feishu, 'minimum_amount': str(flow.minimum_amount), 'maximum_amount': str(flow.maximum_amount) if flow.maximum_amount is not None else None, 'reviewer_id': flow.reviewer_id,
                 'rules': [{'rule_id': r.pk, 'flow_key': r.flow_key, 'version': r.version, 'payment_kind': r.payment_kind, 'nature': r.nature, 'department_key': r.department_key, 'minimum_amount': str(r.minimum_amount), 'maximum_amount': str(r.maximum_amount) if r.maximum_amount is not None else None} for r in flows]}
-            approval=ApprovalRequest.objects.create(tenant=actor.tenant,approval_type='finance',title=f'付款申请 {number}',business_type='supply_payment_request',business_id=str(row.pk),requested_by=actor,designated_reviewer=flow.reviewer,workflow_snapshot=snapshot,reason=f'{number} {row.amount} {row.account_snapshot.get("nature","")} 尾号{suffix}；项目：{row.item_snapshot.get("name", "整单款项")}；申请理由：{row.reason} /supply-chain/costs?kind={kind}&id={pk}&payment_request_id={row.pk}',idempotency_key=f'payreq:{row.pk}')
+            tax_note = f'；未税 {breakdown["net_amount"]}；税额 {breakdown["tax_amount"]}；正报金额 {breakdown["gross_amount"]}' if breakdown else ''
+            approval=ApprovalRequest.objects.create(tenant=actor.tenant,approval_type='finance',title=f'付款申请 {number}',business_type='supply_payment_request',business_id=str(row.pk),requested_by=actor,designated_reviewer=flow.reviewer,workflow_snapshot=snapshot,reason=f'{number} {row.amount} {row.account_snapshot.get("nature","")} 尾号{suffix}；项目：{row.item_snapshot.get("name", "整单款项")}{tax_note}；申请理由：{row.reason} /supply-chain/costs?kind={kind}&id={pk}&payment_request_id={row.pk}',idempotency_key=f'payreq:{row.pk}')
             row.approval=approval; row.status='submitted'; row.version+=1
             with domain_write(): row.save(update_fields=['approval','status','version'])
             from apps.workflows.services import write_workflow_audit

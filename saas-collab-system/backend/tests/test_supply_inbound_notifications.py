@@ -111,3 +111,73 @@ def test_group_send_uses_chat_target_and_uuid_no_real_network():
    return response
  service.http=Http();service._tenant_token=lambda connection:'fake-token'
  assert service.send_group(SimpleNamespace(domain='feishu'),'oc_test',{'test':'card'},'stable-key')=='om_test'
+
+
+def test_card_groups_arrival_skus_by_spu_and_omits_transit(monkeypatch):
+    from types import SimpleNamespace
+    inbound = SimpleNamespace(pk=1, confirmed_at=timezone.now())
+    styles = [
+        {'spu_id': i, 'spu_name': f'款式{i}', 'spu_code': f'NEW{i}', 'legacy_spu_code': f'OLD{i}',
+         'received_quantity': 2, 'image_sku_id': i}
+        for i in range(1, 12)
+    ]
+    rows = styles + [{**styles[0], 'received_quantity': 3}, {**styles[1], 'received_quantity': 0}]
+    transit = [
+        {'product_name': f'在途{i}', 'spu_code': f'T{i}', 'legacy_spu_code': f'OT{i}', 'image_sku_id': i+20}
+        for i in range(5)
+    ]
+    def detail(_, *, transit_limit):
+        assert transit_limit == 0
+        return {'inbound': {'number': 'IN', 'batch_number': 'DB', 'warehouse_name': '仓', 'country_name': '菲律宾'},
+                'lines': rows, 'summary': {'received_quantity': 25},
+                'transit_styles': transit, 'transit_style_total': 7}
+    monkeypatch.setattr(n, 'notice_detail_data', detail)
+    monkeypatch.setattr(n, 'system_url', lambda path: 'https://example.test'+path)
+    card = n.snapshot(inbound, None)
+    texts = [element['text']['content'] for element in card['elements'] if 'text' in element]
+    assert sum('新SPU NEW' in text for text in texts) == 10
+    assert sum('新SPU T' in text for text in texts) == 0
+    assert any('新SPU NEW1 · 旧SPU OLD1 · 实收 5 件' in text for text in texts)
+    assert '另有 1 款到货，详见明细。' in texts
+    assert not any('在途' in text for text in texts)
+    assert len(card['_image_rows']) == 10
+
+
+def test_notice_image_requires_login_and_shown_source(world, monkeypatch):
+    from django.http import HttpResponse
+    from rest_framework.test import APIClient
+    from apps.supply_chain import internal_product_images
+    _, _, inbound = complete(world)
+    sku = world['sku']
+    sku.image_url = 'https://example.test/sku.jpg'
+    sku.save(update_fields=['image_url'])
+    viewer = client(internal_user(world, 'notice-image-reader', scope='own'))
+    detail = viewer.get(BASE+f'inbound-notices/{inbound["id"]}/')
+    assert detail.status_code == 200
+    path = detail.data['data']['items'][0]['image_path']
+    assert path.endswith(f'/arrival/{sku.pk}/image/')
+    monkeypatch.setattr(internal_product_images, '_image_file', lambda *args: HttpResponse(b'photo', content_type='image/jpeg'))
+    assert viewer.get(path).content == b'photo'
+    assert viewer.get(path.replace(f'/{sku.pk}/', f'/{world["sku_b"].pk}/')).status_code == 404
+    assert APIClient().get(path).status_code in (401, 403)
+
+
+def test_card_image_upload_keeps_text_when_single_photo_fails(world, monkeypatch):
+    from io import BytesIO
+    from PIL import Image
+    from apps.supply_chain import supplier_product_images
+
+    first, second = world['sku'], world['sku_b']
+    image = BytesIO()
+    Image.new('RGB', (12, 12)).save(image, format='JPEG')
+    mocked_images = {sku.pk: {'body': image.getvalue()} for sku in (first, second)}
+    monkeypatch.setattr(supplier_product_images, 'load_product_images', lambda *args: mocked_images)
+    service = Mock()
+    service.upload_image.side_effect = ['img_v3_mock', RuntimeError('upload unavailable')]
+    elements = [{'tag': 'div', 'text': n._plain(text)} for text in ['First', 'Second']]
+    payload = {'elements': elements, '_image_rows': {'0': first.pk, '1': second.pk}}
+    rendered = n._resolve_card_images(payload, first.tenant_id, service, object())
+    assert '_image_rows' not in rendered
+    assert rendered['elements'][0]['extra']['img_key'] == 'img_v3_mock'
+    assert rendered['elements'][1] == elements[1]
+    assert 'extra' not in elements[0]

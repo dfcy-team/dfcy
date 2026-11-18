@@ -139,6 +139,7 @@
 <script setup>
 import { computed, defineComponent, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { House, Box, Van, Goods, Shop, TrendCharts, Promotion, DataAnalysis, ShoppingCart, User, Connection, Monitor, Lock, Wallet, Document, Folder, Setting, Guide, Link } from '@element-plus/icons-vue';
 import { ElMenu, ElMenuItem, ElMessage, ElMessageBox, ElSubMenu } from 'element-plus';
 import 'element-plus/theme-chalk/el-container.css';
 import 'element-plus/theme-chalk/el-aside.css';
@@ -473,18 +474,29 @@ function handlePasswordChanged() {
   router.replace('/login');
 }
 
+const menuIcons = new Map(Object.entries({
+  工作台: House, 产品开发: Box, 供应链协同: Van, 库存管理: Goods,
+  全球刊登: Shop, 经营分析: TrendCharts, 营销管理: Promotion, 经营决策: DataAnalysis,
+  销售管理: ShoppingCart, 达人管理: User, 流程协同: Connection, RPA协同: Monitor,
+  授权中心: Lock, 财务中心: Wallet, 报表中心: Document, 基础档案: Folder,
+  系统管理: Setting, 治理与试点: Guide, API数据接入: Link
+}));
+
 const AppMenu = defineComponent({
   props: { items: { type: Array, required: true } },
   emits: ['select'],
   setup(props, { emit }) {
-    const renderItem = (item) => {
+    const renderItem = (item, topLevel = false) => {
+      const label = () => topLevel
+        ? [h('span', { class: 'menu-entry-icon', 'aria-hidden': 'true' }, [h(menuIcons.get(item.label) || Document)]), h('span', { class: 'menu-entry-label' }, item.label)]
+        : item.label;
       if (item.children) {
         return h(
           ElSubMenu,
           { index: item.label },
           {
-            title: () => item.label,
-            default: () => item.children.map(renderItem)
+            title: label,
+            default: () => item.children.map(child => renderItem(child))
           }
         );
       }
@@ -495,13 +507,13 @@ const AppMenu = defineComponent({
           if (navigationFailure) menuRenderVersion.value += 1;
           else emit('select');
         }
-      }, () => item.label);
+      }, label);
     };
     return () => h(ElMenu, {
       key: `${route.path}:${menuRenderVersion.value}`,
       defaultActive: flattenMenuItems(props.items).find(item => item.path === route.path)?.navigationIndex || route.path,
       class: 'menu'
-    }, () => props.items.map(renderItem));
+    }, () => props.items.map(item => renderItem(item, true)));
   }
 });
 </script>
@@ -519,8 +531,8 @@ const AppMenu = defineComponent({
   z-index: 20;
   width: 248px;
   height: 100vh;
-  border-right: 1px solid #263449;
-  background: #101827;
+  border-right: 1px solid #293446;
+  background: #171e2d;
 }
 
 .navigation-surface {
@@ -528,49 +540,51 @@ const AppMenu = defineComponent({
   flex-direction: column;
   height: 100%;
   color: #cbd5e1;
-  background: #101827;
+  background: #171e2d;
 }
 
-.sidebar-menu-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.sidebar-menu-scroll { padding: 14px 10px; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 
 .brand {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  height: 64px;
+  height: 70px;
   padding: 0 20px;
-  border-bottom: 1px solid #263449;
-  background: #0b1220;
+  border-bottom: 1px solid #293446;
+  background: #171e2d;
 }
 
 .brand strong { color: #f8fafc; font-size: 16px; }
 .brand { flex-shrink: 0; }
 
 :global(.navigation-drawer) {
-  --el-drawer-bg-color: #101827;
-  background: #101827;
+  --el-drawer-bg-color: #171e2d;
+  background: #171e2d;
 }
 
 :global(.navigation-drawer .el-drawer__body) {
   padding: 0;
-  background: #101827;
+  background: #171e2d;
 }
 
 :deep(.navigation-surface .menu) {
   --el-menu-active-color: #ffffff;
-  --el-menu-bg-color: #101827;
+  --el-menu-bg-color: #171e2d;
   --el-menu-border-color: transparent;
   --el-menu-hover-bg-color: #1e293b;
   --el-menu-hover-text-color: #f8fafc;
-  --el-menu-item-height: 46px;
-  --el-menu-sub-item-height: 42px;
+  --el-menu-item-height: 40px;
+  --el-menu-sub-item-height: 36px;
   border-right: 0;
-  background: #101827;
+  background: #171e2d;
 }
 
 :deep(.navigation-surface .menu .el-menu-item),
 :deep(.navigation-surface .menu .el-sub-menu__title) {
   color: #cbd5e1;
+  border-radius: 8px;
+  margin-bottom: 3px;
 }
 
 :deep(.navigation-surface .menu .el-menu-item:hover),
@@ -586,21 +600,25 @@ const AppMenu = defineComponent({
 :deep(.navigation-surface .menu .el-menu-item.is-active:focus) {
   color: #ffffff;
   font-weight: 600;
-  background: #1d4ed8;
+  background: #3b4960;
 }
 
 :deep(.navigation-surface .menu .el-sub-menu.is-opened > .el-sub-menu__title),
 :deep(.navigation-surface .menu .el-sub-menu.is-active > .el-sub-menu__title) {
   color: #f8fafc;
-  background: #172235;
+  background: #232d3f;
 }
 
-:deep(.navigation-surface .menu .el-sub-menu .el-menu) {
-  background: #0b1220;
+:deep(.navigation-surface .menu .el-sub-menu > .el-menu) {
+  background: transparent;
+  margin: 4px 0 7px 20px;
+  padding-left: 10px;
+  border-left: 1px solid #3b4960;
 }
 
 :deep(.navigation-surface .menu .el-sub-menu .el-menu-item) {
   color: #b7c5d6;
+  padding-left: 12px;
 }
 
 :deep(.navigation-surface .menu .el-sub-menu .el-menu-item:hover),
@@ -613,8 +631,28 @@ const AppMenu = defineComponent({
 :deep(.navigation-surface .menu .el-sub-menu .el-menu-item.is-active:hover),
 :deep(.navigation-surface .menu .el-sub-menu .el-menu-item.is-active:focus) {
   color: #ffffff;
-  background: #1e40af;
+  background: #3b4960;
 }
+
+:deep(.navigation-surface .menu > .el-menu-item),
+:deep(.navigation-surface .menu > .el-sub-menu > .el-sub-menu__title) {
+  padding-left: 12px;
+  gap: 10px;
+}
+
+:deep(.navigation-surface .menu > .el-sub-menu > .el-sub-menu__title) { padding-right: 34px; }
+:deep(.menu-entry-label) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+:deep(.menu-entry-icon) {
+  display: inline-flex;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  color: #aab9ca;
+}
+
+:deep(.menu-entry-icon svg) { width: 100%; height: 100%; }
+:deep(.el-menu-item.is-active .menu-entry-icon) { color: inherit; }
 
 :deep(.navigation-surface .menu .el-sub-menu__icon-arrow) {
   color: #94a3b8;
@@ -722,7 +760,7 @@ const AppMenu = defineComponent({
 .route-tab-group.is-active .route-tab__close { color: #dbe4ef; }
 .route-tab-group.is-active .route-tab__close:hover { color: #fff; background: #475569; }
 .route-tab:focus-visible, .route-tab__close:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
-.sidebar-menu-scroll { scrollbar-width: thin; scrollbar-color: #475569 #101827; }
+.sidebar-menu-scroll { scrollbar-width: thin; scrollbar-color: #475569 #171e2d; }
 
 .header-user__identity {
   display: flex;

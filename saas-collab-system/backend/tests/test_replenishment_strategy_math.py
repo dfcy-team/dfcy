@@ -7,9 +7,12 @@ import pytest
 
 from apps.supply_chain.replenishment import (
     replenishment_quantities,
+    _replenishment_risk,
+    _supply_action,
     target_stock_quantity,
     weighted_daily_sales,
     evaluate_replenishment_row,
+    recognized_reference,
 )
 
 
@@ -89,3 +92,64 @@ def test_unknown_warehouse_demand_does_not_become_a_known_zero():
     assert result['submitted'] is None
     assert result['draft_reserved'] is None
     assert result['suggested_quantity'] is None
+
+
+def test_forecast_shortage_is_risk_even_when_no_purchase_quantity_is_suggested():
+    row = _exact_row({30: 30})
+    row['available_stock'] = 3
+    row['pipeline']['eta_rows'] = [{'expected_date': '2026-11-22', 'quantity': 10}]
+    strategy = SimpleNamespace(sales_model='ordinary', sales_weights={},
+                               lead_days=2, safety_days=3, cycle_days=2)
+    result = evaluate_replenishment_row(row, strategy,
+        sales_end=date(2026, 11, 16), today=date(2026, 11, 17))
+    timeline = result['timeline']
+    assert timeline['first_shortage_date'] == '2026-11-21'
+    assert timeline['arrival_gap'] is False
+    assert result['suggested_quantity'] == 0
+    assert _replenishment_risk(unknown=False, forecast=Decimal('1'), stock=Decimal('3'),
+        timeline=timeline) == 'arrival_gap'
+    assert _supply_action(timeline, 0) == 'expedite_or_transfer'
+
+
+def test_purchase_action_requires_positive_quantity_and_no_shortage_stays_normal():
+    shortage = {'arrival_gap': False, 'first_shortage_date': '2026-11-21',
+                'needs_replenishment': False}
+    assert _supply_action(shortage, 4) == 'purchase_and_expedite'
+    no_shortage = {'arrival_gap': False, 'first_shortage_date': None,
+                   'needs_replenishment': False}
+    assert _replenishment_risk(unknown=False, forecast=Decimal('1'), stock=Decimal('30'),
+        timeline=no_shortage) == 'normal'
+    assert _supply_action(no_shortage, 0) is None
+
+
+def test_ordinary_calculation_only_requires_the_weighted_window():
+    row = _exact_row({30: 30})
+    row['sales_windows'][0].update(units=None, coverage_complete=False)
+    strategy = SimpleNamespace(sales_model='ordinary', lead_days=10, cycle_days=5, safety_days=5)
+    result = evaluate_replenishment_row(row, strategy, sales_end=date(2026, 1, 1), today=date(2026, 1, 2))
+    assert result['suggested_quantity'] == 20
+
+
+def test_scope_gap_keeps_verified_observations_separate_from_order_quantity():
+    row = _exact_row({30: 30})
+    row['sales_windows'][2].update(recognized_units=30, coverage_complete=False)
+    row.update(inventory_complete=False, available_stock=None,
+        warehouses=[{'available_qty': '4'}, {'available_qty': None, 'last_synced_qty': '99'}],
+        blocking_issues=['collection_coverage_unproven', 'unmapped_inventory', 'stale_inventory_snapshot'])
+    strategy = SimpleNamespace(sales_model='ordinary', lead_days=10, cycle_days=5, safety_days=5)
+    today = date(2026, 1, 2)
+    result = evaluate_replenishment_row(row, strategy, sales_end=date(2026, 1, 1), today=today)
+    reference = recognized_reference(row, strategy, calculated=result, today=today)
+    assert result['suggested_quantity'] is None
+    assert reference['has_observed_basis'] is True
+    assert reference['observed_available_stock'] == '4'
+    assert reference['scope_issues'] == ['collection_coverage_unproven', 'unmapped_inventory']
+    assert reference['item_issues'] == ['stale_inventory_snapshot']
+    assert reference['quantity_reference'] == 16
+    assert reference['can_create_order'] is False
+
+    row['sales_windows'][2]['recognized_units'] = 0
+    result = evaluate_replenishment_row(row, strategy, sales_end=date(2026, 1, 1), today=today)
+    reference = recognized_reference(row, strategy, calculated=result, today=today)
+    assert reference['quantity_reference'] is None
+    assert reference['has_observed_basis'] is False

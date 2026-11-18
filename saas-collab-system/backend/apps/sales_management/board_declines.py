@@ -24,7 +24,7 @@ MAX_STORE_ID = 9_223_372_036_854_775_807
 
 
 def _params(request):
-    allowed = {"date_from", "date_to", "platform", "region", "store_id", "currency", "metric"}
+    allowed = {"date_from", "date_to", "platform", "region", "store_id", "store_ids", "currency", "metric"}
     if set(request.query_params) - allowed or any(
         len(request.query_params.getlist(key)) != 1 for key in request.query_params
     ):
@@ -45,6 +45,8 @@ def _params(request):
     if days > MAX_DAYS:
         raise ValidationError({"date_to": f"日期范围最多 {MAX_DAYS} 天。"})
 
+    from .realtime_board import validate_board_store_ids
+    store_ids = validate_board_store_ids(request.query_params)
     store_id = request.query_params.get("store_id", "")
     if store_id and (
         not store_id.isascii() or not store_id.isdecimal() or len(store_id) > 19
@@ -66,7 +68,7 @@ def _params(request):
     return {
         "date_from": start, "date_to": end, "previous_from": previous_from,
         "previous_to": previous_to, "days": days, "platform": platform or None,
-        "region": region or None, "store_id": int(store_id) if store_id else None,
+        "region": region or None, "store_ids": store_ids, "store_id": int(store_id) if store_id else None,
         "currency": currency, "metric": metric,
     }
 
@@ -96,6 +98,8 @@ def _payload(request, p):
     orders = filter_sales_queryset(request.user, "sales_management.skus.view", orders, permission_cache=cache)
     if p["platform"]:
         orders = orders.filter(platform__platform_type=p["platform"])
+    if p["store_ids"]:
+        orders = orders.filter(store_id__in=p["store_ids"])
     if p["store_id"]:
         orders = orders.filter(store_id=p["store_id"])
     if p["region"]:

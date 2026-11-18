@@ -7,11 +7,12 @@ from apps.integrations import sync_dispatch_policy as policy
 def test_video_queue_is_selected_from_job_not_key(monkeypatch):
     runs, jobs = MagicMock(), MagicMock()
     runs.filter.return_value.exists.return_value = False
-    jobs.filter.return_value.exists.return_value = True
+    jobs.filter.side_effect = lambda **kwargs: SimpleNamespace(
+        exists=lambda: kwargs.get('resource_type') == 'video_metrics')
     monkeypatch.setattr(policy.SyncRun, 'objects', runs)
     monkeypatch.setattr(policy.SyncJob, 'objects', jobs)
     assert policy.queue_for_run(265, 'arbitrary') == 'sync-video'
-    jobs.filter.assert_called_once_with(pk=265, resource_type='video_metrics')
+    jobs.filter.assert_any_call(pk=265, resource_type='video_metrics')
 
 
 def test_history_keeps_its_queue(monkeypatch):

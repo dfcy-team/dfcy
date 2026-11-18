@@ -1,7 +1,7 @@
 from datetime import date
 """Daily, permission-scoped replenishment snapshots backed by existing job rows.
 
-Wire ``generate_daily_replenishments`` to a 10:40 Asia/Shanghai scheduler and
+Wire ``generate_daily_replenishments`` to a 02:30 Asia/Shanghai scheduler and
 ``DailyLatest`` / ``DailyRows`` to read-only routes in the host application.
 """
 from datetime import time, timedelta
@@ -29,6 +29,8 @@ from apps.supply_chain.permissions import MANAGE as SC_MANAGE, VIEW as SC_VIEW
 from apps.commerce.supply_pipeline import SUMMARY_PERMISSION
 
 from apps.supply_chain.replenishment_jobs import _serialize, _validated_config
+
+from .replenishment_schedule import in_night_window, night_deadline, SCHEDULE_LABEL
 
 TZ = ZoneInfo("Asia/Shanghai")
 DAILY_TTL = timedelta(days=7)
@@ -112,7 +114,7 @@ def daily_key(actor, country_id, strategy_id, strategy_version, *, analysis_mode
 
 def _within_schedule(now=None):
     local_now = (now or timezone.now()).astimezone(TZ)
-    return local_now.time() >= time(10, 40)
+    return in_night_window(local_now)
 
 
 def _membership_contexts(user, now):
@@ -213,15 +215,20 @@ def _enqueue_daily(actor, country, strategy, candidate_ids, config, signature, k
         active_tenant = ReplenishmentCalculationJob.objects.filter(tenant_id=actor.tenant_id,
             status__in=["queued", "running"], hard_deadline__gt=now)
         _, actor_private = _effective_read_policy(actor, _scope_descriptor(actor)[0], country.pk)
-        if active_tenant.count() >= 10 or (actor_private and active_tenant.filter(requested_by=actor).count() >= 2):
+        if active_tenant.count() >= 1 or (actor_private and active_tenant.filter(requested_by=actor).count() >= 2):
+            return None
+        # A new dimension needs time for several SKU chunks. Existing work may
+        # still finish inside this window.
+        submission_time = timezone.now()
+        if not in_night_window(submission_time) or night_deadline(submission_time) - submission_time < timedelta(minutes=5):
             return None
         daily_config = {**config, "daily": {"key": key, "day": day.isoformat(), "attempt": attempt}}
         job = ReplenishmentCalculationJob.objects.create(tenant_id=actor.tenant_id, requested_by=actor,
             country=country, strategy=strategy, strategy_version=strategy.version, business_date=day,
             config=daily_config, candidate_ids=candidate_ids, permission_signature=signature,
             status="queued", total=len(candidate_ids), processed=0, next_offset=0,
-            counts={"positive": 0, "zero": 0, "unknown": 0, "awaiting_procurement": 0, "arrival_gap": 0},
-            expires_at=now + DAILY_TTL, hard_deadline=now + timedelta(hours=2))
+            counts={"positive": 0, "zero": 0, "unknown": 0, "awaiting_procurement": 0, "arrival_gap": 0, "observed": 0},
+            expires_at=now + DAILY_TTL, hard_deadline=night_deadline(now))
         transaction.on_commit(lambda: jobs._enqueue(job.pk))
         return job
 
@@ -233,13 +240,13 @@ def models_F(field):
 
 
 def generate_daily_replenishments(*, now=None, limit=MAX_JOBS_PER_RUN, business_day=None):
-    """Queue missing daily standard-country snapshots; intended for 10:40 scheduler only."""
+    """Queue missing daily standard-country snapshots; intended for the 02:30–07:30 night window."""
     now = now or timezone.now()
     day = date.fromisoformat(business_day) if isinstance(business_day, str) else (business_day or business_date())
     if (business_date() - day).days not in (0, 1):
         raise ValueError("Only current or previous business day may run")
-    if day == business_date() and not _within_schedule(now):
-        return {"queued": 0, "reused": 0, "skipped": 0, "reason": "before_10_40"}
+    if not _within_schedule(now):
+        return {"queued": 0, "reused": 0, "skipped": 0, "reason": "outside_night_window"}
     actor_model = get_user_model()
     users = actor_model.objects.filter(is_active=True, user_type="internal").order_by("tenant_id", "pk")
     queued = reused = skipped = errors = pending = failed_dimensions = 0
@@ -248,7 +255,7 @@ def generate_daily_replenishments(*, now=None, limit=MAX_JOBS_PER_RUN, business_
     for user in users.iterator():
         for membership_id in _membership_contexts(user, now):
             try:
-                country_rows = country_decisions.countries_for(user).filter(pk__in=ReplenishmentStrategy.objects.filter(tenant_id=user.tenant_id, active=True).values('country_id')).filter(pk__in=ReplenishmentStrategy.objects.filter(tenant_id=user.tenant_id,active=True).values("country_id"))
+                country_rows = country_decisions.countries_for(user).filter(pk__in=ReplenishmentStrategy.objects.filter(tenant_id=user.tenant_id, active=True).values('country_id'))
                 scope_state = _scope_descriptor(user)
             except (PermissionDenied, NotFound):
                 skipped += 1
@@ -356,7 +363,7 @@ def _serialize_daily(job, refresh_status="已完成"):
     data["updated_at"] = meta.get("calculated_at") or job.updated_at.isoformat()
     data["calculated_at"] = data["updated_at"]
     data["daily_refresh_status"] = refresh_status
-    data["revalidation_note"] = (f"每日北京时间10:40自动更新；本结果业务日期：{job.business_date.isoformat()}；"
+    data["revalidation_note"] = (f"{SCHEDULE_LABEL}自动更新；本结果业务日期：{job.business_date.isoformat()}；"
                                   f"生成时间：{data['calculated_at']}；后台更新状态：{refresh_status}。"
                                   "建议在提交采购前按SKU复核实时数据。")
     return data
@@ -388,8 +395,6 @@ def daily_job_for_actor(actor, pk):
 
 class DailyLatest(ReadAPI):
     """Read-only latest complete snapshot. Never creates or modifies a calculation job."""
-    http_method_names = ["get", "head", "options"]
-
     def get(self, request):
         mode = request.query_params.get("analysis_mode", "country")
         platform_input = request.query_params.get("platform_type", "")
@@ -408,7 +413,7 @@ class DailyLatest(ReadAPI):
             base = base.filter(config__parameters__platform_type=normalized_platform)
         job = _latest_complete(base, now)
         if not job:
-            raise NotFound("暂无已完成的每日补货参考，请等待10:40自动生成后再查看。")
+            raise NotFound("暂无已完成的每日补货参考，请等待夜间02:30自动生成后再查看。")
         active_refresh = base.filter(status__in=["queued", "running"], hard_deadline__gt=now).order_by("-created_at").first()
         today = business_date()
         today_jobs = base.filter(config__daily__day=today.isoformat()).order_by("-created_at")
@@ -420,7 +425,7 @@ class DailyLatest(ReadAPI):
         elif failed_today:
             refresh_status = "当日生成失败，继续显示上次结果"
         elif not _within_schedule(now):
-            refresh_status = "等待今日10:40更新"
+            refresh_status = "等待下次夜间02:30更新"
         else:
             attempts = [int((_daily_meta(SimpleNamespace(config=value)) or {}).get("attempt", 0))
                         for value in today_jobs.values_list("config", flat=True)]
@@ -438,39 +443,16 @@ class DailyLatest(ReadAPI):
 
 class DailyRows(jobs.ReplenishmentJobRows):
     """Daily snapshot row reader; bypasses owner-only manual job lookup, never mutates."""
-    http_method_names = ["get", "head", "options"]
-
     def get_job(self, request, pk):
         return daily_job_for_actor(request.user, pk)
 
-    def get(self, request, pk):
-        # Restrict rows to both the original candidate set and today's visible SKU scope.
-        job = self.get_job(request, pk)
+    default_quantity_filter = "observed"
+
+    def row_queryset(self, request, job):
+        # Intersect the original candidates with the requesting user's current permissions.
         visible_ids = country_decisions.skus_for(request.user, job.country).values_list("pk", flat=True)
-        from django.db.models import Q
-        try:
-            limit = int(request.query_params.get("limit", 20)); offset = int(request.query_params.get("offset", 0))
-        except (TypeError, ValueError):
-            raise ValidationError("分页参数无效。")
-        if not 1 <= limit <= 20 or offset < 0:
-            raise ValidationError("每页最多20条，offset须为非负数。")
-        quantity_filter = request.query_params.get("quantity_filter", "positive")
-        if quantity_filter not in {"positive", "all", "zero", "unknown"}:
-            raise ValidationError({"quantity_filter": "筛选值无效。"})
-        qs = ReplenishmentCalculationRow.objects.filter(job=job, sku_id__in=job.candidate_ids).filter(sku_id__in=visible_ids)
-        if quantity_filter == "positive": qs = qs.filter(suggested_quantity__gt=0)
-        elif quantity_filter == "zero": qs = qs.filter(suggested_quantity=0)
-        elif quantity_filter == "unknown": qs = qs.filter(suggested_quantity__isnull=True)
-        risk = request.query_params.get("risk_filter", "").strip()
-        if risk and risk not in {"awaiting_procurement", "arrival_gap", "data_check", "new_or_zero_sales", "out_of_stock", "replenish", "normal", "manual_review"}:
-            raise ValidationError({"risk_filter": "风险筛选值无效。"})
-        if risk == "awaiting_procurement": qs = qs.filter(has_submitted_demand=True)
-        elif risk: qs = qs.filter(risk_level=risk)
-        term = request.query_params.get("search", "").strip()
-        if term: qs = qs.filter(Q(sku_code__icontains=term) | Q(legacy_sku_code__icontains=term) | Q(product_name__icontains=term))
-        count = qs.count()
-        rows = [row.payload for row in qs.order_by("sku_code", "sku_id")[offset:offset + limit]]
-        return Response({"data": {"status": job.status, "rows": rows, "count": count,
-            "total": job.total, "processed": job.processed, "counts": job.counts,
-            "limit": limit, "offset": offset, "has_more": offset + len(rows) < count,
-            "quantity_filter": quantity_filter, "id": f"daily:{job.pk}"}})
+        return super().row_queryset(request, job).filter(
+            sku_id__in=job.candidate_ids).filter(sku_id__in=visible_ids)
+
+    def result_identity(self, job):
+        return {"id": f"daily:{job.pk}"}
