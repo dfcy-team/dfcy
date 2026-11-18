@@ -98,7 +98,7 @@ class ManualInboundSourceInput(serializers.Serializer):
 
 
 class GenerateInput(VersionInput):
-    lines = ManualInboundSourceInput(many=True, allow_empty=False)
+    lines = ManualInboundSourceInput(many=True, allow_empty=False, required=False)
     notes = serializers.CharField(max_length=10000, allow_blank=True, default='')
     warehouse_id = serializers.IntegerField(min_value=1, allow_null=True, required=False, default=None)
     reason = serializers.CharField(max_length=10000, allow_blank=True, required=False)

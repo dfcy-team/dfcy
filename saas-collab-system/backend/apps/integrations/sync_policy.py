@@ -78,7 +78,7 @@ def _successful_proof(job):
 
 
 def resolve_job_scope(job):
-    if job.resource_type == 'warehouse_order_lookup':
+    if getattr(job, 'resource_type', None) == 'warehouse_order_lookup':
         limit = (job.sync_scope or {}).get('warehouse_order_limit', 50)
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ValidationError({'warehouse_order_limit': '单轮订单上限必须为1到100的整数。'})

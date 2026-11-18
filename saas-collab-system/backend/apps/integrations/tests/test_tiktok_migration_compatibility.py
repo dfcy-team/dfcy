@@ -13,7 +13,7 @@ from django.test import SimpleTestCase, TransactionTestCase
 APP = "integrations"
 OLD = (APP, "0046_syncjob_ads_mapping")
 REPLACEMENT = (APP, "0046_syncjob_ads_mapping_compatible")
-LEAF = (APP, "0065_merge_warehouse_native_collection")
+LEAF = (APP, "0066_warehouse_order_lookup_jobs_vm")
 
 
 def migration(name):

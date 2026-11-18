@@ -64,7 +64,7 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
         if existing.status != SyncRun.Status.QUEUED or int(budget.get("sequence", 0)) != resume_sequence:
             return {"status": "not_executed", "created": False}
     delivery = getattr(self.request, "delivery_info", None) or {}
-    if (sync_job.resource_type == 'warehouse_order_lookup'
+    if (getattr(sync_job, 'resource_type', None) == 'warehouse_order_lookup'
             and delivery.get('routing_key') not in {None, 'warehouse-orders'}):
         run_readonly_sync_job.apply_async(args=(sync_job.pk, idempotency_key, resume_sequence),
                                           queue='warehouse-orders', retry=False)

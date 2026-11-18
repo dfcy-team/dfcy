@@ -47,10 +47,11 @@ def test_dashboard_domestic_freight_is_separate_and_unselected_carrier_is_visibl
     assert selected['party_id'] == carrier.pk
     assert selected['kind'] == 'domestic_freight'
     assert selected['href'] == f'/supply-chain/costs?kind=domestic_freight&id={shipment.pk}'
-    assert queue['summary']['documents'] == 2
+    assert queue['summary']['documents'] == 1
     unassigned_shipment = services.create_supplier_shipment(buyer, shipment_payload(world, seed_shipment.order,
         'domestic-no-carrier', number='SH-DOMESTIC-NONE'), idempotency_key='domestic-no-carrier')
     unassigned_shipment = mark(buyer, unassigned_shipment, key='domestic-no-carrier-arrive')
+    fee(api, 'shipment', unassigned_shipment, '3')
     unassigned = api.get(BASE + 'dashboard/queue/?queue=domestic&status=all').data['data'][0]
     assert unassigned['party_name'] == '未选择国内承运商'
     assert unassigned['party_id'] is None

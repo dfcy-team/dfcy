@@ -54,7 +54,7 @@ def test_warehouse_approval_is_not_circular_or_oauth_based(ready_warehouse_confi
     assert row["can_repair_contract"] is False
     assert row["subject_type"] == "warehouse"
     assert row["contract_approved"] is True
-    assert row["supported_readonly_resources"] == ["inventory_snapshot"]
+    assert row["supported_readonly_resources"] == ["inventory_snapshot", "warehouse_order_lookup"]
     assert "test-reference" not in str(row)
     assert "test-client" not in str(row)
     assert any(item["platform_code"] == "jifeng_wms" for item in build_platform_readiness([config])["items"])

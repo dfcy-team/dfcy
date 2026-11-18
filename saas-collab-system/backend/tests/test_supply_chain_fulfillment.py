@@ -30,7 +30,7 @@ def test_progress_requires_each_purchased_sku_not_just_total_quantity(world):
     create(client(buyer),[shipment],freight(world))
     after=progress(order)['fulfillment']
     assert after['dispatched_quantity']==2 and after['undispatched_quantity']==1
-    assert after['unreceived_quantity']==2
+    assert after['unreceived_quantity']==3  # Two shipped units and one still unshipped.
 
 
 def test_arrival_does_not_count_as_received_and_references_are_own_quantities(world):
@@ -76,8 +76,8 @@ def test_batch_progress_queries_are_bounded(world):
     with CaptureQueriesContext(connection) as batch:
         prepare_orders(orders)
     # One query each for purchase lines, shipments, dispatch allocations,
-    # inbound receipts, and purchase-remainder termination events.
-    assert len(batch) == len(single) == 5
+    # inbound receipts, inbound shortage records, and purchase-remainder termination events.
+    assert len(batch) == len(single) == 6
     assert all(row._read_fulfillment['stage']=='awaiting_shipment' for row in orders)
 
 
