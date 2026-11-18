@@ -224,7 +224,7 @@ function restoreRouteScope() {
     error.value = ''; reason.value = null;
     return true;
   }
-  const scalarKeys = ['date_from','date_to','platform','region','store_id','currency','product_id','return_view','return_date_from','return_date_to','return_platform','return_region','return_store_id','return_currency','return_metric'];
+  const scalarKeys = ['date_from','date_to','platform','region','store_id','currency','product_id','return_view','return_date_from','return_date_to','return_platform','return_region','return_store_id','return_store_ids','return_currency','return_metric'];
   if (scalarKeys.some(key => q[key] !== undefined && typeof q[key] !== 'string')) { routeScopeInvalid.value = true; error.value = '下钻参数无效，请从大屏下降排行重新进入。'; return false; }
   if (typeof q.date_from !== 'string' || typeof q.date_to !== 'string') { routeScopeInvalid.value = true; error.value = '下钻日期无效，请从大屏下降排行重新进入。'; return false; }
   const next = { date_from: q.date_from, date_to: q.date_to,
@@ -244,6 +244,7 @@ function restoreRouteScope() {
     platform: typeof q.return_platform === 'string' ? q.return_platform : next.platform,
     region: typeof q.return_region === 'string' ? q.return_region : next.region,
     store_id: typeof q.return_store_id === 'string' ? q.return_store_id : '',
+    ...(q.return_store_ids ? { store_ids: q.return_store_ids } : {}),
     currency: typeof q.return_currency === 'string' ? q.return_currency : (typeof q.currency === 'string' ? q.currency : ''),
     metric: typeof q.return_metric === 'string' ? q.return_metric : 'amount'
   } : null;
@@ -259,7 +260,7 @@ function restoreRouteScope() {
   return true;
 }
 onMounted(() => { if (restoreRouteScope() || !routeScopeInvalid.value) load(); loadFilters(); });
-watch(() => [route.query.view, route.query.date_from, route.query.date_to, route.query.platform, route.query.region, route.query.store_id, route.query.currency, route.query.product_id, route.query.return_view, route.query.return_date_from, route.query.return_date_to, route.query.return_platform, route.query.return_region, route.query.return_store_id, route.query.return_currency, route.query.return_metric], () => {
+watch(() => [route.query.view, route.query.date_from, route.query.date_to, route.query.platform, route.query.region, route.query.store_id, route.query.currency, route.query.product_id, route.query.return_view, route.query.return_date_from, route.query.return_date_to, route.query.return_platform, route.query.return_region, route.query.return_store_id, route.query.return_store_ids, route.query.return_currency, route.query.return_metric], () => {
   ++generation; controller?.abort(); loading.value = false; data.value = null; reason.value = null; reasonDialog.value?.close();
   if (!restoreRouteScope()) return;
   load();

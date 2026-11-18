@@ -5,9 +5,9 @@
       <div class="header-actions"><span class="period-label">{{ applied.date_from }} — {{ applied.date_to }}</span><button :disabled="loading" @click="load">{{ loading ? '更新中…' : '刷新' }}</button><button @click="toggleFullscreen">{{ fullscreen ? '退出全屏' : '全屏展示' }}</button></div>
     </header>
     <form class="board-filters" @submit.prevent="apply">
-      <label>平台<select v-model="draft.platform" @change="draft.store_id = ''; draft.region = ''"><option value="">全部平台</option><option v-for="item in platforms" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
-      <label>国家／站点<select v-model="draft.region" aria-label="国家／站点" @change="draft.store_id = ''"><option value="">全部授权国家</option><option v-for="item in countries" :key="item" :value="item">{{ countryLabel(item) }}</option></select></label>
-      <label>店铺<select v-model="draft.store_id"><option value="">全部授权店铺</option><option v-for="item in stores" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+      <label>平台<select v-model="draft.platform" @change="selectedShopIds = []; draft.region = ''"><option value="">全部平台</option><option v-for="item in platforms" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+      <label>国家／站点<select v-model="draft.region" aria-label="国家／站点" @change="selectedShopIds = []"><option value="">全部授权国家</option><option v-for="item in countries" :key="item" :value="item">{{ countryLabel(item) }}</option></select></label>
+      <div class="store-filter"><span>店铺</span><details><summary>{{ selectedShopIds.length ? `已选 ${selectedShopIds.length} 家店铺` : '全部授权店铺' }}</summary><div class="store-options"><button type="button" @click="selectedShopIds = []">清除选择（全部授权店铺）</button><label v-for="item in stores" :key="item.value"><input type="checkbox" :checked="selectedShopIds.includes(String(item.value))" @change="toggleShop(String(item.value), $event)" />{{ item.label }}</label></div></details></div>
       <label>开始日期<input v-model="draft.date_from" type="date" required></label><label>结束日期<input v-model="draft.date_to" type="date" required></label>
       <button class="primary" :disabled="loading">查看</button>
       <span class="filter-spacer" />
@@ -62,7 +62,16 @@ const auth = useAuthStore(), router = useRouter(), route = useRoute();
 const screen = ref<HTMLElement | null>(null), fullscreen = ref(false);
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const validIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
-const draft = reactive({ platform: '', store_id: '', region: '', date_from: today(), date_to: today() });
+const draft = reactive({ platform: '', store_id: '', store_ids: '', region: '', date_from: today(), date_to: today() });
+const selectedShopIds = computed({
+  get: () => (draft.store_ids || draft.store_id).split(',').filter(Boolean),
+  set: (ids: string[]) => { draft.store_ids = ids.join(','); draft.store_id = ''; },
+});
+function toggleShop(id: string, event: Event) {
+  selectedShopIds.value = (event.target as HTMLInputElement).checked
+    ? [...new Set([...selectedShopIds.value, id])]
+    : selectedShopIds.value.filter(value => value !== id);
+}
 const applied = ref({ ...draft }), data = shallowRef<Row | null>(null), currency = ref('CNY');
 const declinesMetric = ref('amount');
 const invalidBoardRoute = ref(false);
@@ -71,20 +80,20 @@ function restoreBoardRoute() {
   invalidBoardRoute.value = false;
   if (q.view !== 'declines') {
     if (q.view !== undefined || Object.keys(q).length) { invalidBoardRoute.value = true; error.value = '返回的大屏筛选参数无效，请重新设置查询范围。'; return false; }
-    const defaults = { platform: '', store_id: '', region: '', date_from: today(), date_to: today() };
+    const defaults = { platform: '', store_id: '', store_ids: '', region: '', date_from: today(), date_to: today() };
     Object.assign(draft, defaults); applied.value = { ...defaults };
     currency.value = ''; declinesMetric.value = 'amount'; showDeclines.value = false;
     trendMetric.value = 'sales_amount'; storeMetric.value = 'sales_amount'; skuMetric.value = 'sales_amount';
     productDimension.value = 'product_sku'; error.value = '';
     return true;
   }
-  const keys = ['date_from','date_to','store_id','region','platform','currency','metric'];
+  const keys = ['date_from','date_to','store_id','store_ids','region','platform','currency','metric'];
   if (keys.some(key => q[key] !== undefined && typeof q[key] !== 'string')) { invalidBoardRoute.value = true; error.value = '返回的大屏筛选参数无效，请重新设置查询范围。'; return false; }
   const str = (value: any) => typeof value === 'string' ? value : '';
   const from = str(q.date_from), to = str(q.date_to), store = str(q.store_id), region = str(q.region), platform = str(q.platform), cur = str(q.currency);
   const dateOk = validIsoDate(from) && validIsoDate(to) && from <= to && to < today() && (Date.parse(to) - Date.parse(from)) / 86400000 < 31;
   if (!dateOk || (store && (!/^\d{1,19}$/.test(store) || Number(store) < 1)) || (region && !/^[a-z]{2,3}$/i.test(region)) || (platform && !/^[a-z0-9_-]{1,32}$/i.test(platform)) || (cur && !/^[a-z0-9]{1,8}$/i.test(cur)) || (str(q.metric) && !['amount','percent'].includes(str(q.metric)))) { invalidBoardRoute.value = true; error.value = '返回的大屏筛选参数无效，请重新设置查询范围。'; return false; }
-  Object.assign(draft, { date_from: from, date_to: to, store_id: store, region: region.toUpperCase(), platform: platform.toLowerCase() });
+  Object.assign(draft, { date_from: from, date_to: to, store_id: store, store_ids: str(q.store_ids), region: region.toUpperCase(), platform: platform.toLowerCase() });
   applied.value = { ...draft }; currency.value = cur.toUpperCase(); showDeclines.value = true;
   declinesMetric.value = str(q.metric) || 'amount';
   return true;
@@ -336,7 +345,7 @@ function apply() {
   if ((Date.parse(draft.date_to) - Date.parse(draft.date_from)) / 86400000 > 30) { error.value = '单次最多查询31天，请缩小日期范围。'; return; }
   invalidBoardRoute.value = false; ++generation; stopInventoryRetry(); clearInventory(); controller?.abort(); loading.value = false; inventoryLoading.value = false; inventoryError.value = false; data.value = null; error.value = ''; availabilityNotice.value = ''; applied.value = { ...draft }; load();
 }
-function drillOrders(extra: Row = {}) { if (canOrders.value) router.push({ path: '/sales-management/orders', query: { ...applied.value, ...(data.value?.display_currency ? {} : { currency: currency.value }), ...(extra.sku || (extra.store_id && storeMetric.value !== 'order_count') ? { exclude_cancelled: 'true' } : {}), ...(extra.sku ? { sku_exact: 'true' } : {}), ...extra } }); }
+function drillOrders(extra: Row = {}) { if (canOrders.value) router.push({ path: '/sales-management/orders', query: { ...applied.value, ...(data.value?.display_currency ? {} : { currency: currency.value }), ...(extra.sku || (extra.store_id && storeMetric.value !== 'order_count') ? { exclude_cancelled: 'true' } : {}), ...(extra.sku ? { sku_exact: 'true' } : {}), ...extra, ...((extra.store_id || !applied.value.store_ids) ? { store_ids: undefined } : {}) } }); }
 function drillAds() { if (canAds.value && current.value?.ad_store_ids?.length) router.push({ path: '/analytics/advertising-overview', query: { ...applied.value, currency: currency.value, platform: 'shopee', store_ids: current.value.ad_store_ids.join(',') } }); }
 async function toggleFullscreen() { try { if (document.fullscreenElement) await document.exitFullscreen(); else await screen.value?.requestFullscreen(); } catch { error.value = '当前浏览器暂不支持全屏，请使用浏览器全屏功能。'; } }
 function syncFullscreen() { fullscreen.value = document.fullscreenElement === screen.value; }
@@ -366,7 +375,7 @@ onMounted(() => {
   restoreBoardRoute(); if (!invalidBoardRoute.value) load();
   loadFilters();
 });
-watch(() => [route.query.view, route.query.date_from, route.query.date_to, route.query.region, route.query.platform, route.query.store_id, route.query.currency, route.query.metric], () => {
+watch(() => [route.query.view, route.query.date_from, route.query.date_to, route.query.region, route.query.platform, route.query.store_id, route.query.store_ids, route.query.currency, route.query.metric], () => {
   ++generation; stopInventoryRetry(); clearInventory(); controller?.abort(); loading.value = false; inventoryLoading.value = false; inventoryError.value = false; data.value = null;
   if (restoreBoardRoute()) load();
 });
@@ -415,4 +424,13 @@ onBeforeUnmount(() => { alive = false; filterController?.abort(); ++generation; 
 .realtime-board .product-table td:first-child{display:table-cell}
 .realtime-board .product-table .inventory-cell{min-width:0}
 .realtime-board .product-table strong{max-width:100%}
+</style>
+
+<style scoped>
+.store-filter { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.store-filter details { position: relative; }
+.store-filter summary { cursor: pointer; padding: 8px; border: 1px solid #344359; border-radius: 5px; background: #142136; }
+.store-options { position: absolute; z-index: 20; width: 230px; max-height: 320px; overflow: auto; padding: 8px; background: #142136; border: 1px solid #344359; border-radius: 5px; }
+.store-options label { justify-content: flex-start; padding: 5px 0; cursor: pointer; }
+.store-options label input { min-width: auto; }
 </style>

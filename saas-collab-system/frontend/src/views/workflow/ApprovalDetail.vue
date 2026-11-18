@@ -44,7 +44,12 @@
     </el-dialog>
     <el-card v-if="detail.payment_context" shadow="never"><template #header>转账凭证与入账</template>
       <p>审批通过代表已核实实际转账，将自动生成付款记录并计入已付。</p>
-      <p>本次金额：{{ detail.payment_context.amount }} {{ detail.payment_context.currency || '币种未记录' }} · 收款方：{{ detail.payment_context.account_snapshot?.account_holder || '请核对来源单据' }}</p>
+      <el-descriptions v-if="detail.payment_context.corporate_tax" border :column="1" class="payment-tax-details">
+        <el-descriptions-item label="申请金额（未税）">{{ detail.payment_context.corporate_tax.net_amount }} {{ detail.payment_context.currency }}</el-descriptions-item>
+        <el-descriptions-item label="本次税额">{{ detail.payment_context.corporate_tax.tax_amount }} {{ detail.payment_context.currency }}</el-descriptions-item>
+        <el-descriptions-item label="正报应付（含税）"><strong>{{ detail.payment_context.amount }} {{ detail.payment_context.currency }}</strong></el-descriptions-item>
+      </el-descriptions>
+      <p><template v-if="!detail.payment_context.corporate_tax">本次付款金额：{{ detail.payment_context.amount }} {{ detail.payment_context.currency || '币种未记录' }} · </template><template v-if="['corporate','personal'].includes(detail.payment_context.account_snapshot?.nature)">付款性质：{{ detail.payment_context.account_snapshot.nature==='corporate'?'对公（正报）':'对私' }} · </template>收款方：{{ detail.payment_context.account_snapshot?.account_holder || '请核对来源单据' }}</p>
       <div v-for="file in detail.payment_context.vouchers || []" :key="file.id"><el-button link @click="previewEvidence(file)">{{ file.file_name }} · 预览</el-button><el-button link @click="downloadEvidence(file)">下载</el-button></div>
       <div v-for="file in detail.payment_context.vouchers || []" :key="`voucher-${file.id}`"><el-button link @click="previewEvidence(file)">{{ file.file_name }} · 预览</el-button><el-button link @click="downloadEvidence(file)">下载</el-button><el-button v-if="detail.status === 'pending' && detail.payment_context.can_upload" link type="danger" :disabled="saving || uploading" @click="removeEvidence(file)">删除</el-button></div>
       <div v-if="detail.payment_context.mode === 'single' && detail.payment_context.attachments?.length"><strong>申请附件</strong><div v-for="file in detail.payment_context.attachments" :key="`attachment-${file.id}`"><el-button link @click="previewApplicationAttachment(file)">{{file.file_name}} · 预览</el-button><el-button link @click="downloadApplicationAttachment(file)">下载</el-button></div></div>

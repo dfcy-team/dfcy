@@ -46,7 +46,7 @@ def payment_details(shipment, orders, direct, applications, revision, cutoff):
     for app in applications:
         p = app.prepayment
         visible = p.purchase_order_id in visible_orders
-        payments.append(_entry(app,'采购定金抵扣',visible_orders.get(p.purchase_order_id,'采购付款'),
+        payments.append(_entry(app,'采购预付款抵扣',visible_orders.get(p.purchase_order_id,'采购付款'),
             p.amount if visible else None,proofs[p.pk] if visible else [],cutoff,p.reference_number if visible else ''))
     if revision and revision.recorded_amount:
         payments.append({'id':f'history-{revision.pk}','date':str(revision.date),'source':'历史已付登记',

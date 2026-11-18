@@ -396,9 +396,11 @@ class InboundOrder(Record):
     class Status(models.TextChoices):
         DRAFT = "draft", "待核对"
         CONFIRMED = "confirmed", "已入库"
+        CANCELLED = "cancelled", "已作废"
 
     number = models.CharField(max_length=80)
-    batch = models.OneToOneField(DispatchBatch, on_delete=models.PROTECT, related_name="inbound_order")
+    batch = models.ForeignKey(DispatchBatch, on_delete=models.PROTECT, related_name="inbound_orders")
+    receipt_mode = models.CharField(max_length=20, choices=[('legacy_full','历史整批入库'),('manual_partial','手工分批入库')], default='manual_partial', db_default='legacy_full')
     warehouse = models.ForeignKey("masterdata.WarehouseMaster", on_delete=models.PROTECT)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
     clearance_cbm = models.DecimalField(max_digits=16, decimal_places=6, null=True, blank=True)
@@ -431,8 +433,43 @@ class InboundLine(Record):
 
     def clean(self):
         super().clean()
-        if self.inbound_id and self.shipment_line_id and not DispatchAllocation.objects.filter(membership__batch_id=self.inbound.batch_id, shipment_line_id=self.shipment_line_id, membership__active_guard=True, quantity=self.expected_quantity).exists():
+        if self.expected_quantity <= 0:
+            raise ValidationError('本次应收数量须为正整数。')
+        if self.inbound_id and self.shipment_line_id and not DispatchAllocation.objects.filter(membership__batch_id=self.inbound.batch_id, shipment_line_id=self.shipment_line_id, membership__active_guard=True, quantity__gte=self.expected_quantity).exists():
             raise ValidationError("Inbound source line must belong to the dispatch batch.")
+
+
+class InboundShortageTermination(Record):
+    """Explicit final shortage; never an inventory receipt or payment adjustment."""
+    purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.PROTECT, related_name='inbound_shortage_terminations')
+    batch = models.ForeignKey(DispatchBatch, on_delete=models.PROTECT, related_name='inbound_shortage_terminations')
+    shipment_line = models.ForeignKey(ShipmentLine, on_delete=models.PROTECT, related_name='inbound_shortage_terminations')
+    quantity = models.PositiveIntegerField()
+    reason = models.TextField()
+    request_key = models.CharField(max_length=128)
+    origin = models.CharField(max_length=24, choices=[('final_shortage','最终短缺'),('legacy_closed','历史已结案')], default='final_shortage')
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['tenant','request_key','batch','shipment_line'], name='sc2_inbound_shortage_request'), models.CheckConstraint(condition=models.Q(quantity__gt=0), name='sc2_inbound_shortage_positive')]
+        indexes = [models.Index(fields=['batch','shipment_line'], name='sc2_inbound_shortage_source')]
+        ordering = ['id']
+
+    def clean(self):
+        super().clean()
+        if not self.reason or not self.reason.strip():
+            raise ValidationError('最终短缺原因不能为空。')
+        if self.shipment_line_id and self.purchase_order_id:
+            source = self.shipment_line
+            order_id = source.purchase_line.order_id if source.purchase_line_id else source.shipment.order_id
+            if order_id != self.purchase_order_id:
+                raise ValidationError('短缺商品不属于该采购单。')
+        if self.batch_id and self.shipment_line_id and not DispatchAllocation.objects.filter(membership__batch_id=self.batch_id, shipment_line_id=self.shipment_line_id, membership__active_guard=True, quantity__gte=self.quantity).exists():
+            raise ValidationError('最终短缺来源不属于该发运批次。')
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError('最终短缺记录不可覆盖。')
+        return super().save(*args, **kwargs)
 
 
 class InboundExtraLine(Record):
@@ -806,3 +843,5 @@ from .payment_request_models import (SupplyPaymentRequest, SupplyPaymentRequestV
     SupplyPaymentBatch, SupplyPaymentBatchVoucher)  # noqa: E402,F401
 
 from .inbound_notify_models import InboundNotificationConfig, InboundNotificationOutbox
+
+from .supplier_deposit_models import SupplierDepositEntry  # noqa: E402,F401

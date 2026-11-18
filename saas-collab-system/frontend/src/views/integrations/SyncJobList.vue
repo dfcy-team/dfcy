@@ -184,7 +184,8 @@
         <el-descriptions-item v-if="configRow.ads_mapping_id" label="广告户 / 数据时区">{{ configRow.advertiser_id }} · {{ configRow.advertiser_timezone || '未知' }}；仅竞价广告消耗</el-descriptions-item>
         <el-descriptions-item label="调度方式">{{ schedules[configRow.schedule_type] || '—' }}</el-descriptions-item>
         <el-descriptions-item label="采集范围">
-          <template v-if="configRow.resource_type === 'advertising_report' && configRow.platform === 'tiktok'">{{ configRow.query_mode === 'range' ? `${configRow.range_start_at} 至 ${configRow.range_end_at}` : `最近 ${configRow.lookback_days ?? 7} 个完整自然日，不含今天` }}（广告户时区）</template>
+          <template v-if="configRow.resource_type === 'warehouse_order_lookup'">绑定 WMS 仓库授权作为国家边界；同国家多仓仍逐单核验唯一性，每次最多 {{ configRow.warehouse_order_limit ?? configRow.sync_scope?.warehouse_order_limit ?? 50 }} 单，不按更新时间回看、不做历史补采</template>
+          <template v-else-if="configRow.resource_type === 'advertising_report' && configRow.platform === 'tiktok'">{{ configRow.query_mode === 'range' ? `${configRow.range_start_at} 至 ${configRow.range_end_at}` : `最近 ${configRow.lookback_days ?? 7} 个完整自然日，不含今天` }}（广告户时区）</template>
           <template v-else-if="configRow.resource_type === 'platform_product' && configRow.platform === 'shopee' && configRow.product_order_backfill === 'order_missing_only'">全部已落库订单的缺失商品 ID（不按月、不限制日期）</template>
           <template v-else-if="['sales_order', 'refund_return', 'settlement_bill', 'advertising_report'].includes(configRow.resource_type) || (configRow.resource_type === 'platform_product' && configRow.product_full_sync === false)">
             <template v-if="configRow.resource_type === 'sales_order'">{{ configRow.collection_time_basis === 'created' ? '创建时间' : '更新时间' }} · </template>
@@ -213,6 +214,7 @@
 </template>
 
 <script setup>
+import "element-plus/theme-chalk/el-pagination.css";
 import IntegrationPlatformPicker from '../../components/IntegrationPlatformPicker.vue';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -599,7 +601,7 @@ onMounted(() => {
 .schedule-rule { display: block; margin-top: 4px; }
 .task-filters {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 16px;
   padding: 16px;
   margin-bottom: 20px;
@@ -660,13 +662,16 @@ small { color: #64748b; font-size: 12px; }
 
 
 
-@media (max-width: 1100px) {
+@media (max-width: 1180px) {
   .task-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .summary-card { flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px; }
 }
 
 @media (max-width: 680px) {
-  .task-filters, .sync-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sync-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .task-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .task-filters { gap: 12px; padding: 12px; }
 }
 </style>

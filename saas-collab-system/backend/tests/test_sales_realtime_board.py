@@ -414,6 +414,12 @@ def test_realtime_board_rejects_oversized_range_and_applies_store_scope():
 
     scoped = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]
     assert scoped["currency_groups"] == []
+    _order(tenant, platform, store, run, "visible")
+    response = client.get(URL, {"date_from": DAY, "date_to": DAY, "store_ids": f"{hidden.id},{store.id},{store.id}"})
+    assert response.status_code == 200
+    group = response.json()["data"]["currency_groups"][0]
+    assert [row["store_id"] for row in group["store_ranking"]] == [store.id]
+    assert group["order_count"] == 1
     oversized = client.get(URL, {"date_from": "2026-01-01", "date_to": "2026-12-31"})
     assert oversized.status_code == 400
 
@@ -435,7 +441,7 @@ def test_realtime_board_uses_bounded_query_count():
 @pytest.mark.django_db
 def test_board_rejects_unshared_filter_aliases_and_repeated_parameters():
     *_, client = _fixture("board-filter-alias")
-    for key in ("store_ids", "platforms", "region", "country"):
+    for key in ("platforms", "region", "country"):
         assert client.get(URL, {"date_from": DAY, "date_to": DAY, key: "1"}).status_code == 400
     assert client.get(URL + "?store_id=1&store_id=2").status_code == 400
 

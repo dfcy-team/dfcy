@@ -34,34 +34,37 @@ def require_access(actor, order, *, permission_cache=None):
 
 
 def publish_lookup(pk, revision):
-    """Claim delivery in the database; stale callbacks never reach the broker.
-
-    Pending leases cover lost/ambiguous broker delivery. Consumers replace this
-    with an execution lease; expired claims remain recoverable by the dispatcher.
-    """
+    from .warehouse_unified import managed_for_order_id
+    if managed_for_order_id(pk):
+        return False
     from django.db.models import Q
     from .tasks import synchronize_order_warehouse
     now, delivery = timezone.now(), uuid.uuid4()
-    eligible = Q(status='pending') & (Q(lease_until__isnull=True) | Q(lease_until__lte=now))
-    eligible |= Q(status='running', lease_until__lte=now)
-    claimed = OrderWarehouseLookup.objects.filter(pk=pk, revision=revision).filter(eligible).update(
-        status='pending', lease=delivery, lease_until=now + timedelta(minutes=10))
+    # Pending leases cover delivery only. The worker replaces this deadline
+    # with its execution lease when it actually starts. A lost broker message
+    # remains recoverable without flooding the queue on every dispatcher tick.
+    delivery_until = now + timedelta(minutes=10)
+    claimed = OrderWarehouseLookup.objects.filter(pk=pk, revision=revision).filter(
+        Q(status='pending') & (Q(lease_until__isnull=True) | Q(lease_until__lte=now))
+        | Q(status='running', lease_until__lte=now)
+    ).update(status='pending', lease=delivery, lease_until=delivery_until)
     if not claimed:
         return False
     try:
         synchronize_order_warehouse.apply_async(args=[pk, str(revision)], queue='warehouse-orders', retry=False)
     except Exception:
-        # Release only our delivery claim, never a consumer's execution lease.
-        OrderWarehouseLookup.objects.filter(pk=pk, revision=revision, status='pending', lease=delivery).update(
-            lease=None, lease_until=None,
-            message='消息未送达后台队列，等待调度恢复，也可稍后重试。')
+        # The durable pending record survives broker failure; the dispatcher retries delivery.
+        OrderWarehouseLookup.objects.filter(pk=pk, revision=revision, status='pending',
+                                           lease=delivery).update(lease=None, lease_until=None,
+            message='任务尚未送达后台队列；等待调度恢复，也可稍后重试。')
         return False
     return True
 
 
 @transaction.atomic
 def request_lookup(order_id, actor=None, *, manual=False, scheduled=False):
-    order = SalesOrder.objects.select_for_update().select_related('authorization__created_by').get(pk=order_id)
+    order = SalesOrder.objects.select_for_update().select_related(
+        'authorization__created_by', 'store').get(pk=order_id)
     if manual:
         require_access(actor, order)
     elif not scheduled and order.authorization_id:
@@ -222,9 +225,10 @@ def _fetch_packages_window(actor, authorization, order, is_current, start, end):
     raise ValidationError('仓库返回页数超过单订单查询上限，需核查。')
 
 
-def synchronize(pk, revision):
+def synchronize(pk, revision, *, run_guard=None):
     with transaction.atomic():
-        row = OrderWarehouseLookup.objects.select_for_update().get(pk=pk)
+        row = OrderWarehouseLookup.objects.select_for_update(of=('self',)).select_related(
+            'order__store', 'requested_by').defer('order__source_details').get(pk=pk)
         now = timezone.now()
         if str(row.revision) != str(revision) or row.status not in {'pending', 'running'}:
             return 'superseded'
@@ -234,7 +238,8 @@ def synchronize(pk, revision):
         row.save(update_fields=['status', 'lease', 'lease_until'])
         lease, order, actor = row.lease, row.order, row.requested_by
 
-    current = lambda: OrderWarehouseLookup.objects.filter(pk=pk, revision=revision, lease=lease).exists()
+    current = lambda: (OrderWarehouseLookup.objects.filter(pk=pk, revision=revision, lease=lease).exists()
+                       and (run_guard is None or run_guard()))
     checks, matches, state, message = [], [], 'failed', '仓库查询失败，请稍后重试。'
     try:
         require_access(actor, order)
@@ -293,6 +298,11 @@ def synchronize(pk, revision):
         latest = OrderWarehouseLookup.objects.select_for_update().get(pk=pk)
         if str(latest.revision) != str(revision) or latest.lease != lease:
             return 'superseded'
+        if run_guard is not None and not run_guard():
+            latest.status, latest.lease, latest.lease_until = 'pending', None, None
+            latest.message = '统一任务已暂停或权限范围改变；本次响应未提交，保留待处理状态。'
+            latest.save(update_fields=['status', 'lease', 'lease_until', 'message'])
+            return 'stopped'
         if latest.followup_required:
             latest.status, latest.revision = 'pending', uuid.uuid4()
             latest.lease, latest.lease_until, latest.next_query_at = None, None, None
@@ -300,7 +310,7 @@ def synchronize(pk, revision):
             latest.save()
             transaction.on_commit(lambda: publish_lookup(pk, latest.revision), robust=True)
             return 'superseded'
-        order.refresh_from_db()
+        order.refresh_from_db(fields=['normalized_status', 'raw_status', 'paid_at_utc'])
         changes['next_query_at'], changes['retry_count'] = next_refresh(latest, order, state, checks, matches[0][1] if state == 'matched' else [])
         OrderWarehouseLookup.objects.filter(pk=pk).update(**changes)
         if state == 'matched':
@@ -327,7 +337,23 @@ def lookup_data(order):
             'stale': bool(row.snapshot) and row.status != 'matched'}
 
 
-def scheduled_ready(row, *, permission_cache=None):
+def scheduled_ready(row, *, readiness=None, permission_cache=None):
+    """Always check this order's visibility; share only the local warehouse gate."""
+    try:
+        require_access(row.requested_by, row.order, permission_cache=permission_cache)
+    except Exception:
+        return False
+    scope = (row.order.tenant_id, row.requested_by_id,
+             row.order.store.country_code, row.warehouse_id)
+    if readiness is not None and scope in readiness:
+        return readiness[scope]
+    ready = _scheduled_scope_ready(row)
+    if readiness is not None:
+        readiness[scope] = ready
+    return ready
+
+
+def _scheduled_scope_ready(row):
     """Recheck local approvals without calling the warehouse while blocked."""
     try:
         from apps.integrations.warehouse_api_service import execution_gate
@@ -335,7 +361,6 @@ def scheduled_ready(row, *, permission_cache=None):
         from apps.integrations.warehouse_credential_service import require_verified_warehouse
         from apps.integrations.readonly_clients import JifengWmsReadonlyClient
         order, actor = row.order, row.requested_by
-        require_access(actor, order, permission_cache=permission_cache)
         execution_gate(operation_for('order_page'))
         candidates = WarehouseAuthorization.objects.filter(tenant_id=order.tenant_id, status='active',
             warehouse__tenant_id=order.tenant_id, warehouse__status='active',

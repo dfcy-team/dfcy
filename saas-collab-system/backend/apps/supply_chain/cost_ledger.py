@@ -1,7 +1,7 @@
 from .shipment_sources import accessible_shipments
 """Read-only product cost projections; never publish a batch as a global price."""
 from decimal import Decimal
-from django.db.models import Exists, F, OuterRef, Q
+from django.db.models import Exists, F, OuterRef, Q, Value
 
 from . import costs, logistics
 from .models import CostEntry, CostVersion, DispatchAllocation, PurchaseOrder
@@ -9,114 +9,46 @@ from .permissions import internal_orders
 
 
 def fingerprints_for_entries(entries):
-    """Compute current input fingerprints for page owners with bounded queries."""
-    from . import services
-    from .models import InboundOrder, InboundLine, FeeRecord, ShipmentLine, DispatchAllocation
+    """Batch-load inputs while using the exact calculation source serializer."""
+    from .models import InboundOrder, InboundLine, InboundShortageTermination, FeeRecord, ShipmentLine
     from .tax_calculation import contract_cost_allocations
-
     entries = list(entries)
     owners = {}
     for entry in entries:
         version = entry.cost_version
-        owner = ('batch', version.batch) if version.batch_id else ('shipment', version.shipment)
-        owners[(owner[0], owner[1].pk)] = owner
+        kind, owner = ('batch', version.batch) if version.batch_id else ('shipment', version.shipment)
+        owners[(kind, owner.pk)] = (kind, owner)
     if not owners:
         return {}
-    shipment_ids = {obj.pk for kind, obj in owners.values() if kind == 'shipment'}
-    batch_ids = {obj.pk for kind, obj in owners.values() if kind == 'batch'}
-
-    allocations = list(DispatchAllocation.objects.filter(
-        membership__active_guard=True, membership__batch__status='active',
-        membership__batch_id__in=batch_ids,
-    ).select_related('membership').order_by('membership__batch_id', 'shipment_line_id'))
-    quantities_by_batch = {}
-    line_ids_by_batch = {}
-    for allocation in allocations:
-        quantities_by_batch.setdefault(allocation.membership.batch_id, {})[allocation.shipment_line_id] = allocation.quantity
-        line_ids_by_batch.setdefault(allocation.membership.batch_id, set()).add(allocation.shipment_line_id)
-
-    line_query = ShipmentLine.objects.filter(tenant=entries[0].tenant, is_active=True).select_related('shipment')
-    if shipment_ids and batch_ids:
-        line_query = line_query.filter(Q(shipment_id__in=shipment_ids) | Q(pk__in=set().union(*line_ids_by_batch.values())))
-    elif shipment_ids:
-        line_query = line_query.filter(shipment_id__in=shipment_ids)
-    else:
-        all_line_ids = set().union(*line_ids_by_batch.values()) if line_ids_by_batch else set()
-        line_query = line_query.filter(pk__in=all_line_ids)
-    lines = list(line_query.order_by('pk'))
-    lines_by_shipment, lines_by_id = {}, {}
-    for line in lines:
-        lines_by_shipment.setdefault(line.shipment_id, []).append(line)
-        lines_by_id[line.pk] = line
-
-    inbounds = {row.batch_id: row for row in InboundOrder.objects.filter(batch_id__in=batch_ids).order_by('-pk')}
-    inbound_lines = list(InboundLine.objects.filter(inbound_id__in=[row.pk for row in inbounds.values()]).order_by('shipment_line_id'))
-    inbound_lines_by_id = {}
-    for row in inbound_lines:
-        inbound_lines_by_id.setdefault(row.inbound_id, []).append(row)
-
-    shipment_line_groups = {pk: lines_by_shipment.get(pk, []) for pk in shipment_ids}
-    for batch_id in batch_ids:
-            shipment_line_groups[('batch', batch_id)] = [lines_by_id[pk] for pk in sorted(line_ids_by_batch.get(batch_id, set())) if pk in lines_by_id]
-
-    all_shipment_ids = shipment_ids | {line.shipment_id for line in lines}
-    fee_filter = Q()
-    if all_shipment_ids: fee_filter |= Q(shipment_id__in=all_shipment_ids)
-    if batch_ids:
-        fee_filter |= Q(batch_id__in=batch_ids) | Q(inbound__batch_id__in=batch_ids)
-    fee_revisions = {}
-    for fee in FeeRecord.objects.filter(tenant=entries[0].tenant).filter(fee_filter).select_related('current_revision'):
-        if fee.shipment_id: key = ('shipment', fee.shipment_id)
-        elif fee.batch_id: key = ('batch', fee.batch_id)
-        else: key = ('inbound', fee.inbound_id)
-        fee_revisions[key] = fee.current_revision
-
-    line_ids = [line.pk for line in lines]
-    distribution = list(DispatchAllocation.objects.filter(
-        shipment_line_id__in=line_ids, membership__active_guard=True, membership__batch__status='active',
-    ).order_by('membership__batch_id', 'shipment_line_id').values(
-        'membership__batch_id', 'shipment_line_id', 'quantity'))
-    contract_rows = contract_cost_allocations(shipment_ids | {
-        line.shipment_id for line in lines
-    })
-    contract_by_shipment = {row['shipment_id']: row for row in contract_rows}
-
-    result = {}
-    for key, (kind, obj) in owners.items():
-        inbound = inbounds.get(obj.pk) if kind == 'batch' else None
-        if kind == 'shipment':
-            source_lines = shipment_line_groups.get(obj.pk, [])
-            batch_qty = {}
-        else:
-            source_lines = shipment_line_groups.get(('batch', obj.pk), [])
-            batch_qty = quantities_by_batch.get(obj.pk, {})
-        source = {'kind': kind, 'id': obj.pk, 'status': obj.status,
-            'lines': [{'id': line.pk, 'shipment_id': line.shipment_id, 'sku': line.sku_code_snapshot,
-                'quantity': batch_qty.get(line.pk, line.quantity), 'unit_price': costs.text_number(line.unit_price),
-                'collection_arrived': line.shipment.collection_arrived} for line in source_lines],
-            'inbound': None if not inbound else {'id': inbound.pk, 'status': inbound.status,
-                'receipt_ref': inbound.stock_receipt_ref,
-                'lines': [{'id': row.pk, 'shipment_line_id': row.shipment_line_id,
-                    'received_quantity': row.received_quantity} for row in inbound_lines_by_id.get(inbound.pk, [])]},
-            'fees': []}
-        fee_owners = [('shipment', shipment) for shipment in {line.shipment_id: line.shipment for line in source_lines}.values()]
-        if kind == 'batch': fee_owners.append(('batch', obj))
-        if inbound: fee_owners.append(('inbound', inbound))
-        for fee_kind, fee_owner in fee_owners:
-            source['fees'].append({'kind': fee_kind, 'id': fee_owner.pk,
-                'revision_id': (fee_revisions.get((fee_kind, fee_owner.pk)).pk
-                    if fee_revisions.get((fee_kind, fee_owner.pk)) else None)})
-        source['dispatch_distribution'] = [row for row in distribution
-            if row['shipment_line_id'] in {line.pk for line in source_lines}]
-        # A single contract snapshot covers all source lines in one shipment;
-        # include it once per shipment in the fingerprint input.
-        source_shipment_ids = sorted({line.shipment_id for line in source_lines})
-        taxes = [contract_by_shipment[shipment_id] for shipment_id in source_shipment_ids
-                 if shipment_id in contract_by_shipment]
-        if taxes: source['contract_cost_taxes'] = taxes
-        source['fees'].sort(key=lambda row: (row['kind'], row['id']))
-        result[key] = services.request_hash(source)
-    return result
+    batches = {pk for kind, pk in owners if kind == 'batch'}
+    shipments = {pk for kind, pk in owners if kind == 'shipment'}
+    quantities = {}
+    for row in DispatchAllocation.objects.filter(membership__batch_id__in=batches,
+            membership__active_guard=True, membership__batch__status='active').values('membership__batch_id', 'shipment_line_id', 'quantity'):
+        quantities.setdefault(row['membership__batch_id'], {})[row['shipment_line_id']] = row['quantity']
+    ids = {pk for group in quantities.values() for pk in group}
+    lines = list(ShipmentLine.objects.filter(tenant_id=entries[0].tenant_id, is_active=True).filter(
+        Q(pk__in=ids) | Q(shipment_id__in=shipments)).select_related('shipment').order_by('pk'))
+    grouped = {key: [line for line in lines if (line.shipment_id == key[1] if key[0] == 'shipment' else line.pk in quantities.get(key[1], {}))] for key in owners}
+    inbounds, inbound_lines, terminations = {}, {}, {}
+    for row in InboundOrder.objects.filter(batch_id__in=batches).order_by('pk'):
+        inbounds.setdefault(row.batch_id, []).append(row)
+    for row in InboundLine.objects.filter(inbound__batch_id__in=batches).order_by('shipment_line_id'):
+        inbound_lines.setdefault(row.inbound_id, []).append(row)
+    for row in InboundShortageTermination.objects.filter(batch_id__in=batches, origin='final_shortage').order_by('pk').values('id', 'batch_id', 'shipment_line_id', 'quantity', 'origin'):
+        batch_id = row.pop('batch_id')
+        terminations.setdefault(batch_id, []).append(row)
+    shipment_ids = {line.shipment_id for line in lines}
+    revisions = {}
+    for row in FeeRecord.objects.filter(tenant_id=entries[0].tenant_id).filter(
+            Q(shipment_id__in=shipment_ids) | Q(batch_id__in=batches) | Q(inbound__batch_id__in=batches)).select_related('current_revision'):
+        key = ('shipment', row.shipment_id) if row.shipment_id else ('batch', row.batch_id) if row.batch_id else ('inbound', row.inbound_id)
+        revisions[key] = row.current_revision
+    distribution = list(DispatchAllocation.objects.filter(shipment_line_id__in=[line.pk for line in lines],
+        membership__active_guard=True, membership__batch__status='active').order_by('membership__batch_id', 'shipment_line_id').values('membership__batch_id', 'shipment_line_id', 'quantity'))
+    data = dict(lines=grouped, inbounds=inbounds, inbound_lines=inbound_lines, terminations=terminations,
+        quantities=quantities, revisions=revisions, distribution=distribution, taxes=contract_cost_allocations(shipment_ids))
+    return {key: costs.inputs(*owner, data=data)[1] for key, owner in owners.items()}
 
 
 def entries_for(actor, *, history=False):
@@ -147,10 +79,19 @@ def entries_for(actor, *, history=False):
 def filter_entries(rows, params):
     for param, field in (('sku_id', 'shipment_line__sku_id'),
                          ('country_id', 'shipment_line__shipment__order__country_id'),
-                         ('warehouse_id', 'receipt_line__receipt__warehouse_id'),
                          ('batch_id', 'cost_version__batch_id')):
         if param in params:
             rows = rows.filter(**{field: params[param]})
+    if 'warehouse_id' in params:
+        from .models import InternalStockReceiptLine
+        matching = InternalStockReceiptLine.objects.filter(
+            receipt__inbound__batch_id=OuterRef('cost_version__batch_id'),
+            inbound_line__shipment_line_id=OuterRef('shipment_line_id'),
+            receipt__warehouse_id=params['warehouse_id'], receipt__inbound__status='confirmed',
+            receipt__created_at__lte=OuterRef('cost_version__created_at'))
+        rows = rows.annotate(_warehouse_match=Exists(matching),
+            _projection_warehouse_id=Value(int(params['warehouse_id']))).filter(
+                Q(receipt_line__receipt__warehouse_id=params['warehouse_id']) | Q(_warehouse_match=True))
     if params.get('search'):
         value = params['search']
         rows = rows.filter(Q(shipment_line__sku_code_snapshot__icontains=value) |
@@ -193,7 +134,7 @@ def serialize(entry, fingerprints, details=None, settlements=None):
             (revision.sequence if revision else 0) + payment.get('count', 0), 'payment_transactions' if new_amount else 'current')
     goods_settlement = settlement_projection(goods_revision, goods_payment)
     freight_settlement = settlement_projection(freight_revision, freight_payment)
-    return {**costs.entry_data(entry, details), 'id': entry.pk, 'sku_id': line.sku_id,
+    result = {**costs.entry_data(entry, details), 'id': entry.pk, 'sku_id': line.sku_id,
         'legacy_sku_code': line.sku.legacy_sku_code or '',
         'product_name': line.product_name_snapshot, 'country_id': order.country_id,
         'country_code': order.country_code_snapshot, 'country_name': order.country.name,
@@ -217,6 +158,33 @@ def serialize(entry, fingerprints, details=None, settlements=None):
         'goods_prepayment_applied_amount': goods_payment.get('applied_amount', '0.0000'),
         'freight_payment_amount': freight_payment.get('paid_amount', '0.0000'),
         'freight_payment_classification': freight_payment.get('classification', 'unclassified')}
+    if 'receipt_cost_allocations' in version.summary:
+        allocations = [row for row in version.summary['receipt_cost_allocations'] if row['shipment_line_id'] == line.pk]
+        projection = getattr(entry, '_projection_warehouse_id', None)
+        if projection is not None:
+            allocations = [row for row in allocations if row['warehouse_id'] == projection]
+            result['received_quantity'] = sum(row['actual_quantity'] for row in allocations)
+            for name in ('received_goods_amount', 'received_collection_fee', 'received_freight_fee', 'clearance_fee', 'received_total'):
+                values = [row[name] for row in allocations]
+                result[name] = None if any(value is None for value in values) else costs.text_number(sum((Decimal(value) for value in values), Decimal(0)))
+            quantity, amount = result['received_quantity'], result['received_total']
+            result['received_unit_cost'] = costs.text_number(Decimal(amount) / quantity, costs.UNIT) if quantity and amount is not None else None
+            # Planned and pending costs remain explicitly batch-wide.
+            result['aggregation_basis'] = 'warehouse_received; planned_and_pending_are_batch_totals; payments_are_source_totals'
+            from apps.masterdata.models import WarehouseMaster
+            warehouse = WarehouseMaster.objects.get(tenant_id=entry.tenant_id, pk=projection)
+            result.update(warehouse_id=warehouse.pk, warehouse_name=warehouse.name)
+        else:
+            result['aggregation_basis'] = 'batch_totals; receipt_cost_allocations identify warehouse shares'
+            warehouse_ids = {row['warehouse_id'] for row in allocations}
+            if len(warehouse_ids) == 1:
+                from apps.masterdata.models import WarehouseMaster
+                warehouse = WarehouseMaster.objects.get(tenant_id=entry.tenant_id, pk=next(iter(warehouse_ids)))
+                result.update(warehouse_id=warehouse.pk, warehouse_name=warehouse.name)
+        result['receipt_cost_allocations'] = allocations
+        result['warehouse_ids'] = sorted({row['warehouse_id'] for row in allocations})
+    return result
+
 
 
 def serialize_many(entries, fingerprints):

@@ -146,11 +146,37 @@ class PurchaseTerminationInput(serializers.Serializer):
     lines = PurchaseTerminationLine(many=True, allow_empty=False)
 
 
+class InboundShortageTerminationLine(serializers.Serializer):
+    batch_id = serializers.IntegerField(min_value=1)
+    shipment_line_id = serializers.IntegerField(min_value=1)
+    quantity = serializers.IntegerField(min_value=1, max_value=2147483647)
+
+
+class InboundShortageTerminationInput(VersionInput):
+    scope = serializers.ChoiceField(choices=['inbound_shortage'])
+    preview_token = serializers.CharField(max_length=64)
+    reason = serializers.CharField(max_length=10000)
+    lines = InboundShortageTerminationLine(many=True, allow_empty=False)
+
+
 class PurchaseTermination(InternalAPI):
     def get(self, request, pk):
+        scope = request.query_params.get('scope')
+        if scope == 'inbound_shortage':
+            from .inbound_shortage import preview
+            return Response({'data': preview(request.user, pk)})
+        if scope not in (None, '', 'unshipped'):
+            raise serializers.ValidationError('终止范围不正确。')
         return Response({'data': preview_purchase_termination(request.user, pk)})
 
     def post(self, request, pk):
+        if request.data.get('scope') == 'inbound_shortage':
+            from .inbound_shortage import terminate
+            data = validated(InboundShortageTerminationInput, request)
+            order = terminate(request.user, pk, data, key(request))
+            return Response({'data': purchase_snapshot(order)})
+        if request.data.get('scope') not in (None, '', 'unshipped'):
+            raise serializers.ValidationError('终止范围不正确。')
         data = validated(PurchaseTerminationInput, request)
         order = terminate_purchase_remainder(request.user, pk, data, key(request))
         return Response({'data': purchase_snapshot(order)})

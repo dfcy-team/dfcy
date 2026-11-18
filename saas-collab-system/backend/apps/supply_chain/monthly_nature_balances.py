@@ -3,13 +3,15 @@ from collections import defaultdict
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
+from .cost_models import ShipmentPayableTax
+from .models import PurchaseContract
 from .cost_models import (PayableClassificationRecord, PaymentClassification, PaymentPlanRecord,
                           FeeRecord, SettlementRecord, PaymentCurrencyConfirmation)
 
 ZERO = Decimal('0')
 UNKNOWN = '币种未记录'
 NATURES = ('corporate', 'personal')
-FIELDS = ('opening_net', 'new_payable', 'paid_amount', 'historical_paid_amount', 'current_plan_amount')
+FIELDS = ('opening_net', 'new_payable', 'paid_amount', 'historical_paid_amount', 'current_plan_amount', 'transferred_prepayment_amount')
 
 
 def currency(value):
@@ -42,6 +44,32 @@ def allocations(amount, snapshot, supplemental):
 def matches_party(saved, obj, default_party):
     return (saved.get('id') == obj['party_id'] and saved.get('type') == obj.get('party_type',default_party)
             and saved.get('name') == obj['party_name'])
+
+
+def corporate_tax_breakdown(tenant_id, shipment_ids):
+    taxes = {
+        pk: (tax if basis > ZERO or rate == ZERO else None, True)
+        for pk, tax, basis, rate in ShipmentPayableTax.objects.filter(
+            tenant_id=tenant_id, shipment_id__in=shipment_ids
+        ).values_list('shipment_id', 'added_tax_amount', 'taxable_amount', 'tax_rate')
+    }
+    for pk, nature, tax, payload in PurchaseContract.objects.filter(
+        tenant_id=tenant_id, shipment_id__in=shipment_ids, status='issued'
+    ).values_list('shipment_id', 'nature', 'settlement_tax_amount', 'payload'):
+        if nature != 'corporate':
+            taxes[pk] = (None, False)
+        elif payload.get('pricing_basis') == 'net_plus_tax':
+            taxes[pk] = (tax, True)
+        else:
+            lines = payload.get('lines') or []
+            try:
+                embedded = sum((Decimal(str(line['tax_amount'])) for line in lines), ZERO) if lines else None
+                if embedded is not None and (not embedded.is_finite() or embedded < ZERO):
+                    embedded = None
+            except (ArithmeticError, KeyError, TypeError, ValueError):
+                embedded = None
+            taxes[pk] = (embedded, True)
+    return taxes
 
 
 def nature_balances(actor, kind, query, docs, display_payments, purchase_docs, start, end, *, plan_balance_cache=None):
@@ -102,7 +130,7 @@ def nature_balances(actor, kind, query, docs, display_payments, purchase_docs, s
         for nature,amount in split:
             add(obj,cur,nature,'opening_net' if day < start else 'new_payable',amount,obj['number'])
 
-    payment_rows = list(display_payments.filter(date__lt=end).select_related('reverses'))
+    payment_rows = list(display_payments.filter(date__lt=end).select_related('reverses', 'supplier_deposit_transfer'))
     payment_ids = {p.reverses_id or p.pk for p in payment_rows}
     supplemental = {c.payment_id:c.allocations for c in PaymentClassification.objects.filter(
         tenant_id=actor.tenant_id,payment_id__in=payment_ids)}
@@ -130,7 +158,8 @@ def nature_balances(actor, kind, query, docs, display_payments, purchase_docs, s
             part = left if index == len(split)-1 else (payment.amount * amount / original.amount).quantize(Decimal('0.0001'),rounding=ROUND_HALF_UP)
             left -= part
             signed = -part if payment.reverses_id else part
-            add(obj,cur,nature,'opening_net' if payment.date < start else 'paid_amount',
+            period_field = 'transferred_prepayment_amount' if hasattr(original, 'supplier_deposit_transfer') else 'paid_amount'
+            add(obj,cur,nature,'opening_net' if payment.date < start else period_field,
                 -signed if payment.date < start else signed,obj['number']+' / 付款'+str(original.pk))
 
     # Historical cumulative settlements are not cash transactions and remain a separate column.
@@ -180,7 +209,7 @@ def nature_balances(actor, kind, query, docs, display_payments, purchase_docs, s
         if all(row[field] == ZERO for field in FIELDS):
             continue
         opening=row.pop('opening_net')
-        ending=opening+row['new_payable']-row['paid_amount']-row['historical_paid_amount']
+        ending=opening+row['new_payable']-row['paid_amount']-row['historical_paid_amount']-row['transferred_prepayment_amount']
         uncertain=(row['party_type'],row['party_id']) in review_parties
         row.update(opening_payable=None if uncertain else max(opening,ZERO),opening_credit=None if uncertain else max(-opening,ZERO),
                    reference_opening_payable=max(opening,ZERO),reference_opening_credit=max(-opening,ZERO),

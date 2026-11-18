@@ -78,6 +78,13 @@ def _successful_proof(job):
 
 
 def resolve_job_scope(job):
+    if job.resource_type == 'warehouse_order_lookup':
+        limit = (job.sync_scope or {}).get('warehouse_order_limit', 50)
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValidationError({'warehouse_order_limit': '单轮订单上限必须为1到100的整数。'})
+        return {'warehouse_order_limit': limit,
+                'warehouse_country_code': job.warehouse_authorization.warehouse.country_code.upper()
+                if job.warehouse_authorization_id else ''}
     if getattr(job, "ads_mapping_id", None):
         from .ads_sync import resolve_scope
         return resolve_scope(job.ads_mapping, job.sync_scope)

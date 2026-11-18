@@ -2,7 +2,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 
-from django.db import transaction
+from django.db import models, transaction
 from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import ValidationError
 
@@ -193,6 +193,7 @@ def bulk_upsert_inventory_snapshots(*, tenant, payloads, source_run):
     )
     result_by_key = {}
     new_rows = []
+    changed_rows = []
     audit_rules = {}
     for payload, site_code, source_sku, snapshot_at in prepared:
         key = (site_code, source_sku, snapshot_at)
@@ -231,8 +232,21 @@ def bulk_upsert_inventory_snapshots(*, tenant, payloads, source_run):
             audit_rules[key] = (sku_id, rule)
         unchanged = before_hash == snapshot.payload_hash and before_sku == snapshot.internal_sku_id
         if not unchanged:
-            snapshot.save(update_fields=[*fields, "internal_sku"])
+            # Validate as save() does, then use the base QuerySet implementation
+            # below to avoid ValidatedQuerySet.bulk_update's per-row save loop.
+            snapshot.full_clean()
+            changed_rows.append(snapshot)
         result_by_key[key] = {"snapshot": snapshot, "action": "skipped" if unchanged else "updated"}
+
+    if changed_rows:
+        update_fields = [*fields, "internal_sku"]
+        # Instantiate Django's base QuerySet directly: the validated manager's
+        # bulk_update() intentionally turns writes back into row-by-row saves.
+        # Django's implementation handles CASE values (including JSON) and
+        # parameter batching; full_clean above preserves save validation.
+        models.QuerySet(model=InventorySnapshot, using=changed_rows[0]._state.db).bulk_update(
+            changed_rows, update_fields, batch_size=300,
+        )
 
     if new_rows:
         InventorySnapshot.objects.bulk_create(new_rows, batch_size=300)

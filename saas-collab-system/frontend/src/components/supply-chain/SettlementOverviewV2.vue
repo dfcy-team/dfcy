@@ -3,17 +3,17 @@
     <div v-if="!overview" class="filters"><label>目的国家 <el-select v-model="localCountry" clearable placeholder="全部可访问国家" @change="reload(false)"><el-option v-for="c in data?.country_options||[]" :key="c.id" :value="c.id" :label="c.name"/></el-select></label><el-button @click="reload(false)">刷新</el-button></div>
     <el-alert v-if="error" :title="error" type="error" :closable="false"/>
     <PaymentRemindersV2 ref="reminders" :country-id="country" @open="row=>emit('open',row)"/>
-    <p class="hint">{{data?.amount_basis}} 定金抵扣单独展示，不重复计入已付现金。采购未付与发货单未付属于不同业务阶段，不相加。</p>
+    <p class="hint">{{data?.amount_basis}} 预付款抵扣单独展示，不重复计入已付现金。采购未付与发货单未付属于不同业务阶段，不相加。</p>
     <div class="summary-grid" v-loading="loading">
-      <section v-for="(label,key) in labels" :key="key" class="summary-card">
-          <header><h3>{{label}}</h3><div><el-button link type="primary" @click="openMonthly(key)">月份对账</el-button><el-button link type="primary" @click="openGroup(key)">查看全部单据 →</el-button></div></header>
+      <section v-for="(label,key) in summaryLabels" :key="key" class="summary-card">
+          <header><h3>{{label}}</h3><div><el-button v-if="key==='supplier'" link type="primary" @click="openGroup('deposit')">采购预付款</el-button><el-button link type="primary" @click="openMonthly(key)">月份对账</el-button><el-button link type="primary" @click="openGroup(key)">查看全部单据 →</el-button></div></header>
         <template v-if="data?.groups?.[key]">
           <div class="metrics overview-totals">
             <template v-if="key==='supplier'"><span>总采购金额<b>{{money(data.groups[key].purchase_total_amount)}}</b></span><span>总发货金额<b>{{money(data.groups[key].shipment_total_amount)}}</b></span></template>
             <span v-else>{{totalLabels[key]}}<b>{{money(data.groups[key].amount)}}</b></span>
             <span>已付款金额<b>{{money(data.groups[key].cash_paid_amount)}}</b></span>
             <span>历史期初<b>{{money(data.groups[key].opening)}}</b></span>
-            <span v-if="['supplier','deposit'].includes(key)">定金抵扣<b>{{money(data.groups[key].applied)}}</b></span>
+            <span v-if="['supplier','deposit'].includes(key)">预付款抵扣<b>{{money(data.groups[key].applied)}}</b></span>
           </div>
           <button class="balance" @click="openGroup(key)"><small>剩余应付</small><strong>{{money(key==='supplier'?data.groups[key].payable_amount:data.groups[key].unsettled)}}</strong><small v-if="key==='deposit'">可用余额 {{money(data.groups[key].available_prepayment??data.groups[key].available)}}</small></button>
           <p v-if="key==='supplier'" class="hint">采购待核对 {{data.groups[key].purchase_unknown_documents||0}} 张 · 发货待核对 {{data.groups[key].unknown_documents||0}} 张 · 待核对付款 {{money(data.groups[key].unknown_payment_amount)}} · 预付余额 {{money(data.groups[key].advance_balance)}}</p><p v-else class="hint">待核对 {{data.groups[key].unknown_documents||0}} 张 · 超额 {{money(data.groups[key].over_recorded)}}</p>
@@ -29,13 +29,14 @@
           </el-table></div></details>
         </template><p v-else class="hint">暂无该类汇总</p>
       </section>
+      <SupplierDepositLedgerV2 class="summary-card" :country-id="country" />
     </div>
     <section v-if="opened" class="document-list">
       <h3>{{labels[queue]}} · {{partyName||'全部往来单位'}}单据</h3><el-button @click="openMonthly(queue,partyId,partyName,monthlyPartyType)">月份对账</el-button><el-button v-if="partyId && queue!=='deposit'" type="primary" @click="goPay(queue,partyId,partyName)">批量申请付款</el-button>
       <div class="filters"><el-select v-model="queue" aria-label="结算类别" @change="changeKind"><el-option v-for="(label,key) in labels" :key="key" :value="key" :label="label"/></el-select><el-select v-model="status" aria-label="结算状态" @change="resetList"><el-option label="全部单据" value="all"/><el-option label="待核对 / 未结清" value="pending"/><el-option label="已结清" value="settled"/></el-select><el-input v-model="search" clearable placeholder="单号 / 供应商 / 货运公司" @keyup.enter="resetList"/><el-button @click="resetList">查询</el-button><el-button v-if="partyId" @click="clearParty">清除单位筛选</el-button></div>
-      <div v-if="listSummary" class="metrics query-totals"><span>查询范围 {{listSummary.documents}} 张 · 待核对 {{listSummary.unknown_documents}} 张</span><span v-for="f in columns" :key="f.key">{{f.label}}<b>{{money(listSummary[f.key])}}</b></span><span v-if="queue==='deposit'">可用定金<b>{{money(listSummary.available_prepayment)}}</b></span></div>
+      <div v-if="listSummary" class="metrics query-totals"><span>查询范围 {{listSummary.documents}} 张 · 待核对 {{listSummary.unknown_documents}} 张</span><span v-for="f in columns" :key="f.key">{{f.label}}<b>{{money(listSummary[f.key])}}</b></span><span v-if="queue==='deposit'">可用预付款<b>{{money(listSummary.available_prepayment)}}</b></span></div>
       <div class="filters"><el-select v-model="paymentNature" aria-label="实际付款性质" clearable placeholder="全部实际付款性质" @change="resetList"><el-option label="含对公付款" value="corporate"/><el-option label="含对私付款" value="personal"/><el-option label="对公对私混合付款" value="mixed"/><el-option label="未付款或含未分类已付" value="unknown"/></el-select><el-select v-if="['carrier','clearance'].includes(queue)" v-model="itemStatus" aria-label="费用项目付款状态" @change="resetList"><el-option label="按已付款记录筛选" value=""/><el-option label="全部费用项目" value="all"/><el-option label="未付款项目" value="unpaid"/><el-option label="部分付款项目" value="partial"/><el-option label="已结清项目" value="settled"/></el-select><el-input v-model="paymentItem" clearable :placeholder="itemStatus?'费用项目名称':'已付费用项目名称'" @keyup.enter="resetList"/><el-button @click="resetList">筛选付款</el-button></div>
-      <p class="hint">付款性质按有效付款时的收款账户统计；混合付款单可同时出现在对公、对私结果中。选择费用项目状态后，按当前费用明细及有效付款筛选，包含从未付款的项目；历史未分项付款不推定归属。筛选后金额仍为整单金额，未分类含历史期初，定金抵扣不计入现金分类。</p>
+      <p class="hint">付款性质按有效付款时的收款账户统计；混合付款单可同时出现在对公、对私结果中。选择费用项目状态后，按当前费用明细及有效付款筛选，包含从未付款的项目；历史未分项付款不推定归属。筛选后金额仍为整单金额，未分类含历史期初，预付款抵扣不计入现金分类。</p>
       <p v-if="listSummary" class="hint">以上合计覆盖当前筛选的全部单据，不仅是本页。</p>
       <div v-if="listSummary" class="metrics"><span>对公已付<b>{{money(listSummary.corporate_paid)}}</b></span><span>对私已付<b>{{money(listSummary.personal_paid)}}</b></span><span>未分类已付（含期初）<b>{{money(listSummary.unknown_paid)}}</b></span></div>
       <el-alert v-if="listError" :title="listError" type="error" :closable="false"/>
@@ -58,7 +59,7 @@
           </template>
         </el-table-column>
         <el-table-column v-if="['carrier','clearance'].includes(queue)" label="费用项目 / 约定性质" min-width="210"><template #default="{row}"><div v-for="item in row.fee_items||[]" :key="item.fee_item_id">{{item.name}} · {{item.nature==='corporate'?'对公':'对私'}} · {{money(item.amount)}}</div><span v-if="!row.fee_items?.length">原总额模式</span></template></el-table-column>
-        <el-table-column v-if="queue==='deposit'" label="可用定金" min-width="120"><template #default="{row}">{{money(row.available_prepayment)}}</template></el-table-column>
+        <el-table-column v-if="queue==='deposit'" label="可用预付款" min-width="120"><template #default="{row}">{{money(row.available_prepayment)}}</template></el-table-column>
         <el-table-column label="付款" width="100"><template #default="{row}"><el-button v-if="queue!=='deposit' && row.party_id" link @click="goPay(queue,row.party_id,row.party_name,row.party_type)">批量付款</el-button></template></el-table-column><el-table-column label="穿透查看" width="145"><template #default="{row}"><el-button link type="primary" @click="emit('open',row)">金额过程 / 凭证</el-button></template></el-table-column>
       </el-table>
       <el-pagination :current-page="page" :total="total" :page-size="20" layout="total,prev,pager,next" @current-change="changePage"/>
@@ -75,6 +76,7 @@ import {computed,onUnmounted,ref,watch} from 'vue';
 import {useRouter,useRoute} from 'vue-router';
 import BatchPaymentsV2 from './BatchPaymentsV2.vue';
 import PaymentRemindersV2 from './PaymentRemindersV2.vue';
+import SupplierDepositLedgerV2 from './SupplierDepositLedgerV2.vue';
 import MonthlyPayablesV2 from './MonthlyPayablesV2.vue';
 import {fetchDashboard,fetchDashboardQueue} from '../../api/supplyDashboardV2';
 import {useAuthStore} from '../../stores/auth';
@@ -87,10 +89,11 @@ const router=useRouter(),route=useRoute(),batchParty=ref(null),batchRequestId=re
 function goPay(queue,id,name,partyType=''){const partyKind=queue==='supplier'||(queue==='domestic'&&partyType==='supplier')?'supplier':'freight_company';if(props.overview){router.push({path:'/supply-chain/costs',query:{tab:'reconciliation',party_kind:partyKind,party_id:id,party_name:name||''}});return;}batchParty.value={kind:partyKind,id,name};batchRequestId.value=null;}
 watch(()=>route?.fullPath,()=>{const q=route?.query||{};if(['supplier','freight_company'].includes(q.party_kind)&&/^\d+$/.test(String(q.party_id)))batchParty.value={kind:q.party_kind,id:Number(q.party_id),name:q.party_name||''};if(/^\d+$/.test(String(q.payment_batch_id)))batchRequestId.value=Number(q.payment_batch_id);},{immediate:true});
 const auth=useAuthStore(),localCountry=ref(''),ownData=ref(null),data=computed(()=>props.overview||ownData.value);
-const labels={supplier:'供应商货款',domestic:'国内运费',carrier:'批次货运费',clearance:'入库清关费用',deposit:'采购定金'};
+const labels={supplier:'供应商货款',domestic:'国内运费',carrier:'批次货运费',clearance:'入库清关费用',deposit:'采购预付款'};
+const {deposit: prepaymentLabel, ...summaryLabels}=labels;
 const totalLabels={domestic:'总国内运费',carrier:'总批次货运费',clearance:'总入库清关费',deposit:'总采购金额'};
 const paymentNature=ref(''),paymentItem=ref(''),itemStatus=ref('');
-const columns=[{key:'due_amount',label:'应付 / 采购金额'},{key:'opening_amount',label:'历史期初已付'},{key:'paid_amount',label:'已付（含期初）'},{key:'applied_amount',label:'定金抵扣'},{key:'remaining_amount',label:'剩余应付'}];
+const columns=[{key:'due_amount',label:'应付 / 采购金额'},{key:'opening_amount',label:'历史期初已付'},{key:'paid_amount',label:'已付（含期初）'},{key:'applied_amount',label:'预付款抵扣'},{key:'remaining_amount',label:'剩余应付'}];
 const loading=ref(false),error=ref(''),opened=ref(false),queue=ref('supplier'),status=ref('all'),search=ref(''),partyId=ref(null),partyName=ref(''),rows=ref([]),total=ref(0),page=ref(1),listLoading=ref(false),listError=ref(''),listSummary=ref(null);
 let generation=0,listGeneration=0;
 const country=computed(()=>props.overview?props.countryId:localCountry.value);

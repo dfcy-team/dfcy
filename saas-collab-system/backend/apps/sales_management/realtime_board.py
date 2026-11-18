@@ -36,8 +36,22 @@ MAX_DATE_SPAN_DAYS = 31
 logger = logging.getLogger(__name__)
 
 
+def validate_board_store_ids(params):
+    raw = params.get("store_ids") or ""
+    single = params.get("store_id") or ""
+    if raw and single:
+        raise ValidationError({"store_ids": "请选择一种店铺筛选方式。"})
+    ids = (raw or single).split(",") if raw or single else []
+    if len(ids) > 500 or (single and len(ids) != 1) or any(
+        not value.isascii() or not value.isdecimal() or len(value) > 19
+        or not 1 <= int(value) <= 9223372036854775807 for value in ids
+    ):
+        raise ValidationError({"store_ids": "店铺编号必须为有效正整数，最多选择500家。"})
+    return sorted(set(map(int, ids))) if raw else []
+
+
 def _board_filters(request):
-    allowed = {"date_from", "date_to", "platform", "store_id", "currency", "region", "defer_inventory", "inventory_only", "display_currency"}
+    allowed = {"date_from", "date_to", "platform", "store_id", "store_ids", "currency", "region", "defer_inventory", "inventory_only", "display_currency"}
     if set(request.query_params) - allowed:
         raise ValidationError({"filters": "大屏只支持国家、平台、店铺、币种和起止日期筛选。"})
     if any(len(request.query_params.getlist(key)) != 1 for key in request.query_params):
@@ -59,9 +73,9 @@ def _board_filters(request):
         raise ValidationError({"date_to": f"Date range may not exceed {MAX_DATE_SPAN_DAYS} days."})
     params["date_from"], params["date_to"] = start.isoformat(), end.isoformat()
 
-    store_id = params.get("store_id")
-    if store_id and (not store_id.isascii() or not store_id.isdecimal() or int(store_id) <= 0):
-        raise ValidationError({"store_id": "Store ID must be a positive integer."})
+    selected = validate_board_store_ids(params)
+    if selected:
+        params["store_ids"] = ",".join(map(str, selected))
     if params.get("currency"):
         params["currency"] = params["currency"].strip().upper()
         if not params["currency"].isascii() or not params["currency"].isalnum() or len(params["currency"]) > 8:
@@ -298,6 +312,8 @@ def realtime_board_payload(request):
                     stores = filter_quality_store_queryset(
                         request.user, "sales_management.view", StoreMaster.objects.filter(tenant=request.user.tenant),
                     )
+                    if params.get("store_ids"):
+                        stores = stores.filter(pk__in=params["store_ids"].split(","))
                     for param, field in (("region", "country_code"), ("platform", "platform__platform_type"), ("store_id", "pk")):
                         if params.get(param):
                             stores = stores.filter(**{field: params[param]})
@@ -364,6 +380,7 @@ def realtime_board_payload(request):
             "date_to": end.isoformat(),
             "platform": params.get("platform") or None,
             "store_id": params.get("store_id") or None,
+            "store_ids": params.get("store_ids") or None,
             "currency": params.get("currency") or None,
             "region": params.get("region") or None,
         },
@@ -406,6 +423,8 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
     # Intersect the two permissions at the store layer. This includes permitted stores
     # with advertising spend even when they had no sales in the selected period.
     candidate_stores = StoreMaster.objects.filter(tenant=request.user.tenant)
+    if params.get("store_ids"):
+        candidate_stores = candidate_stores.filter(pk__in=params["store_ids"].split(","))
     if params.get("store_id"):
         candidate_stores = candidate_stores.filter(pk=params["store_id"])
     if params.get("platform"):

@@ -8,7 +8,7 @@ from decimal import Decimal, localcontext
 
 from django.db.models import (Case, Count, DecimalField, ExpressionWrapper, Exists, F,
     IntegerField, OuterRef, Q, Subquery, Sum, Value, When)
-from django.db.models.functions import Coalesce, Greatest
+from django.db.models.functions import Coalesce, Greatest, Least
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import NotFound
@@ -25,7 +25,7 @@ from .cost_models import (FeeRevisionItem, FeeRecord, SettlementRecord, PaymentR
 from .dates import business_date
 from .document_time import document_time
 from .logistics import batches_for
-from .models import (DispatchAllocation, InboundLine, InboundOrder,
+from .models import (DispatchAllocation, InboundLine, InboundOrder, InboundShortageTermination,
     OperatingAllocation, PurchaseLine, PurchaseOrder, ShipmentLine, SupplierShipment)
 from .payment_request_models import SupplyPaymentRequest
 from .permissions import internal_orders
@@ -141,12 +141,20 @@ def operations_data(actor, scoped):
         'order__country_id', waiting_factory_loading=Count('pk'))
     allocations = DispatchAllocation.objects.filter(membership__batch__in=batches,
         membership__active_guard=True, shipment_line__is_active=True, shipment_line__shipment__status='submitted')
+    received = InboundLine.objects.filter(inbound__batch_id=OuterRef('membership__batch_id'),
+        shipment_line_id=OuterRef('shipment_line_id'), inbound__status='confirmed',
+        received_quantity__isnull=False).values('shipment_line_id').annotate(
+            total=Sum(Least('received_quantity','expected_quantity'))).values('total')
+    terminated = InboundShortageTermination.objects.filter(batch_id=OuterRef('membership__batch_id'),
+        shipment_line_id=OuterRef('shipment_line_id')).values('shipment_line_id').annotate(total=Sum('quantity')).values('total')
+    allocations = allocations.annotate(_pending_receipt=Greatest(F('quantity')-
+        Coalesce(Subquery(received,output_field=IntegerField()),Value(0))-
+        Coalesce(Subquery(terminated,output_field=IntegerField()),Value(0)),Value(0)))
     merge(allocations, 'membership__batch__country_id',
         awaiting_departure_quantity=Sum('quantity', filter=Q(membership__batch__stage='unmarked')),
         in_transit_quantity=Sum('quantity', filter=Q(membership__batch__stage='departed')),
         at_port_quantity=Sum('quantity', filter=Q(membership__batch__stage='arrived_port')),
-        at_warehouse_quantity=Sum('quantity', filter=Q(membership__batch__stage='arrived_warehouse') &
-            (Q(membership__batch__inbound_order__isnull=True) | Q(membership__batch__inbound_order__status='draft'))))
+        at_warehouse_quantity=Sum('_pending_receipt', filter=Q(membership__batch__stage='arrived_warehouse')))
     merge(inbounds.filter(status='draft'), 'batch__country_id', pending_inbounds=Count('pk'))
     merge(InboundLine.objects.filter(inbound__in=inbounds, received_quantity__isnull=False).exclude(
         received_quantity=F('expected_quantity')), 'inbound__batch__country_id', inbound_difference_lines=Count('pk'))
@@ -255,7 +263,10 @@ def _money_targets(kind, scoped):
     payment_history = PaymentRecord.objects.filter(
         tenant_id=OuterRef('tenant_id'), **{payment_owner: OuterRef('pk')}, purpose=purpose,
     )
-    query = query.annotate(has_payment_history=Exists(payment_history), **nature_totals)
+    converted = effective_payments.filter(supplier_deposit_transfer__isnull=False).order_by().values(owner).annotate(total=Sum('amount')).values('total') if kind == 'deposit' else None
+    query = query.annotate(has_payment_history=Exists(payment_history),
+        converted_amount=Coalesce(Subquery(converted, output_field=MONEY), ZERO) if converted is not None else ZERO,
+        **nature_totals)
     applied = ZERO
     available = ZERO
     if kind == 'supplier':
@@ -291,13 +302,34 @@ def _money_targets(kind, scoped):
         **{'_party_id': party_id, '_party_name': party_name, '_party_type': party_type, '_country_code': F(f'{country_path}__country_code'), '_country_name': F(f'{country_path}__name')})
 
 
+def _with_fee_activity(query, kind):
+    """Keep unreconciled fees with recorded or requested financial activity."""
+    fields = {
+        'domestic': ('shipment_id', 'domestic_freight'),
+        'carrier': ('batch_id', 'batch'),
+        'clearance': ('inbound_id', 'inbound'),
+    }
+    if kind not in fields:
+        return query
+    owner_field, request_kind = fields[kind]
+    fees = FeeRecord.objects.filter(tenant_id=OuterRef('tenant_id'), **{owner_field: OuterRef('pk')})
+    requests = SupplyPaymentRequest.objects.filter(
+        tenant_id=OuterRef('tenant_id'), kind=request_kind, source_id=OuterRef('pk'),
+    )
+    return query.annotate(_review_has_fee=Exists(fees), _review_has_request=Exists(requests)).exclude(
+        due__isnull=True, opening_amount=0, has_payment_history=False,
+        _review_has_fee=False, _review_has_request=False,
+    )
+
+
 def costs_data(actor, scoped):
     groups = {}
     grouped_rows = {}
     for kind in ('supplier', 'carrier', 'domestic', 'deposit', 'clearance'):
-        query = _money_targets(kind, scoped)
+        query = _with_fee_activity(_money_targets(kind, scoped), kind)
         rows = list(query.order_by().values('_party_type', '_party_id', '_party_name').annotate(
             documents=Count('pk'), amount=Sum('due'), opening=Sum('opening_amount'), paid=Sum('paid_amount'),
+            converted=Sum('converted_amount'),
             applied=Sum('applied_amount'), recorded=Sum('recorded'), unsettled=Sum('unsettled'),
             over_recorded=Sum('over_recorded'), available_prepayment=Sum('available_prepayment'),
             unknown_documents=Count('pk', filter=Q(due__isnull=True)),
@@ -317,9 +349,9 @@ def costs_data(actor, scoped):
         data['ranking'] = [{'party_type': r['_party_type'], 'party_id': r['_party_id'], 'id': r['_party_id'], 'name': r['_party_name'],
             **{key: str(r[key] or Decimal('0')) for key in ('amount','opening','paid','applied','recorded','unsettled','over_recorded','available_prepayment')},
             'unknown_documents': r['unknown_documents']} for r in ranking]
-        data['cash_paid_amount'] = str(Decimal(data['paid']) - Decimal(data['opening']))
-        for row in data['ranking']:
-            row['cash_paid_amount'] = str(Decimal(row['paid']) - Decimal(row['opening']))
+        data['cash_paid_amount'] = str(Decimal(data['paid']) - Decimal(data['opening']) - sum((r['converted'] or Decimal('0') for r in rows), Decimal('0')))
+        for row, source in zip(data['ranking'], ranking):
+            row['cash_paid_amount'] = str(Decimal(row['paid']) - Decimal(row['opening']) - (source['converted'] or Decimal('0')))
         groups[kind] = data
     # Supplier purchase totals and cash use the same actor/country scope as the
     # purchase ledger. Deposit applications move funds; they are not new cash.
@@ -344,7 +376,7 @@ def costs_data(actor, scoped):
         row.update(purchase_total_amount=str(purchase.get('amount') or Decimal('0')),
             purchase_paid_amount=str(purchase.get('paid') or Decimal('0')),
             purchase_unknown_documents=purchase.get('unknown_documents', 0), direct_paid_amount=row['cash_paid_amount'])
-        row['cash_paid_amount'] = str(Decimal(row['cash_paid_amount']) + Decimal(row['purchase_paid_amount']))
+        row['cash_paid_amount'] = str(Decimal(row['cash_paid_amount']) + Decimal(row['purchase_paid_amount']) - (purchase.get('converted') or Decimal('0')))
         row['unknown_payment_amount'] = str(Decimal(row['direct_paid_amount']) - Decimal(row['known_direct_paid']))
         balance = Decimal(row['amount']) - Decimal(row['purchase_paid_amount']) - Decimal(row['known_direct_paid']) - Decimal(row['known_opening'])
         row.update(shipment_total_amount=row['amount'], payable_amount=str(max(balance, Decimal('0'))),
@@ -355,9 +387,9 @@ def costs_data(actor, scoped):
     supplier['ranking'] = sorted(supplier_rows.values(), key=lambda r: (-Decimal(r['payable_amount']), r['party_id']))[:10]
     return {'groups': groups, 'amount_basis': '系统单据金额，未作汇率换算；供应商货款与货运费用分别统计。',
         'notices': ['供应商应结额来自已提交发货单有效行价格；国内运费和承运费用分别采用当前已确认费用版本。',
-            '总采购金额按已确认采购单统计；供应商已付款合计采购付款与发货单直接付款，定金抵扣不重复计入现金。',
+            '总采购金额按已确认采购单统计；供应商已付款合计采购付款与发货单直接付款，预付款抵扣不重复计入现金。',
             '供应商剩余应付按总发货金额减累计现金已付及历史已付计算；多付列为预付余额，不跨供应商冲抵。单据明细按实际付款和抵扣归属显示。',
-            '期初登记、有效现金支付及有效定金抵扣分列；定金抵扣不计入现金已付，历史修订不重复求和。',
+            '期初登记、有效现金支付及有效预付款抵扣分列；预付款抵扣不计入现金已付，历史修订不重复求和。',
             '未定价/未确认费用单据不计入已知应结及未结金额，须结合待核对单据数查看；登记金额不代表银行核验。']}
 
 
@@ -402,7 +434,7 @@ class DashboardQueue(InternalAPI):
         elif kind == 'inbounds':
             records = inbounds.filter(status='draft').select_related('batch__country', 'batch__freight_company')
         else:
-            records = _money_targets(kind, scoped)
+            records = _with_fee_activity(_money_targets(kind, scoped), kind)
             nature = v.get('payment_nature')
             if nature == 'mixed':
                 records = records.filter(corporate_paid__gt=0, personal_paid__gt=0)

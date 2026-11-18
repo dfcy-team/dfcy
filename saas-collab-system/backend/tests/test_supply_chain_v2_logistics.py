@@ -56,9 +56,11 @@ def arrive(api, batch):
 
 
 def generate(api, batch, warehouse):
-    response = write(api, f"dispatch-batches/{batch['id']}/inbound/", {'expected_version': batch['version'], 'warehouse_id': warehouse.pk}, 'generate')
-    assert response.status_code == 200, response.data
-    return response.data['data']
+    """Legacy historical full-receipt fixture; new UI/API tests select explicit lines."""
+    actor = api.handler._force_user
+    obj = services.generate_inbound_draft(actor, batch['id'], expected_version=batch['version'],
+        warehouse_id=warehouse.pk, idempotency_key='generate')
+    return logistics.inbound_data(obj)
 
 
 def checked(api, inbound, *, quantities=None):

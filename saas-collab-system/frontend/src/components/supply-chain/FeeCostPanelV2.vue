@@ -6,7 +6,7 @@
       <el-alert v-if="refreshPending" title="单据版本已变化，当前表单有未保存内容。保存或手动刷新后可读取最新数据。" type="warning" :closable="false" class="spaced"><template #default><el-button link @click="load">刷新最新数据</el-button></template></el-alert>
       <el-alert v-if="!refreshPending && dirty" title="有未保存的费用或结算登记输入。" type="info" :closable="false" class="spaced" />
       <el-alert v-if="context.target?.fee_block_reason" :title="context.target.fee_block_reason" type="warning" :closable="false" class="spaced" />
-      <div v-show="panelSection==='fee'"><section v-if="!embedded && context.freight_quote_reference" class="spaced"><h4>批次冻结报价参考</h4><p>{{context.freight_quote_reference.channel_name}} · v{{context.freight_quote_reference.quote_sequence}} · {{context.freight_quote_reference.billing_basis==='container'?`${context.freight_quote_reference.container_type}，按柜`:'按方'}} · 单价 {{context.freight_quote_reference.unit_price}} · {{context.freight_quote_reference.prices_include_tax?'含税':'未税'}}（税点 {{context.freight_quote_reference.tax_percent}}%）</p><p>按已保存计费资料计算的参考金额：{{context.freight_quote_reference.reference_amount ?? '待维护计费体积'}}<span v-if="context.freight_quote_reference.quantity!=null"> · 计费量 {{context.freight_quote_reference.quantity}}</span></p><p class="hint">参考金额用于核对报价；实际费用以本页维护并保存的费用金额为准。</p></section>
+      <div v-show="panelSection==='fee'"><section v-if="!embedded && context.freight_quote_reference" class="spaced"><h4>批次冻结报价参考</h4><p>{{context.freight_quote_reference.channel_name}} · v{{context.freight_quote_reference.quote_sequence}} · {{context.freight_quote_reference.billing_basis==='container'?`${context.freight_quote_reference.container_type}，按柜`:'按方'}} · 单价 {{context.freight_quote_reference.unit_price}} · {{context.freight_quote_reference.prices_include_tax?'含税':'未税'}}（税点 {{context.freight_quote_reference.tax_percent}}%）</p><p>按已保存计费资料计算的参考金额：{{context.freight_quote_reference.reference_amount ?? '待维护计费体积'}}<span v-if="context.freight_quote_reference.quantity!=null"> · 计费量 {{context.freight_quote_reference.quantity}}</span></p><p class="hint">报价按批次计费资料试算。收到账单后在此确认实际费用。</p></section>
       <section v-if="context.settlement?.payment_terms" class="spaced"><h4>供应商账期约定</h4><p>{{context.settlement.payment_terms.start_label || '未记录起算方式'}} · {{context.settlement.payment_terms.days==null?'账期未维护':`${context.settlement.payment_terms.days} 天`}} · 参考到期日 {{context.settlement.payment_terms.due_date || '待确定'}}</p><p class="hint">{{context.settlement.payment_terms.message}}</p></section>
       <div v-if="editable" class="fee-form">
         <el-form-item label="成本折算币种">
@@ -20,6 +20,7 @@
         <el-form-item v-if="!embedded" label="费用状态"><el-select :disabled="busy||loading" v-model="fee.state"><el-option label="估算" value="estimated"/><el-option label="已确认" value="confirmed"/></el-select></el-form-item>
         <section v-if="['batch','inbound'].includes(kind)" class="fee-items" aria-label="费用项目">
           <h4>费用项目</h4>
+          <p v-if="lclQuote && lclAmount" class="hint">按冻结散货报价试算 CNY {{ lclAmount }}，请按账单核对。</p>
           <p v-if="embedded && quoteSuggestion != null" class="hint">运费建议 CNY {{ quoteSuggestion }}，请按实际账单核对。</p>
           <div class="table-scroll fee-items-table">
             <el-table :data="breakdown" border empty-text="暂无费用明细，可在下方添加。">
@@ -58,12 +59,13 @@
         </section>
         <el-form-item v-if="embedded" label="费用状态"><el-select :disabled="busy||loading" v-model="fee.state"><el-option label="估算" value="estimated"/><el-option label="已确认" value="confirmed"/></el-select></el-form-item>
         <el-form-item label="分摊方式"><el-select :disabled="busy||loading" v-model="fee.method"><el-option label="按体积" value="volume"/><el-option label="按重量" value="weight"/><el-option label="体积 + 重量" value="mixed"/></el-select></el-form-item><el-form-item v-if="fee.method==='mixed'" label="体积分摊比例 %" required :error="fieldErrors['fee.volume_percent']"><el-input :disabled="busy||loading" v-model="fee.volume_percent" inputmode="decimal" /></el-form-item>
-        <el-form-item v-if="kind!=='shipment'" label="计费体积 m³（记录用途）" :error="fieldErrors['fee.billed_cbm']"><el-input :disabled="busy||loading" v-model="fee.billed_cbm" inputmode="decimal" placeholder="可选；不会自动计算费用" /></el-form-item><el-form-item label="调整原因（必填）" required :error="fieldErrors['fee.reason']"><el-input :disabled="busy||loading" v-model="fee.reason" /></el-form-item></div>
+        <el-form-item v-if="kind!=='shipment'" :label="lclQuote ? '散货计费体积 m³' : '计费体积 m³（可选）'" :error="fieldErrors['fee.billed_cbm']"><el-input :disabled="busy||loading" v-model="fee.billed_cbm" inputmode="decimal" placeholder="按货代账单填写计费体积" /></el-form-item><el-form-item label="调整原因（必填）" required :error="fieldErrors['fee.reason']"><el-input :disabled="busy||loading" v-model="fee.reason" /></el-form-item></div>
         <el-form-item label="备注"><el-input :disabled="busy||loading" v-model="fee.notes" type="textarea" /></el-form-item>
         <details class="fee-measurements" :open="!embedded"><summary>商品计费资料</summary><div class="table-scroll"><el-table :data="measurements" border><el-table-column label="商品图片" width="112"><template #default="{row}"><DocumentProductImageV2 :image-path="row.image_preview_url || ''" :alt="`${row.sku || ''} 商品图片`"/></template></el-table-column><el-table-column label="SKU" min-width="190"><template #default="{row}"><DocumentSkuV2 :sku="row.sku" :legacy-sku-code="row.legacy_sku_code"/></template></el-table-column><el-table-column prop="product_name" label="商品"/><el-table-column prop="quantity" label="数量"/><el-table-column label="本行总体积 m³"><template #default="{row}"><el-input :disabled="busy||loading" v-model="row.volume_cbm" :aria-invalid="!!fieldErrors[`measurements.${row.shipment_line_id}.volume_cbm`]" inputmode="decimal" placeholder="补充本行实测总体积"/><p v-if="fieldErrors[`measurements.${row.shipment_line_id}.volume_cbm`]" class="field-error">{{fieldErrors[`measurements.${row.shipment_line_id}.volume_cbm`]}}</p></template></el-table-column><el-table-column label="本行总重量 kg"><template #default="{row}"><el-input :disabled="busy||loading" v-model="row.weight_kg" :aria-invalid="!!fieldErrors[`measurements.${row.shipment_line_id}.weight_kg`]" inputmode="decimal" placeholder="补充本行实测总重量"/><p v-if="fieldErrors[`measurements.${row.shipment_line_id}.weight_kg`]" class="field-error">{{fieldErrors[`measurements.${row.shipment_line_id}.weight_kg`]}}</p></template></el-table-column></el-table></div>
         <p class="hint">体积和重量均为该商品行总量（含该行全部数量）；录入实测总量会覆盖自动计量值。金额最多 4 位小数，计量最多 6 位。</p>
         </details>
         <el-button v-if="!embedded" type="primary" :disabled="busy||!canWrite" :loading="busy" @click="saveFee">保存费用</el-button>
+        <el-button v-if="!embedded && kind==='batch' && editable && (context.payment_supported ?? context.settlement_supported)" :disabled="busy || loading" :loading="busy" @click="confirmBatchFeeForPayment">确认费用并进入付款申请</el-button>
       </div>
       <div v-else class="spaced"><el-tag type="info">只读</el-tag></div>
       <p v-if="context.fee?.cost_exchange?.currency" class="hint">
@@ -107,6 +109,21 @@ const loading=ref(false),busy=ref(false),error=ref(''),context=ref(null),fee=rea
 function snapshot(){return JSON.stringify({fee:{cost_currency:fee.cost_currency,cost_rate_date:fee.cost_rate_date,amount:fee.amount,state:fee.state,method:fee.method,volume_percent:fee.volume_percent,billed_cbm:fee.billed_cbm,notes:fee.notes,reason:fee.reason,item_breakdown:breakdown.value},measurements:measurements.value.map(m=>({shipment_line_id:m.shipment_line_id,volume_cbm:m.volume_cbm,weight_kg:m.weight_kg})),settlement:{recorded_amount:settlement.recorded_amount,reference_number:settlement.reference_number.trim(),date:settlement.date,notes:settlement.notes,reason:settlement.reason,payee_allocations:settlement.payee_allocations}});}
 watch(breakdown, rows=>{if(['batch','inbound'].includes(props.kind)&&rows.length)fee.amount=rows.reduce((n,row)=>n+Number(row.amount||0),0).toFixed(4);},{deep:true});
 const fieldErrors=ref({});
+const lclQuote=computed(()=>{
+  const reference=context.value?.freight_quote_reference;
+  return props.kind==='batch' && reference?.load_type==='lcl' ? reference : null;
+});
+const lclAmount=computed(()=>{
+  const quote=lclQuote.value;
+  const volume=Number(fee.billed_cbm);
+  if(!quote || !(volume>0) || quote.unit_price==null)return '';
+  const total=Number(quote.unit_price)*volume*(quote.prices_include_tax ? 1 : 1+Number(quote.tax_percent)/100);
+  return Number.isFinite(total) && total>0 ? total.toFixed(2) : '';
+});
+watch(lclAmount,(amount,previous)=>{
+  if(!editable.value || context.value?.fee || breakdown.value.length)return;
+  if(!fee.amount || fee.amount===previous)fee.amount=amount;
+});
 const dirty=computed(()=>!!savedSnapshot.value&&snapshot()!==savedSnapshot.value);
 function unwrap(r){if(!r?.success){const e=new Error(r?.message||'请求失败');e.details=r?.data;throw e;}return r.data;}
 const fieldLabels={amount:'费用金额',volume_percent:'体积分摊比例',billed_cbm:'计费体积',reason:'原因',recorded_amount:'累计已结算金额',reference_number:'参考单号',date:'日期',volume_cbm:'本行总体积',weight_kg:'本行总重量',notes:'备注'};
@@ -163,7 +180,12 @@ function validateForm(scope){
   if(messages.length){error.value=messages.join('；');return false;}return true;
 }
 function idempotent(slot,body,run){const f=JSON.stringify(body);let p=keys.get(slot);if(!p||p.f!==f){p={f,key:api.createIdempotencyKey()};keys.set(slot,p);}return run(p.key).then(r=>{const d=unwrap(r);keys.delete(slot);return d;});}
-function hydrate(data){context.value=data;feeItems.value=data.fee_item_options||[];const f=data.fee||{};breakdown.value=(f.item_breakdown||[]).map(row=>({...row,amount:String(row.amount)}));for(const row of breakdown.value){if(!feeItems.value.some(item=>String(item.id)===String(row.fee_item_id)))feeItems.value.push({id:row.fee_item_id,name:row.name,default_nature:row.nature,is_active:false});}Object.assign(fee,{cost_currency:f.cost_exchange?.currency||'',cost_rate_date:f.cost_exchange?.rate_date||'',amount:f.amount==null?'':String(f.amount),state:f.state||'estimated',method:f.method||'volume',volume_percent:f.volume_percent==null?'50':String(f.volume_percent),billed_cbm:f.billed_cbm==null?'':String(f.billed_cbm),notes:f.notes||'',reason:''});measurements.value=(data.measurements||[]).map(m=>({...m,volume_cbm:m.volume_cbm==null?'':String(m.volume_cbm),weight_kg:m.weight_kg==null?'':String(m.weight_kg)}));const s=data.settlement||{};Object.assign(settlement,{recorded_amount:s.recorded_amount==null?'':String(s.recorded_amount),reference_number:s.reference_number||'',date:s.date||'',notes:s.notes||'',reason:'',payee_allocations:(s.allocations||[]).map(row=>({...row,amount:String(row.amount)}))});refreshPending.value=false;selectedVersion.value=null;savedSnapshot.value=snapshot();emit('updated',data.target);}
+function hydrate(data){context.value=data;feeItems.value=data.fee_item_options||[];const f=data.fee||{};breakdown.value=(f.item_breakdown||[]).map(row=>({...row,amount:String(row.amount)}));for(const row of breakdown.value){if(!feeItems.value.some(item=>String(item.id)===String(row.fee_item_id)))feeItems.value.push({id:row.fee_item_id,name:row.name,default_nature:row.nature,is_active:false});}Object.assign(fee,{cost_currency:f.cost_exchange?.currency||'',cost_rate_date:f.cost_exchange?.rate_date||'',amount:f.amount==null?'':String(f.amount),state:f.state||'estimated',method:f.method||'volume',volume_percent:f.volume_percent==null?'50':String(f.volume_percent),billed_cbm:f.billed_cbm==null?'':String(f.billed_cbm),notes:f.notes||'',reason:''});measurements.value=(data.measurements||[]).map(m=>({...m,volume_cbm:m.volume_cbm==null?'':String(m.volume_cbm),weight_kg:m.weight_kg==null?'':String(m.weight_kg)}));const s=data.settlement||{};Object.assign(settlement,{recorded_amount:s.recorded_amount==null?'':String(s.recorded_amount),reference_number:s.reference_number||'',date:s.date||'',notes:s.notes||'',reason:'',payee_allocations:(s.allocations||[]).map(row=>({...row,amount:String(row.amount)}))});refreshPending.value=false;selectedVersion.value=null;savedSnapshot.value=snapshot();
+  const quotedAmount=data.freight_quote_reference?.reference_amount;
+  if (props.kind==='batch' && !props.embedded && editable.value && !data.fee && data.freight_quote_reference?.load_type==='lcl' && quotedAmount!=null && Number(quotedAmount)>0) {
+    fee.amount=String(quotedAmount);
+  }
+  emit('updated',data.target);}
 let contextGeneration=0;
 async function load(){const token=++contextGeneration,kind=props.kind,id=props.id;loading.value=true;error.value='';fieldErrors.value={};try{const data=unwrap(await api.fetchCostContext(kind,id));if(token===contextGeneration&&kind===props.kind&&id===props.id)hydrate(data);}catch(e){if(token===contextGeneration)error.value=e.message||'费用信息读取失败';}finally{if(token===contextGeneration)loading.value=false;}}
 watch(()=>[cockpitActorKey(auth.currentUser),auth.authorizationStale],clearVoucherPreview,{flush:'sync'});
@@ -177,6 +199,15 @@ function removeFeeItem(index){breakdown.value.splice(index,1);}
 function methodLabel(value){return ({volume:'按体积',weight:'按重量',mixed:'体积与重量混合'})[value]||'—';}
 function stageLabel(value){return ({shipped:'发货阶段',received:'入库阶段'})[value]||'—';}
 function displayTime(value){if(!value)return '—';const date=new Date(value);return Number.isNaN(date.getTime())?'—':date.toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});}
+async function confirmBatchFeeForPayment(){
+  if (dirty.value || context.value.fee?.state!=='confirmed') {
+    fee.state='confirmed';
+    if (!await saveFee()) return;
+    if (context.value.fee?.state!=='confirmed') return;
+  }
+  changePanel('payment');
+}
+
 function costLabel(state){return ({estimated:'暂估',confirmed:'已确认',recalculation_required:'待重算'})[state]||'尚未计算';}
 function measurementPayload(){return measurements.value.map(row=>{const original=context.value.measurements.find(m=>m.shipment_line_id===row.shipment_line_id)||{};const value=(name,source,label)=>{const parsed=decimal(row[name],6,label);return row[source]==='manual_total'||String(row[name]??'')!==String(original[name]??'')?parsed:null;};return {shipment_line_id:row.shipment_line_id,volume_cbm:value('volume_cbm','volume_source','本行总体积'),weight_kg:value('weight_kg','weight_source','本行总重量')};});}
 async function saveFee(sourceVersion){if(!editable.value||busy.value)return;error.value='';try{if(['batch','inbound'].includes(props.kind)&&breakdown.value.length)fee.amount=breakdown.value.reduce((n,row)=>n+Number(row.amount||0),0).toFixed(4);if(!validateForm('fee'))return;const body={expected_source_version:Number(typeof sourceVersion==='number'?sourceVersion:context.value.target.version),expected_version:Number(context.value.fee?.version||0),amount:decimal(fee.amount,4,'费用金额',true),state:fee.state,method:fee.method,volume_percent:fee.method==='mixed'?decimal(fee.volume_percent,2,'体积分摊比例',true):null,billed_cbm:props.kind==='shipment'?null:decimal(fee.billed_cbm,6,'计费体积'),notes:fee.notes,reason:fee.reason.trim(),measurements:measurementPayload(),...(fee.cost_currency?{cost_exchange:{currency:fee.cost_currency.toUpperCase(),...(fee.cost_rate_date?{rate_date:fee.cost_rate_date}:{})}}:{}),...(['batch','inbound'].includes(props.kind)?{item_breakdown:breakdown.value.map(x=>({fee_item_id:Number(x.fee_item_id),amount:decimal(x.amount,4,'分项金额',true),nature:x.nature,...('tax_rate' in x?{tax_rate:x.nature==='personal'?'0':x.tax_rate}:{} )}))}:{})};if(['batch','inbound'].includes(props.kind)&&body.item_breakdown.length){const sum=body.item_breakdown.reduce((n,x)=>n+Number(x.amount),0);body.amount=sum.toFixed(4);}if(fee.method==='mixed'&&Number(body.volume_percent)>100)throw new Error('体积分摊比例不能超过 100%。');busy.value=true;await idempotent('fee',body,k=>api.saveFee(props.kind,props.id,body,k));await load();ElMessage.success('费用已保存。');return true;}catch(e){showError(e,'fee');return false;}finally{busy.value=false;}}

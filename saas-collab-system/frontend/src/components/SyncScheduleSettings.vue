@@ -3,6 +3,10 @@
     <h3>采集范围与定时设置</h3>
     <p>采集范围决定读取哪些数据，定时设置决定何时执行。保存不会立即采集，也不会启用停用任务。</p>
     <el-form label-position="top" :disabled="!canManage || saving">
+      <template v-if="isWarehouseOrderLookup">
+        <el-form-item label="单次订单核验上限（1～100）"><el-input-number v-model="form.warehouse_order_limit" :min="1" :max="100" :precision="0" /></el-form-item>
+        <p>绑定 WMS 仓库授权作为国家边界；同国家多仓仍逐单核验唯一性。不按时间范围回看，不提供历史补采。</p>
+      </template>
       <el-form-item v-if="supportsLogistics" label="Shopee 独立物流采集">
         <el-switch v-model="form.include_logistics" :disabled="!canManage || saving" />
         <p>默认关闭。开启后额外查询运单号及正向／逆向轨迹，每页最多 4 单；保存不会执行采集，也不会调用仓库或操作平台发货。</p>
@@ -75,7 +79,7 @@
         <p>仅采集所选数据。GMS 须有平台白名单和权限，建议先单独选中试采；推荐数据和开关是当前快照，不是历史效果。小时报表逐日采集，耗时高于日报。</p>
       </template>
       <el-form-item label="执行方式"><el-select v-model="form.schedule_type"><el-option label="手动" value="manual" /><el-option label="每隔 N 分钟" value="interval" /><el-option label="每天" value="daily" /><el-option label="每周" value="weekly" /></el-select></el-form-item>
-      <el-form-item v-if="form.schedule_type === 'interval'" label="间隔（分钟，15～10080）"><el-input-number v-model="form.interval_minutes" :min="15" :max="10080" /></el-form-item>
+      <el-form-item v-if="form.schedule_type === 'interval'" :label="`间隔（分钟，${isWarehouseOrderLookup ? '1～10080' : '15～10080'}）`"><el-input-number v-model="form.interval_minutes" :min="isWarehouseOrderLookup ? 1 : 15" :max="10080" /></el-form-item>
       <el-form-item v-if="form.schedule_type === 'daily'" label="每日执行时间（所选时区）">
         <el-checkbox v-model="form.multiple_daily_times">一天执行多个时点</el-checkbox>
         <template v-if="form.multiple_daily_times">
@@ -124,6 +128,7 @@ const isMissingOrdersOnly = computed(() => supportsProductOrderBackfill.value &&
 const isOrderJob = computed(() => props.job.resource_type === 'sales_order');
 const isAdvertisingJob = computed(() => props.job.resource_type === 'advertising_report' && String(props.job.platform || '').toLowerCase() !== 'tiktok' && !props.job.ads_mapping_id);
 const isAdsJob = computed(() => props.job.resource_type === 'advertising_report' && (String(props.job.platform || '').toLowerCase() === 'tiktok' || Boolean(props.job.ads_mapping_id)));
+const isWarehouseOrderLookup = computed(() => props.job.resource_type === 'warehouse_order_lookup');
 const supportsRange = computed(() => ['sales_order', 'refund_return', 'settlement_bill', 'advertising_report'].includes(props.job.resource_type) || (isProductJob.value && !isMissingOrdersOnly.value && form.product_full_sync === false));
 const maxDays = computed(() => {
   if (isAdsJob.value) return 7;
@@ -146,7 +151,7 @@ const canEditAnchor = computed(() => supportsEfficientPolicy.value && form.strat
 const days = ['周一','周二','周三','周四','周五','周六','周日'];
 watch(() => props.job, job => {
   const localTimes = Array.isArray(job.local_times) ? [...new Set(job.local_times)] : [];
-  Object.assign(form, { schedule_type: job.schedule_type === 'hourly' ? 'interval' : job.schedule_type === 'cron' ? 'manual' : job.schedule_type || 'manual', interval_minutes: job.interval_minutes || 60, local_time: job.local_time || localTimes[0] || '02:00', local_times: localTimes.length ? localTimes : [job.local_time || '02:00'], multiple_daily_times: job.schedule_type === 'daily' && localTimes.length > 0, weekdays: [...(job.weekdays || [1])], timezone: job.timezone || 'Asia/Shanghai', catch_up: job.catch_up || 'skip', pause_until: job.pause_until || '', execution_budget_seconds: job.execution_budget_seconds ?? 0, overlap_minutes: job.overlap_minutes ?? 5 });
+  Object.assign(form, { schedule_type: job.schedule_type === 'hourly' ? 'interval' : job.schedule_type === 'cron' ? 'manual' : job.schedule_type || 'manual', interval_minutes: job.interval_minutes || (isWarehouseOrderLookup.value ? 1 : 60), warehouse_order_limit: job.warehouse_order_limit ?? job.sync_scope?.warehouse_order_limit ?? 50, local_time: job.local_time || localTimes[0] || '02:00', local_times: localTimes.length ? localTimes : [job.local_time || '02:00'], multiple_daily_times: job.schedule_type === 'daily' && localTimes.length > 0, weekdays: [...(job.weekdays || [1])], timezone: job.timezone || 'Asia/Shanghai', catch_up: job.catch_up || 'skip', pause_until: job.pause_until || '', execution_budget_seconds: job.execution_budget_seconds ?? 0, overlap_minutes: job.overlap_minutes ?? 5 });
 }, { immediate: true });
 watch(() => props.job, job => {
   if (supportsEfficientPolicy.value) {
@@ -226,6 +231,9 @@ function buildPayload() {
     delete data.overlap_minutes;
   }
   if (isAdsJob.value) delete data.execution_budget_seconds;
+  if (isWarehouseOrderLookup.value) {
+    data.warehouse_order_limit = Number(form.warehouse_order_limit);
+  } else delete data.warehouse_order_limit;
   return data;
 }
 async function preview() {

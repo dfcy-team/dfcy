@@ -24,6 +24,7 @@ export const fetchInboundOrder = (id) => requestApi({ method: 'get', url: `${BAS
 export const fetchInboundExtraSkus = (id, search = '') => requestApi({ method: 'get', url: `${BASE}inbound-orders/${enc(id)}/extra-skus/`, params: { search } });
 export const updateInboundOrder = (id, data, key) => write('patch', `${BASE}inbound-orders/${enc(id)}/`, data, key);
 export const confirmInboundOrder = (id, data, key) => write('post', `${BASE}inbound-orders/${enc(id)}/confirm/`, data, key);
+export const cancelInboundOrder = (id, data, key) => write('post', `${BASE}inbound-orders/${enc(id)}/cancel/`, data, key);
 export const fetchWmsReconciliation = (id) => requestApi({ method: 'get', url: `${BASE}inbound-orders/${enc(id)}/wms-reconciliation/` });
 export const fetchWmsCandidates = (id, params) => requestApi({ method: 'get', url: `${BASE}inbound-orders/${enc(id)}/wms-candidates/`, params });
 export const createWmsAllocation = (id, data, key) => write('post', `${BASE}inbound-orders/${enc(id)}/wms-allocations/`, data, key);

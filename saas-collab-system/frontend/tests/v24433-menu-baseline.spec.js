@@ -140,7 +140,7 @@ describe('current deployment menu baseline', () => {
 
   it('keeps the current dark desktop and mobile navigation palette', () => {
     const layout = fs.readFileSync(path.resolve(process.cwd(), 'src/layouts/MainLayout.vue'), 'utf8');
-    for (const color of ['#101827', '#0b1220', '#1e293b', '#1d4ed8', '#1e40af', '#cbd5e1', '#f8fafc']) {
+    for (const color of ['#171e2d', '#1e293b', '#232d3f', '#3b4960', '#cbd5e1', '#f8fafc']) {
       expect(layout).toContain(color);
     }
     expect(layout).toContain('class="navigation-surface"');

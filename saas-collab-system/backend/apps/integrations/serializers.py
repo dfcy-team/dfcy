@@ -959,6 +959,7 @@ class IntegrationAuditLogSerializer(serializers.ModelSerializer):
 
 class SyncJobSerializer(serializers.ModelSerializer):
     is_enabled = serializers.BooleanField(default=False)
+    warehouse_order_limit = serializers.IntegerField(min_value=1, max_value=100, required=False, write_only=True)
     include_logistics = serializers.SerializerMethodField()
 
     def get_include_logistics(self, job):
@@ -1034,7 +1035,12 @@ class SyncJobSerializer(serializers.ModelSerializer):
         return f"store:{store_id}" if store_id else (f"warehouse:{obj.warehouse_authorization.warehouse_id}" if obj.warehouse_authorization_id else f"unbound:{obj.pk}")
 
     def create(self, validated_data):
-        policy = {k: validated_data.pop(k) for k in ("execution_mode", "query_mode", "lookback_days", "range_start_at", "range_end_at", "execution_budget_seconds") if k in validated_data}
+        policy = {k: validated_data.pop(k) for k in ("execution_mode", "query_mode", "lookback_days", "range_start_at", "range_end_at", "execution_budget_seconds", "warehouse_order_limit") if k in validated_data}
+        if validated_data.get('resource_type') == 'warehouse_order_lookup':
+            validated_data['sync_scope'] = {'execution_mode': 'live_readonly',
+                'warehouse_order_limit': policy.get('warehouse_order_limit', 50),
+                'schedule': {'interval_minutes': 1, 'execution_budget_seconds': 240, 'timezone': 'Asia/Shanghai', 'catch_up': 'skip'}}
+            validated_data.setdefault('max_retry_count', 0)
         if validated_data.get("ads_mapping_id"):
             validated_data["sync_scope"] = {"execution_mode": "live_readonly", "query": {
                 "mode": policy.get("query_mode", "incremental"), "lookback_days": policy.get("lookback_days", 7),
@@ -1070,6 +1076,7 @@ class SyncJobSerializer(serializers.ModelSerializer):
             "ads_mapping_id", "advertiser_id", "advertiser_timezone", "store_id", "subject_name", "subject_key",
             "execution_mode", "query_mode", "lookback_days", "range_start_at", "range_end_at",
             "execution_budget_seconds",
+            "warehouse_order_limit",
             "platform",
             "config_alias",
             "environment",
@@ -1121,6 +1128,9 @@ class SyncJobSerializer(serializers.ModelSerializer):
         if not config_id or not resource_type:
             return attrs
         config = PlatformIntegrationConfig.objects.get(id=config_id, tenant=request.user.tenant)
+        if resource_type == 'warehouse_order_lookup' and (
+                config.environment != 'production' or config.platform not in {'jifeng_wms', 'best_ecapi'}):
+            raise serializers.ValidationError('订单仓库查询仅支持正式WMS配置。')
         if resource_type == "advertising_report" and config.platform != "tiktok" and (
             config.platform != "shopee" or (config.platform_config or {}).get("api_type") != "advertising"
         ):
@@ -1173,6 +1183,8 @@ class SyncJobSerializer(serializers.ModelSerializer):
         warehouse_authorization_id = attrs.get(
             "warehouse_authorization_id", getattr(self.instance, "warehouse_authorization_id", None)
         )
+        if resource_type == 'warehouse_order_lookup' and (store_authorization_id is not None or warehouse_authorization_id is None):
+            raise serializers.ValidationError('订单仓库查询必须绑定具体WMS仓库授权，不绑定平台店铺授权。')
         if store_authorization_id is not None and warehouse_authorization_id is not None:
             raise serializers.ValidationError("A sync job can bind either a store or warehouse authorization, not both.")
         if (
@@ -1225,6 +1237,13 @@ class SyncJobSerializer(serializers.ModelSerializer):
                 )
             from .warehouse_credential_service import require_verified_warehouse
             require_verified_warehouse(warehouse_authorization)
+            if resource_type == 'warehouse_order_lookup':
+                other = SyncJob.objects.filter(tenant=request.user.tenant, resource_type=resource_type,
+                    warehouse_authorization__warehouse__country_code__iexact=warehouse_authorization.warehouse.country_code)
+                if self.instance:
+                    other = other.exclude(pk=self.instance.pk)
+                if other.exists():
+                    raise serializers.ValidationError('该国家已有订单仓库查询任务，请编辑原任务，避免重复协调。')
         if config.environment not in {
             PlatformIntegrationConfig.Environment.PILOT,
             PlatformIntegrationConfig.Environment.PRODUCTION,

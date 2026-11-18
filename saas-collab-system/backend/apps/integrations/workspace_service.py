@@ -38,6 +38,7 @@ RESOURCE_DESTINATIONS = {
     "advertising_report": ("Shopee 广告数据", "shopee_advertising_record"),
     "refund_return": ("退款退货", "refund_return / refund_return_item"),
     "inventory_snapshot": ("库存分析", "inventory_snapshot"),
+    "warehouse_order_lookup": ("订单仓库查询结果", "sales_order_warehouse_lookup"),
 }
 
 
@@ -328,6 +329,7 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None, context=None
         "query_page_size": int(query_scope.get("page_size") or scope.get("query_page_size") or 50),
         "max_pages": int(query_scope.get("max_pages") or scope.get("max_pages") or 100),
         "max_records": int(query_scope.get("max_records") or scope.get("max_records") or 50000),
+        "warehouse_order_limit": int(scope.get("warehouse_order_limit", 50)) if job.resource_type == "warehouse_order_lookup" else None,
         "range_start_at": query_scope.get("start_at") or scope.get("range_start_at"),
         "range_end_at": query_scope.get("end_at") or scope.get("range_end_at"),
         "interval_minutes": int(schedule_scope.get("interval_minutes") or scope.get("interval_minutes") or 60),

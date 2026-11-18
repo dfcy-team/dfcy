@@ -60,7 +60,7 @@ possible during an outage; committed timestamps bound uncertain retries.
                 return snapshot
             client = channel.client
             seen, complete = 0, True
-            for queue in ("sync", "sync-history", "celery"):
+            for queue in ("sync", "sync-history", "sync-video", "warehouse-orders", "celery"):
                 for priority in channel.priority_steps:
                     key = channel._q_for_pri(queue, priority)
                     length = client.llen(key)

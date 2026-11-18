@@ -29,6 +29,12 @@
             <el-input v-model="itemSearch" class="search-input" clearable placeholder="搜索产品名称或编码" aria-label="搜索到货明细" />
           </div>
           <el-table :data="pagedItems" border stripe empty-text="没有匹配的到货明细">
+            <el-table-column label="图片" width="80">
+              <template #default="{ row }">
+                <img v-if="imageUrls[row.image_path]" :src="imageUrls[row.image_path]" :alt="row.product_name" class="notice-image" />
+                <span v-else>—</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="product_name" label="产品" min-width="190" show-overflow-tooltip />
             <el-table-column label="SKU 编码" min-width="220">
               <template #default="{ row }"><div class="codes"><span><b>新</b>{{ display(row.sku_code) }}</span><span><b>旧</b>{{ display(row.legacy_sku_code) }}</span></div></template>
@@ -47,6 +53,12 @@
             <el-input v-model="transitSearch" class="search-input" clearable placeholder="搜索款式名称或编码" aria-label="搜索在途款式" />
           </div>
           <el-table :data="pagedTransitStyles" border stripe empty-text="暂无匹配的在途款式">
+            <el-table-column label="图片" width="80">
+              <template #default="{ row }">
+                <img v-if="imageUrls[row.image_path]" :src="imageUrls[row.image_path]" :alt="row.product_name" class="notice-image" />
+                <span v-else>—</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="product_name" label="款式" min-width="190" show-overflow-tooltip />
             <el-table-column label="SPU 编码" min-width="220">
               <template #default="{ row }"><div class="codes"><span><b>新</b>{{ display(row.spu_code) }}</span><span><b>旧</b>{{ display(row.legacy_spu_code) }}</span></div></template>
@@ -62,7 +74,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { requestApi } from '../../api/request';
+import { fetchApiFile, requestApi } from '../../api/request';
 
 const route = useRoute();
 const loading = ref(true);
@@ -86,6 +98,24 @@ const filteredTransitStyles = computed(() => {
 });
 const pagedItems = computed(() => filteredItems.value.slice((itemPage.value - 1) * itemPageSize.value, itemPage.value * itemPageSize.value));
 const pagedTransitStyles = computed(() => filteredTransitStyles.value.slice((transitPage.value - 1) * transitPageSize.value, transitPage.value * transitPageSize.value));
+const imageUrls = ref({});
+watch([pagedItems, pagedTransitStyles], ([items, transit], _, onCleanup) => {
+  const urls = {};
+  let cancelled = false;
+  imageUrls.value = {};
+  onCleanup(() => {
+    cancelled = true;
+    Object.values(urls).forEach((url) => URL.revokeObjectURL(url));
+  });
+  const paths = new Set([...items, ...transit].map((row) => row.image_path).filter(Boolean));
+  for (const path of paths) {
+    fetchApiFile(path).then((result) => {
+      if (cancelled || !result?.success) return;
+      urls[path] = URL.createObjectURL(result.blob);
+      imageUrls.value = { ...urls };
+    }).catch(() => {});
+  }
+});
 watch(itemSearch, () => { itemPage.value = 1; });
 watch(transitSearch, () => { transitPage.value = 1; });
 watch(itemPageSize, () => { itemPage.value = 1; });
@@ -106,6 +136,7 @@ watch(() => route.params.id, async (id) => {
 </script>
 
 <style scoped>
+.notice-image { width: 48px; height: 48px; object-fit: contain; }
 .notice-page { max-width: 1180px; margin: 0 auto; padding: 20px; color: #1d2939; }
 .notice-card { border: 1px solid #e8edf3; border-radius: 14px; }
 .page-heading, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }

@@ -45,7 +45,7 @@ function drill(row: Row) {
     currency: row.currency, product_id: String(row.product_id), return_view: 'declines',
     return_date_from: props.filters.date_from, return_date_to: props.filters.date_to,
     return_platform: props.filters.platform || '', return_region: props.filters.region || '',
-    return_store_id: props.filters.store_id || '', return_currency: props.filters.currency || '', return_metric: metric.value
+    return_store_id: props.filters.store_id || '', ...(props.filters.store_ids ? { return_store_ids: props.filters.store_ids } : {}), return_currency: props.filters.currency || '', return_metric: metric.value
   } });
 }
 async function openSelected(row: Row) { selected.value = row; await nextTick(); }

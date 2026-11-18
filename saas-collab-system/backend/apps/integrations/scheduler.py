@@ -267,6 +267,12 @@ def dispatch_due_jobs(enqueue, now=None, limit=20, admission=None, resource_type
                 continue
             if blocking_runs(job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]), now).exists():
                 continue
+            if job.resource_type == 'warehouse_order_lookup':
+                from .warehouse_order_admission import warehouse_slot_available
+                if not warehouse_slot_available(job):
+                    SyncSchedulerHeartbeat.objects.update_or_create(
+                        key=f'capacity:{job.pk}', defaults={'last_seen_at': job.next_run_at})
+                    continue
             due = job.next_run_at
             ads_scope = None
             ads_error = False

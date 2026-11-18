@@ -27,6 +27,7 @@ class ChannelInput(serializers.Serializer):
     transport_mode = serializers.ChoiceField(choices=['sea', 'air', 'road', 'rail', 'other'])
     notes = serializers.CharField(allow_blank=True, max_length=10000, default='')
     is_active = serializers.BooleanField(default=True)
+    load_type = serializers.ChoiceField(choices=['fcl', 'lcl'], allow_blank=True, required=False)
     container_records = serializers.ListField(child=serializers.DictField(), required=False, max_length=100)
     expected_version = serializers.IntegerField(min_value=1, required=False)
 
@@ -141,7 +142,7 @@ def channel_data(channel, quote=None, quotes=None):
     return {'id': channel.pk, 'version': channel.version, 'company_id': channel.company_id,
             'company_name': channel.company.name, 'country_id': channel.country_id,
             'country_code': channel.country.country_code.upper(), 'country_name': channel.country.name,
-            **{name: getattr(channel, name) for name in ('code', 'name', 'origin', 'cargo_type', 'transport_mode', 'notes', 'is_active', 'container_records')},
+            **{name: getattr(channel, name) for name in ('code', 'name', 'origin', 'cargo_type', 'transport_mode', 'notes', 'is_active', 'container_records', 'load_type')},
             'current_quote': quote_data(quote), 'current_quotes': [quote_data(item) for item in quotes]}
 
 
@@ -185,6 +186,8 @@ def save_channel(actor, payload, request_key, pk=None):
     with domain_write():
         for field in ('code', 'name', 'origin', 'cargo_type', 'transport_mode', 'notes', 'is_active'):
             setattr(obj, field, payload[field])
+        if 'load_type' in payload:
+            obj.load_type = payload['load_type']
         if 'container_records' in payload:
             obj.container_records = payload['container_records']
         obj.company, obj.country = company, country
@@ -230,7 +233,19 @@ def batch_freight_values(actor, company, country_code, channel_id=None, quote_id
     channel = channel_scope(actor, VIEW).filter(pk=channel_id, company=company, is_active=True).first()
     if channel is None or channel.country.country_code.upper() != country_code or channel.country.status != 'active':
         raise ValidationError('运输渠道必须属于所选货运公司及目的国家，且处于启用状态。')
+    if channel.load_type == 'fcl':
+        if quote_id:
+            raise ValidationError('整柜线路请在发运批次维护本次运费。')
+        snapshot = channel_data(channel, quotes=[])
+        snapshot.pop('current_quote', None)
+        snapshot.pop('current_quotes', None)
+        base.update(freight_channel=channel, freight_quote_snapshot=snapshot, fee_per_cbm_snapshot=None)
+        return base
     quotes = current_quotes(channel)
+    if channel.load_type == 'lcl':
+        quotes = [item for item in quotes if item.billing_basis == 'cbm']
+        if quote_id is None and len(quotes) == 1:
+            quote_id = quotes[0].pk
     quote = next((item for item in quotes if item.pk == quote_id), None)
     if not quote:
         raise ValidationError('有效报价版本已变化或已过期，请刷新渠道报价后重新选择。')
@@ -259,7 +274,7 @@ def freight_reference(batch, chargeable_cbm=None):
         if amount is not None and not quote.get('prices_include_tax'):
             amount *= 1 + Decimal(quote['tax_percent']) / 100
         amount_text = str(amount.quantize(Decimal('.01'), rounding=ROUND_HALF_UP)) if amount is not None else None
-    return {'channel_name': snapshot['name'], 'quote_sequence': quote['sequence'], 'billing_basis': basis,
+    return {'load_type': snapshot.get('load_type', ''), 'channel_name': snapshot['name'], 'quote_sequence': quote['sequence'], 'billing_basis': basis,
             'quantity': str(quantity) if quantity is not None else None, 'unit_price': unit,
             'container_type': quote['container_type'], 'tax_percent': quote['tax_percent'],
             'prices_include_tax': quote['prices_include_tax'],

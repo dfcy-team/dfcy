@@ -30,6 +30,7 @@ def _freeze_adapter_scope(adapter_scope):
         "time_basis", "statuses", "_sync_policy", "_refund_daily_pilot", "start_date", "end_date",
         "report_timezone", "advertising_datasets", "affiliate_plan", "ads_mapping_id",
         "advertiser_id", "advertiser_timezone", "report_scope", "collection_plan",
+        "warehouse_order_limit", "warehouse_country_code",
     )
     return {
         key: adapter_scope[key]
@@ -230,6 +231,10 @@ def enqueue_sync_run(sync_job, idempotency_key=None):
         ).first()
         if existing:
             return existing, False
+        if locked_job.resource_type == 'warehouse_order_lookup':
+            from .warehouse_order_admission import warehouse_slot_available
+            if not warehouse_slot_available(locked_job, idempotency_key=idempotency_key):
+                raise ValidationError('WAREHOUSE_COORDINATOR_BUSY')
         from .history_schedule import blocking_runs
         if blocking_runs(SyncRun.objects.filter(
             sync_job=locked_job,
@@ -312,6 +317,11 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             .get(pk=sync_job.pk, tenant_id=sync_job.tenant_id)
         )
         now = timezone.now()
+        if locked_job.resource_type == 'warehouse_order_lookup':
+            from .warehouse_order_admission import warehouse_slot_available
+            if not warehouse_slot_available(locked_job, idempotency_key=idempotency_key,
+                                            dispatch_id=dispatch.pk if dispatch else None):
+                raise ValidationError('WAREHOUSE_COORDINATOR_BUSY')
         if history_segment:
             from .models import HistorySyncBatch, HistorySyncSegment
             from .history_schedule import history_task_gate
@@ -440,6 +450,8 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
     adapter.bind_run(run)
     schedule = (sync_job.sync_scope or {}).get("schedule", {})
     budget_seconds = 240 if history_segment else int(schedule.get("execution_budget_seconds") or 0)
+    if sync_job.resource_type == "warehouse_order_lookup" and "execution_budget_seconds" not in schedule:
+        budget_seconds = 240
     if sync_job.resource_type == "advertising_report" and not sync_job.ads_mapping_id and not budget_seconds:
         budget_seconds = 240
     if (sync_job.resource_type == "platform_product" and sync_job.integration_config.platform == "shopee"

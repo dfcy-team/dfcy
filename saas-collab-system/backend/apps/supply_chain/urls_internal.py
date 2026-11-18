@@ -1,4 +1,5 @@
-from .inbound_notice_api import InboundNoticeDetail
+from .supplier_deposits import SupplierDeposits
+from .inbound_notice_api import InboundNoticeDetail, InboundNoticeImage
 from .inbound_result import InboundResult
 from .inbound_notifications import ConfigAPI as InboundNotifyConfig, StatusAPI as InboundNotifyStatus
 from django.urls import include, path
@@ -33,8 +34,10 @@ from .monthly_shipment_drilldown import MonthlyShipmentDrilldown
 
 from .daily_replenishment import DailyLatest, DailyRows
 urlpatterns = [
+    path("supplier-deposits/", SupplierDeposits.as_view(), name="sc2-supplier-deposits"),
     path("replenishment-daily/", DailyLatest.as_view(), name="sc2-replenishment-daily"),
     path("replenishment-daily/<uuid:pk>/rows/", DailyRows.as_view(), name="sc2-replenishment-daily-rows"),
+    path('inbound-notices/<int:pk>/<str:kind>/<int:sku_id>/image/', InboundNoticeImage.as_view(), name='sc2-inbound-notice-image'),
     path('inbound-notices/<int:pk>/', InboundNoticeDetail.as_view(), name='sc2-inbound-notice-detail'),
     path("inbound-results/<str:token>/", InboundResult.as_view(), name="sc2-inbound-result"),
     path('settings/inbound-notification/', InboundNotifyConfig.as_view()),
@@ -185,6 +188,7 @@ urlpatterns = [
     path("inbound-orders/<int:pk>/skus/<int:sku_id>/image/", InternalInboundProductImage.as_view(), name="sc2-inbound-image"),
     path("inbound-orders/<int:pk>/extra-skus/", la.InboundExtraSkuOptions.as_view(), name="sc2-inbound-extra-skus"),
     path("inbound-orders/<int:pk>/confirm/", la.ConfirmInbound.as_view(), name="sc2-inbound-confirm"),
+    path("inbound-orders/<int:pk>/cancel/", la.CancelInbound.as_view(), name="sc2-inbound-cancel"),
     path("inbound-orders/<int:pk>/wms-reconciliation/", la.WmsReconciliation.as_view(), name="sc2-wms-reconciliation"),
     path("inbound-orders/<int:pk>/wms-candidates/", la.WmsCandidates.as_view(), name="sc2-wms-candidates"),
     path("inbound-orders/<int:pk>/wms-allocations/", la.WmsAllocations.as_view(), name="sc2-wms-allocations"),

@@ -57,6 +57,7 @@ def prepare_batches(rows):
         for allocation in active().filter(tenant_id=tenant_id, membership__batch_id__in=ids).values(
                 'membership__batch_id', 'shipment_line_id', 'quantity'):
             quantities[allocation['membership__batch_id']][allocation['shipment_line_id']] = allocation['quantity']
-        inbound = {row.batch_id: row for row in InboundOrder.objects.filter(tenant_id=tenant_id, batch_id__in=ids)}
+        from .inbound_split import prepare_progress
+        prepare_progress(scoped, quantities)
         for row in scoped:
-            row._read_batch = {'members': groups[row.pk], 'quantities': quantities[row.pk], 'inbound': inbound.get(row.pk)}
+            row._read_batch = {'members': groups[row.pk], 'quantities': quantities[row.pk]}

@@ -81,6 +81,10 @@ def test_full_country_filters_later_chunks_and_reads_never_recalculate(world, co
         rows = facts(user, country, skus, **kwargs)
         for row in rows:
             row['available_stock'] = '99999' if int(row['sku'][1:]) < 20 else '400'
+            if row['sku'] == 'J000':
+                row['blocking_issues'] = ['collection_coverage_unproven']
+                for window in row['sales_windows']:
+                    window.update(recognized_units=window['units'], coverage_complete=False)
         return rows
 
     api = client(actor)
@@ -105,7 +109,14 @@ def test_full_country_filters_later_chunks_and_reads_never_recalculate(world, co
         search = api.get(BASE + result['id'] + '/rows/', {'search': 'J044'}).data['data']
         assert search['count'] == 1
         zero = api.get(BASE + result['id'] + '/rows/', {'quantity_filter': 'zero'}).data['data']
-        assert zero['count'] == 20
+        assert zero['count'] == 19
+        observed = api.get(BASE + result['id'] + '/rows/', {'quantity_filter': 'observed'}).data['data']
+        assert observed['count'] == 26 and observed['counts']['observed'] == 26
+        assert observed['rows'][0]['sku_code'] == 'J000'
+        unknown = api.get(BASE + result['id'] + '/rows/', {'quantity_filter': 'unknown'}).data['data']
+        assert unknown['count'] == 1
+        assert unknown['rows'][0]['suggested_quantity'] is None
+        assert unknown['rows'][0]['recognized_reference']['can_create_order'] is False
     assert ReplenishmentCalculationRow.objects.count() == 45
     jobs.run_replenishment_calculation(result['id'])
     assert ReplenishmentCalculationRow.objects.count() == 45

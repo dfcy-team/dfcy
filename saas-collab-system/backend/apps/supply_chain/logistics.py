@@ -54,14 +54,15 @@ def confirm_inbound(actor, pk, payload, key):
         raise ValidationError(f'发运批次 {obj.batch.number} 尚未标记到仓。请先在集货发运中登记实际到仓时间，再确认入库。')
     if warehouse.country_code.upper() != obj.batch.country_code_snapshot:
         raise ValidationError('入库仓所属国家与发运批次目的国家不一致，请核对入库仓。')
-    lines = list(obj.lines.select_related('shipment_line__shipment'))
+    from .inbound_split import validate_confirmation
+    lines = validate_confirmation(obj)
     if not lines or any(line.received_quantity is None for line in lines):
         raise ValidationError('请逐行确认实收数量；未核对数量不能视为零。')
     extra_lines = list(obj.extra_lines.filter(is_active=True).select_related('sku'))
     source_quantities = dispatch_allocations.batch_quantities(obj.batch)
     for line in lines:
         if (not line.shipment_line.is_active
-                or line.expected_quantity != source_quantities.get(line.shipment_line_id)):
+                or line.expected_quantity > source_quantities.get(line.shipment_line_id, 0)):
             raise ValidationError('入库来源发生变化，请核对批次与发货明细。')
         if line.received_quantity != line.expected_quantity and not line.difference_note.strip():
             raise ValidationError('实收数量与应收不同，请填写差异原因。')
@@ -80,14 +81,22 @@ def confirm_inbound(actor, pk, payload, key):
         obj.stock_receipt_ref, obj.confirmed_by, obj.confirmed_at = receipt.receipt_ref, actor, timezone.now()
         obj.version += 1
         obj.save()
+        from .inbound_split import preserve_legacy_shortage
+        preserve_legacy_shortage(obj, actor)
+        obj.batch.version += 1
+        obj.batch.save()
         services._event(actor, obj, 'inbound_confirmed', key, payload, audit={
             'stock_receipt_ref': receipt.receipt_ref, 'warehouse_id': warehouse.pk,
             'received_lines': [{'inbound_line_id': l.pk, 'shipment_line_id': l.shipment_line_id,
                                 'received_quantity': l.received_quantity, 'difference_note': l.difference_note} for l in lines],
             'extra_lines': [{'extra_line_id': l.pk, 'sku_id': l.sku_id, 'sku': l.sku_code_snapshot,
                              'received_quantity': l.received_quantity, 'difference_note': l.difference_note} for l in extra_lines]})
-        from .costs import calculate_inbound_estimate
-        calculate_inbound_estimate(actor, obj.batch)
+        if obj.receipt_mode == 'legacy_full':
+            from .costs import calculate_inbound_estimate
+            calculate_inbound_estimate(actor, obj.batch)
+    if obj.receipt_mode == 'manual_partial':
+        from .inbound_costs import estimate_for_inbound
+        estimate_for_inbound(actor, obj)
     from .inbound_notifications import prepare
     prepare(obj, actor)
     return obj
@@ -120,7 +129,10 @@ def batch_data(obj):
             line['image_preview_url'] = (f"/api/internal/supply-chain/v2/dispatch-batches/{obj.pk}/skus/{line['sku_id']}/image/"
                 if (line.get('product_details') or {}).get('image_url') else '')
         shipment['total_quantity'] = sum(line['quantity'] for line in shipment['lines'])
-    inbound = prepared['inbound'] if prepared is not None else InboundOrder.objects.filter(batch=obj).first()
+    from .inbound_split import progress
+    inbound_progress_data = progress(obj)
+    active_inbounds = [row for row in inbound_progress_data['inbounds'] if row['status'] != 'cancelled']
+    inbound_id = active_inbounds[0]['id'] if len(active_inbounds) == 1 else None
     return {'id': obj.pk, 'number': obj.number, 'country_code': obj.country_code_snapshot,
             'supplier_names': ', '.join(sorted({m.shipment.order.supplier.name for m in members})),
             'freight_company_id': obj.freight_company_id, 'freight_company_name': obj.freight_company.name,
@@ -136,7 +148,7 @@ def batch_data(obj):
             'logistics_dates': {field: getattr(obj, field) for field in ('departed_at', 'arrived_port_at', 'arrived_warehouse_at')},
             'shipment_ids': [m.shipment_id for m in members],
             'shipments': shipment_data,
-            'inbound_id': inbound.pk if inbound else None}
+            'inbound_id': inbound_id, **inbound_progress_data}
 
 
 def inbound_for(actor, pk, permission=MANAGE):
@@ -147,6 +159,8 @@ def inbound_for(actor, pk, permission=MANAGE):
 
 
 def inbound_data(obj):
+    from .inbound_costs import reference_for_inbound
+    estimated_cost = reference_for_inbound(obj)
     lines = list(obj.lines.select_related('shipment_line__sku__spu__category_node',
         'shipment_line__shipment__order__supplier', 'shipment_line__purchase_line__order'))
     from .supplier_products import shipment_line_product_details
@@ -156,7 +170,7 @@ def inbound_data(obj):
         for line in lines if line.received_quantity is not None and line.shipment_line.unit_price is not None), Decimal('0'))
     received_amount += sum((line.unit_price * line.received_quantity for line in extra_lines
                             if line.unit_price is not None), Decimal('0'))
-    return {'id': obj.pk, 'number': obj.number, 'batch_id': obj.batch_id, 'batch_number': obj.batch.number,
+    return {'id': obj.pk, 'number': obj.number, 'receipt_mode': obj.receipt_mode, 'estimated_cost': estimated_cost, 'batch_id': obj.batch_id, 'batch_number': obj.batch.number,
             'supplier_names': ', '.join(sorted({line.shipment_line.shipment.order.supplier.name for line in lines})),
             'country_code': obj.batch.country_code_snapshot, 'warehouse_id': obj.warehouse_id,
             'planned_warehouse_id': obj.batch.planned_warehouse_id,

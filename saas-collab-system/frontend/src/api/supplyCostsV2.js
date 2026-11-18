@@ -6,6 +6,8 @@ const enc=(v)=>encodeURIComponent(v);
 function write(method,url,data,key=createIdempotencyKey()){return requestApi({method,url,data,headers:{'Idempotency-Key':key}});}
 export {createIdempotencyKey};
 export const fetchCostTargets=(params={})=>requestApi({method:'get',url:`${BASE}cost-targets/`,params});
+export const fetchSupplierDeposits=(params={})=>requestApi({method:'get',url:`${BASE}supplier-deposits/`,params});
+export const createSupplierDepositEntry=(data,key)=>write('post',`${BASE}supplier-deposits/`,data,key);
 export const fetchSupplyProductCosts=(params={})=>requestApi({method:'get',url:`${BASE}product-cost-ledger/`,params});
 export const fetchSupplyCostOptions=(params={})=>requestApi({method:'get',url:`${BASE}product-cost-ledger/options/`,params});
 export const fetchCostContext=(kind,id)=>requestApi({method:'get',url:`${BASE}costs/${enc(kind)}/${enc(id)}/`});

@@ -15,6 +15,9 @@ from .aftersales_models import AftersalesCase, AftersalesSyncSettings
 
 @shared_task(soft_time_limit=540, time_limit=570, acks_late=True)
 def synchronize_order_warehouse(pk, revision):
+    from .warehouse_unified import managed_for_order_id
+    if managed_for_order_id(pk):
+        return 'managed'
     if not getattr(settings, 'SALES_ORDER_WAREHOUSE_SYNC_ENABLED', False):
         return 'disabled'
     from .warehouse_orders import synchronize
@@ -29,24 +32,43 @@ def dispatch_order_warehouse():
     from .warehouse_order_models import OrderWarehouseLookup
     from .warehouse_orders import publish_lookup, request_lookup, scheduled_ready
     from .warehouse_order_policy import unpaid
+    from .warehouse_unified import managed_country_pairs
+    managed = managed_country_pairs()
     now = timezone.now()
     resumed = set()
-    permission_cache = {}  # This dispatch only; consumers recheck permissions independently.
-    due = OrderWarehouseLookup.objects.filter(next_query_at__lte=now).exclude(status__in=['pending', 'running']).select_related('order__store', 'requested_by').defer('order__source_details').order_by('next_query_at')[:100]
+    readiness = {}
+    permission_cache = {}  # One dispatch only; workers recheck independently.
+    # Expired polling windows need no provider or permission lookup. Clear them
+    # in one local query so they cannot occupy the bounded ready-work scan.
+    OrderWarehouseLookup.objects.filter(next_query_at__lte=now).exclude(
+        status__in=['pending', 'running']).filter(
+        Q(polling_until__isnull=True) | Q(polling_until__lte=now)
+    ).update(next_query_at=None)
+    due = OrderWarehouseLookup.objects.filter(next_query_at__lte=now).exclude(status__in=['pending', 'running'])
+    for tenant_id, country in managed:
+        due = due.exclude(order__tenant_id=tenant_id, order__store__country_code__iexact=country)
+    due = due.select_related('order__store', 'requested_by').defer('order__source_details').order_by('next_query_at', 'pk')[:100]
     for row in due:
+        if (row.order.tenant_id, (row.order.store.country_code or '').upper()) in managed:
+            continue
         if not row.polling_until or row.polling_until <= now or unpaid(row.order):
             OrderWarehouseLookup.objects.filter(pk=row.pk, revision=row.revision).update(next_query_at=None)
             continue
         blocked = row.status == 'blocked' or any(check.get('status') == 'blocked' for check in row.checks)
-        if blocked and not scheduled_ready(row, permission_cache=permission_cache):
-            OrderWarehouseLookup.objects.filter(pk=row.pk, revision=row.revision).update(next_query_at=min(now + timedelta(hours=1), row.polling_until))
-            continue
+        if blocked:
+            if not scheduled_ready(row, readiness=readiness, permission_cache=permission_cache):
+                OrderWarehouseLookup.objects.filter(pk=row.pk, revision=row.revision).update(next_query_at=min(now + timedelta(hours=1), row.polling_until))
+                continue
         queued = request_lookup(row.order_id, row.requested_by, scheduled=True)
         if queued and queued.status == 'pending':
             resumed.add(queued.pk)
     rows = OrderWarehouseLookup.objects.filter(
-        (Q(status='pending') & (Q(lease_until__isnull=True) | Q(lease_until__lte=now))) |
-        Q(status='running', lease_until__lte=timezone.now())).exclude(pk__in=resumed).order_by('requested_at')
+        Q(status='pending') & (Q(lease_until__isnull=True) | Q(lease_until__lte=now)) |
+        Q(status='running', lease_until__lte=now)
+    ).exclude(pk__in=resumed)
+    for tenant_id, country in managed:
+        rows = rows.exclude(order__tenant_id=tenant_id, order__store__country_code__iexact=country)
+    rows = rows.order_by('requested_at', 'pk')
     selected = list(rows.values_list('pk', 'revision')[:100])
     submitted = sum(bool(publish_lookup(pk, revision)) for pk, revision in selected)
     return {'submitted': submitted + len(resumed)}

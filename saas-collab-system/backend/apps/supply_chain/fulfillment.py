@@ -2,10 +2,10 @@
 from collections import defaultdict
 
 from django.db.models import Q, Sum, Subquery, OuterRef, IntegerField, Exists, F, Case, When, Value, CharField, Count
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, Least
 from rest_framework.exceptions import ValidationError
 
-from .models import BusinessEvent, PurchaseLine, ShipmentLine, DispatchAllocation, InboundLine
+from .models import BusinessEvent, PurchaseLine, ShipmentLine, DispatchAllocation, InboundLine, InboundShortageTermination
 
 LABELS = {'draft': '待下单', 'cancelled': '已取消', 'awaiting_shipment': '待发货',
     'partial_shipment': '部分发货', 'awaiting_dispatch': '待集货',
@@ -19,7 +19,7 @@ def matching_dispatch_allocations():
         membership__shipment_id=OuterRef('shipment_line__shipment_id'),
         membership__batch_id=OuterRef('inbound__batch_id'),
         membership__active_guard=True,
-        quantity=OuterRef('expected_quantity'),
+        quantity__gte=OuterRef('expected_quantity'),
     )
 
 
@@ -38,7 +38,10 @@ def annotate_workflow_stage(query):
         shipment_line__purchase_line_id=OuterRef('pk'),
         shipment_line__is_active=True, shipment_line__shipment__status='submitted',
     )).values('shipment_line__purchase_line_id').annotate(
-        total=Sum('expected_quantity')).values('total')
+        total=Sum(Least('expected_quantity', 'received_quantity'))).values('total')
+    terminated = InboundShortageTermination.objects.filter(
+        shipment_line__purchase_line_id=OuterRef('pk')).values(
+            'shipment_line__purchase_line_id').annotate(total=Sum('quantity')).values('total')
     arrival = DispatchAllocation.objects.filter(shipment_line__purchase_line_id=OuterRef('pk'),
         shipment_line__is_active=True, shipment_line__shipment__status='submitted',
         membership__active_guard=True, membership__batch__status='active',
@@ -46,20 +49,34 @@ def annotate_workflow_stage(query):
         total=Sum('quantity')).values('total')
     lines = PurchaseLine.objects.filter(order_id=OuterRef('pk'), is_active=True).annotate(
         _shipped=Coalesce(Subquery(shipping, output_field=IntegerField()), Value(0)),
-        _closed=Coalesce(Subquery(receiving, output_field=IntegerField()), Value(0)),
+        _closed=Coalesce(Subquery(receiving, output_field=IntegerField()), Value(0)) +
+            Coalesce(Subquery(terminated, output_field=IntegerField()), Value(0)),
         _arrived=Coalesce(Subquery(arrival, output_field=IntegerField()), Value(0)))
+    extra_receiving = confirmed_allocated_receipts(InboundLine.objects.filter(
+        shipment_line_id=OuterRef('pk'), shipment_line__purchase_line__isnull=True,
+        shipment_line__is_active=True, shipment_line__shipment__status='submitted',
+    )).values('shipment_line_id').annotate(
+        total=Sum(Least('expected_quantity', 'received_quantity'))).values('total')
+    extra_terminated = InboundShortageTermination.objects.filter(
+        shipment_line_id=OuterRef('pk')).values('shipment_line_id').annotate(
+            total=Sum('quantity')).values('total')
+    extra_lines = ShipmentLine.objects.filter(purchase_line__isnull=True,
+        shipment__order_id=OuterRef('pk'), shipment__status='submitted', is_active=True).annotate(
+            _extra_closed=Coalesce(Subquery(extra_receiving, output_field=IntegerField()), Value(0)) +
+                Coalesce(Subquery(extra_terminated, output_field=IntegerField()), Value(0)))
     started = DispatchAllocation.objects.filter(Q(shipment_line__purchase_line__order_id=OuterRef('pk')) | Q(shipment_line__purchase_line__isnull=True, shipment_line__shipment__order_id=OuterRef('pk')),
         shipment_line__is_active=True, shipment_line__shipment__status='submitted',
         membership__active_guard=True, membership__batch__status='active').exclude(membership__batch__stage='unmarked')
-    query = query.annotate(_flow_lines=Exists(lines),
+    query = query.annotate(_flow_lines=Exists(lines), _flow_extra_receiving=Exists(
+        extra_lines.filter(quantity__gt=F('_extra_closed'))),
         _flow_shipping=Exists(lines.filter(quantity__gt=F('_shipped'))),
-        _flow_receiving=Exists(lines.filter(quantity__gt=F('_closed'))),
+        _flow_receiving=Exists(lines.filter(Q(quantity__gt=F('_closed')) | Q(_shipped__gt=F('_closed')))),
         _flow_arrival=Exists(lines.filter(quantity__gt=F('_arrived'))),
         _flow_shipped=Exists(lines.filter(_shipped__gt=0)), _flow_started=Exists(started))
     return query.annotate(_workflow_stage=Case(
         When(status='draft', then=Value('draft')), When(status='cancelled', then=Value('cancelled')),
         When(_flow_lines=False, then=Value('awaiting_shipment')),
-        When(_flow_lines=True, _flow_receiving=False, then=Value('completed')),
+        When(_flow_lines=True, _flow_receiving=False, _flow_extra_receiving=False, then=Value('completed')),
         When(_flow_shipping=True, _flow_shipped=True, then=Value('partial_shipment')),
         When(_flow_shipping=True, then=Value('awaiting_shipment')),
         When(_flow_lines=True, _flow_arrival=False, then=Value('awaiting_inbound')),
@@ -102,7 +119,7 @@ def prepare_orders(orders):
         lines = list(PurchaseLine.objects.filter(tenant_id=tenant_id, order_id__in=ids, is_active=True))
         by_order, shipped, dispatched, arrived, received = defaultdict(list), defaultdict(int), defaultdict(int), defaultdict(int), defaultdict(int)
         closed = defaultdict(int)
-        extras, ship_refs, batch_refs, inbound_refs = defaultdict(int), defaultdict(dict), defaultdict(dict), defaultdict(dict)
+        extras, extra_closed, ship_refs, batch_refs, inbound_refs = defaultdict(int), defaultdict(int), defaultdict(dict), defaultdict(dict), defaultdict(dict)
         for line in lines:
             by_order[line.order_id].append(line)
         shipping = ShipmentLine.objects.filter(Q(purchase_line__order_id__in=ids) | Q(purchase_line__isnull=True, shipment__order_id__in=ids), tenant_id=tenant_id,
@@ -135,18 +152,31 @@ def prepare_orders(orders):
             ).select_related('inbound', 'shipment_line__shipment', 'shipment_line__purchase_line')
         for receipt in receipts:
             source, inbound = receipt.shipment_line, receipt.inbound
-            ref = inbound_refs[source.purchase_line.order_id if source.purchase_line_id else source.shipment.order_id].setdefault(inbound.pk, {'id': inbound.pk,
+            order_id = source.purchase_line.order_id if source.purchase_line_id else source.shipment.order_id
+            ref = inbound_refs[order_id].setdefault(inbound.pk, {'id': inbound.pk,
                 'number': inbound.number, 'status': inbound.status, 'quantity': 0})
             if inbound.status == 'confirmed' and receipt.received_quantity is not None:
                 ref['quantity'] += receipt.received_quantity
                 if source.purchase_line_id in line_ids:
                     received[source.purchase_line_id] += receipt.received_quantity
                     if receipt._closure_eligible:
-                        closed[source.purchase_line_id] += receipt.expected_quantity
+                        closed[source.purchase_line_id] += min(receipt.expected_quantity, receipt.received_quantity)
+                else:
+                    if receipt._closure_eligible:
+                        extra_closed[order_id] += min(receipt.expected_quantity, receipt.received_quantity)
+        terminations = InboundShortageTermination.objects.filter(tenant_id=tenant_id,
+            purchase_order_id__in=ids).values_list(
+                'purchase_order_id', 'shipment_line__purchase_line_id', 'quantity')
+        for order_id, purchase_line_id, quantity in terminations:
+            if purchase_line_id in line_ids:
+                closed[purchase_line_id] += quantity
+            elif purchase_line_id is None:
+                extra_closed[order_id] += quantity
         for order in scoped:
             source = by_order[order.pk]
             pending_ship = sum(max(line.quantity - shipped[line.pk], 0) for line in source)
-            pending_receipt = sum(max(line.quantity - closed[line.pk], 0) for line in source)
+            pending_receipt = sum(max(max(line.quantity, shipped[line.pk]) - closed[line.pk], 0) for line in source)
+            pending_receipt += max(extras[order.pk] - extra_closed[order.pk], 0)
             stage = 'awaiting_shipment'
             if order.status != 'confirmed':
                 stage = order.status

@@ -67,18 +67,18 @@ def materialize_daily_snapshot(actor, strategy, country, capture_on_commit_callb
     from apps.supply_chain.daily_replenishment import generate_daily_replenishments
 
     day = business_date()
-    with patch('apps.supply_chain.daily_replenishment._within_schedule', return_value=True), \
-            patch.object(replenishment_jobs, '_enqueue'), \
-            capture_on_commit_callbacks(execute=True):
-        generated = generate_daily_replenishments(now=timezone.now(), business_day=day)
-    assert generated['queued'] + generated['reused'] >= 1
-    job = ReplenishmentCalculationJob.objects.filter(requested_by=actor, country=country,
-        strategy=strategy, config__daily__day=day.isoformat()).order_by('-created_at').first()
-    assert job is not None
-    if job.status != 'completed':
-        with patch.object(replenishment_jobs, '_enqueue'):
+    from apps.supply_chain.replenishment_schedule import TZ, START
+    night = timezone.now().astimezone(TZ).replace(hour=START.hour, minute=START.minute, second=0, microsecond=0)
+    with patch.object(timezone, 'now', return_value=night), patch.object(replenishment_jobs, '_enqueue'):
+        with capture_on_commit_callbacks(execute=True):
+            generated = generate_daily_replenishments(now=night, business_day=day)
+        assert generated['queued'] + generated['reused'] >= 1
+        job = ReplenishmentCalculationJob.objects.filter(requested_by=actor, country=country,
+            strategy=strategy, config__daily__day=day.isoformat()).order_by('-created_at').first()
+        assert job is not None
+        if job.status != 'completed':
             replenishment_jobs.run_replenishment_calculation(job.pk)
-        job.refresh_from_db()
+            job.refresh_from_db()
     assert job.status == 'completed' and job.processed == job.total
     return job
 

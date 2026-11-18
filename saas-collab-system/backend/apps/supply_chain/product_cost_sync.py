@@ -21,18 +21,20 @@ def _rounded_unit_costs(purchase, freight, duty, quantity):
 def publish_received_costs(version, actor):
     if version.state != "confirmed" or version.stage != "received":
         return
+    from .inbound_costs import receipt_allocations
+    from apps.masterdata.models import WarehouseMaster
     groups = defaultdict(list)
-    for entry in version.entries.filter(
-        receipt_line__isnull=False, received_quantity__gt=0, received_total__isnull=False,
-    ).select_related("shipment_line", "receipt_line__receipt"):
-        groups[(entry.shipment_line.sku_id, entry.receipt_line.receipt.warehouse_id)].append(entry)
+    for allocation in receipt_allocations(version):
+        if allocation['actual_quantity'] and all(allocation.get(name) is not None for name in (
+                'received_total', 'received_goods_amount', 'received_collection_fee', 'received_freight_fee', 'clearance_fee')):
+            groups[(allocation['sku_id'], allocation['warehouse_id'])].append(allocation)
 
     start = version.created_at
     source = version.batch if version.batch_id else version.shipment
     reason = f"供应链入库成本 {source.number} / v{version.sequence} / 成本记录 {version.pk}"
     for (sku_id, warehouse_id), entries in sorted(groups.items()):
         sku = ProductSKU.objects.select_for_update().get(tenant=version.tenant, pk=sku_id)
-        warehouse = entries[0].receipt_line.receipt.warehouse
+        warehouse = WarehouseMaster.objects.get(tenant=version.tenant, pk=warehouse_id)
         existing = ProductCostVersion.objects.filter(
             tenant=version.tenant, sku=sku, warehouse_id=warehouse_id,
             status=ProductCostVersion.Status.CONFIRMED,
@@ -40,12 +42,12 @@ def publish_received_costs(version, actor):
         if existing.filter(reason=reason).exists():
             continue
         future = existing.filter(effective_from__gt=start).order_by("effective_from").first()
-        quantity = sum(entry.received_quantity for entry in entries)
+        quantity = sum(entry['actual_quantity'] for entry in entries)
 
         total, purchase, freight, duty = _rounded_unit_costs(
-            sum(entry.received_goods_amount for entry in entries),
-            sum(entry.received_collection_fee + entry.received_freight_fee for entry in entries),
-            sum(entry.clearance_fee for entry in entries),
+            sum(Decimal(entry['received_goods_amount']) for entry in entries),
+            sum(Decimal(entry['received_collection_fee']) + Decimal(entry['received_freight_fee']) for entry in entries),
+            sum(Decimal(entry['clearance_fee']) for entry in entries),
             quantity,
         )
         append_cost_version(
