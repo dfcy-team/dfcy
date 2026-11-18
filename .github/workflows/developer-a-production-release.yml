@@ -249,7 +249,7 @@ jobs:
           path: .v460-reflow-control
           persist-credentials: false
       - name: Check out protected V472 cumulative release control
-        if: inputs.action == 'deploy' && inputs.release_sha == 'addb61c4343e1427dcd47768e07d2d244671d21b'
+        if: inputs.action == 'deploy' && inputs.release_sha == '19fb4e543731533eff29423bfd0e97ebcf17d203'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -385,7 +385,7 @@ jobs:
             python .v461-control/saas-collab-system/deploy/production-control/ci/verify_v461_source.py
           elif [[ "$action" = deploy && "$release_sha" = fcfbb41ab9c412c81ef7ae909b1923e9aefc5c4a ]]; then
             python .v460-reflow-control/saas-collab-system/deploy/production-control/ci/verify_v460_reflow_source.py
-          elif [[ "$action" = deploy && "$release_sha" = addb61c4343e1427dcd47768e07d2d244671d21b ]]; then
+          elif [[ "$action" = deploy && "$release_sha" = 19fb4e543731533eff29423bfd0e97ebcf17d203 ]]; then
             python .v472-cumulative-control/saas-collab-system/deploy/production-control/ci/verify_v472_cumulative_source.py
           elif [[ "$action" != rollback ]]; then
             git fetch --no-tags origin main
