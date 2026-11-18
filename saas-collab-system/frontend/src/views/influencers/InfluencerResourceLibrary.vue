@@ -20,6 +20,7 @@
         <el-select v-model="filters.is_blacklisted" clearable placeholder="黑名单"><el-option label="未拉黑" value="false" /><el-option label="已拉黑" value="true" /></el-select>
         <el-select v-model="filters.ordering" placeholder="排序"><el-option label="最近更新" value="-updated_at" /><el-option label="平均播放从高到低" value="-profile__average_video_views" /><el-option label="平均播放从低到高" value="profile__average_video_views" /><el-option label="历史 GMV 从高到低" value="-profile__historical_gmv" /><el-option label="历史 GMV 从低到高" value="profile__historical_gmv" /><el-option label="粉丝数从高到低" value="-follower_count" /><el-option label="名称正序" value="name" /></el-select>
         <el-button type="primary" @click="applyFilters">查询</el-button>
+        <el-checkbox v-model="deletedOnly" @change="applyFilters">只看已删除档案</el-checkbox>
         <el-button @click="resetFilters">重置</el-button>
         <el-button :loading="loading" @click="load">刷新</el-button>
         <el-button type="primary" :disabled="!canManage" @click="openCreate">新建达人</el-button>
@@ -38,7 +39,7 @@
         <el-table-column label="履约率" min-width="95"><template #default="{ row }">{{ formatRate(row.profile?.fulfillment_rate) }}</template></el-table-column>
         <el-table-column label="合作状态" width="110"><template #default="{ row }"><el-tag size="small" :type="cooperationTag(row.cooperation_status)">{{ cooperationLabel(row.cooperation_status) }}</el-tag></template></el-table-column>
         <el-table-column label="档案状态" min-width="155"><template #default="{ row }"><el-tag size="small" :type="row.is_blacklisted ? 'danger' : (row.status === 'active' ? (hasPlatformIdentity(row) ? 'success' : 'warning') : 'info')">{{ archiveStateLabel(row) }}</el-tag></template></el-table-column>
-        <el-table-column label="操作" width="360" fixed="right"><template #default="{ row }"><el-button link @click.stop="openDetail(row)">详情</el-button><el-button link :disabled="!canManage" @click.stop="openEdit(row)">编辑</el-button><el-button link :disabled="!canManage || row.is_blacklisted || saving" @click.stop="openRelatedCreate(row)">新建关联档案</el-button><el-button link :type="row.is_blacklisted ? 'success' : 'danger'" :disabled="!canManage" @click.stop="toggleBlacklist(row)">{{ row.is_blacklisted ? '解除拉黑' : '加入黑名单' }}</el-button><el-button link :disabled="!canManage" @click.stop="changeStatus(row, row.status === 'active' ? 'inactive' : 'active')">{{ row.status === 'active' ? '停用' : '启用' }}</el-button></template></el-table-column>
+        <el-table-column label="操作" width="410" fixed="right"><template #default="{ row }"><el-button link @click.stop="openDetail(row)">详情</el-button><template v-if="!row.is_deleted"><el-button link :disabled="!canManage || saving" @click.stop="openEdit(row)">编辑</el-button><el-button link :disabled="!canManage || row.is_blacklisted || saving" @click.stop="openRelatedCreate(row)">新建关联档案</el-button><el-button link :type="row.is_blacklisted ? 'success' : 'danger'" :disabled="!canManage || saving" @click.stop="toggleBlacklist(row)">{{ row.is_blacklisted ? '解除拉黑' : '加入黑名单' }}</el-button><el-button link :disabled="!canManage || saving" @click.stop="changeStatus(row, row.status === 'active' ? 'inactive' : 'active')">{{ row.status === 'active' ? '停用' : '启用' }}</el-button><el-button link type="danger" :disabled="!canManage || saving" @click.stop="changeArchiveDeletion(row)">删除档案</el-button></template><el-button v-else link type="primary" :disabled="!canManage || saving" @click.stop="changeArchiveDeletion(row, true)">恢复档案</el-button></template></el-table-column>
       </el-table>
       <el-pagination v-if="total > 0" v-model:current-page="page" v-model:page-size="pageSize" :page-sizes="[20, 50, 100]" :total="total" layout="total, sizes, prev, pager, next" @current-change="load" @size-change="changePageSize" />
     </el-card>
@@ -92,7 +93,7 @@
         <div v-for="(contact, index) in form.contacts" :key="contact.key" class="contact-row"><el-select v-model="contact.channel" filterable allow-create default-first-option placeholder="选择或输入联系渠道"><el-option v-for="(label, value) in selectableContactChannels" :key="value" :label="label" :value="value" /><el-option v-if="contact.channel && !Object.hasOwn(selectableContactChannels, contact.channel)" :label="`${INFLUENCER_CONTACT_CHANNEL_LABELS[contact.channel] || contact.channel}（已保存）`" :value="contact.channel" disabled /></el-select><el-input v-model="contact.value" placeholder="账号、手机号或邮箱"/><el-input v-model="contact.label" placeholder="备注"/><el-checkbox v-model="contact.is_primary" @change="selectPrimaryContact(contact)">主渠道</el-checkbox><el-button link type="danger" @click="removeContact(index)">删除</el-button></div>
         <el-button link type="primary" @click="addContact">+ 新增联系方式</el-button>
       </el-form>
-      <template #footer><el-button :disabled="saving" @click="editVisible = false">取消</el-button><el-button type="primary" :loading="saving" :disabled="editLoading || createOutcomeUncertain" @click="save">{{ relatedSource ? '创建并关联档案' : '保存档案' }}</el-button></template>
+      <template #footer><el-button v-if="editing && canManage" type="danger" plain :disabled="saving || editLoading" @click="changeArchiveDeletion(editing)">删除当前平台档案</el-button><el-button :disabled="saving" @click="editVisible = false">取消</el-button><el-button type="primary" :loading="saving" :disabled="editLoading || createOutcomeUncertain" @click="save">{{ relatedSource ? '创建并关联档案' : '保存档案' }}</el-button></template>
     </el-dialog>
 
     <el-drawer v-model="detailVisible" :title="detail ? influencerDisplayName(detail) : '达人详情'" size="560px">
@@ -101,7 +102,7 @@
       <template v-else-if="detail">
         <el-alert v-if="!hasPlatformIdentity(detail)" title="身份待补全：尚无昵称 ID 或平台数字 ID。历史名称不等于平台账号，启用状态也不代表身份已经核实。" type="warning" show-icon :closable="false" />
         <p v-if="!hasPlatformIdentity(detail) && detail.name">历史名称：{{ detail.name }}</p>
-        <div class="drawer-actions"><el-button v-if="canManage" type="primary" plain @click="openEdit(detail)">编辑档案</el-button><el-button v-if="canManage" :type="detail.is_blacklisted ? 'success' : 'danger'" plain @click="toggleBlacklist(detail)">{{ detail.is_blacklisted ? '解除黑名单' : '加入黑名单' }}</el-button></div>
+        <div v-if="!detail.is_deleted" class="drawer-actions"><el-button v-if="canManage" type="primary" plain @click="openEdit(detail)">编辑档案</el-button><el-button v-if="canManage" :type="detail.is_blacklisted ? 'success' : 'danger'" plain @click="toggleBlacklist(detail)">{{ detail.is_blacklisted ? '解除黑名单' : '加入黑名单' }}</el-button></div>
         <h3>关联档案</h3>
         <el-alert v-if="relatedError" type="warning" :title="relatedError" :closable="false" />
         <div class="archive-navigation"><el-button v-for="archive in detailRelated" :key="archive.id" plain :disabled="archive.id === detail.id" @click="openDetail(archive)">{{ platformLabel(archive.platform) }} · {{ influencerDisplayName(archive) }}</el-button><el-button v-if="canManage" class="archive-create-button" type="primary" :disabled="detail.is_blacklisted || saving" @click="openRelatedCreate(detail)">新建关联档案</el-button></div>
@@ -166,6 +167,8 @@ import {
   fetchInfluencers,
   formatInfluencerError,
   saveInfluencerForm,
+  deleteInfluencerArchive,
+  restoreInfluencerArchive,
   fetchTikTokCreatorSnapshots,
   queryTikTokCreator,
   updateInfluencerBlacklist,
@@ -174,6 +177,7 @@ import {
 
 const auth = useAuthStore();
 const rows = ref([]); const total = ref(null); const page = ref(1); const pageSize = ref(20); const loading = ref(false); const saving = ref(false); const listError = ref('');
+const deletedOnly = ref(false);
 const editVisible = ref(false); const detailVisible = ref(false); const detailLoading = ref(false); const detailError = ref(''); const detail = ref(null); const editing = ref(null);
 const relatedSource = ref(null); const editLoading = ref(false); const createOutcomeUncertain = ref(false); const detailRelated = ref([]); const relatedError = ref('');
 let editRequestId = 0;
@@ -217,12 +221,13 @@ const creatorStatusLabel = (status) => ({ matched: '账号和地区一致', hand
 async function load() {
   loading.value = true; listError.value = '';
   const params = { page: page.value, page_size: pageSize.value, include_nickname_id: 'true', ordering: filters.ordering, ...(filters.search.trim() ? { search: filters.search.trim() } : {}), ...(filters.profile_notes.trim() ? { profile_notes: filters.profile_notes.trim() } : {}), ...(filters.status ? { status: filters.status } : {}), ...(filters.platform ? { platform: filters.platform } : {}), ...(filters.cooperation_status ? { cooperation_status: filters.cooperation_status } : {}), ...(filters.level ? { level: filters.level } : {}), ...(filters.market.trim() ? { market: filters.market.trim() } : {}), ...(filters.tier.trim() ? { tier: filters.tier.trim() } : {}), ...(filters.is_blacklisted ? { is_blacklisted: filters.is_blacklisted } : {}) };
+  if (deletedOnly.value) params.deleted_only = 'true';
   const response = await fetchInfluencers(params); loading.value = false;
   if (!response?.success) { rows.value = []; total.value = null; listError.value = response?.message || '达人档案加载失败，请稍后重试'; return; }
   rows.value = collectionRows(response.data); total.value = collectionTotal(response.data);
 }
 function applyFilters() { page.value = 1; load(); }
-function resetFilters() { Object.assign(filters, { search: '', profile_notes: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' }); applyFilters(); }
+function resetFilters() { deletedOnly.value = false; Object.assign(filters, { search: '', profile_notes: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' }); applyFilters(); }
 function changePageSize() { page.value = 1; load(); }
 function resetForm() { editRequestId += 1; editLoading.value = false; createOutcomeUncertain.value = false; editing.value = null; relatedSource.value = null; Object.assign(form, blankForm()); formSnapshot = JSON.stringify(form); }
 async function confirmDraftSwitch() {
@@ -262,6 +267,7 @@ async function loadEditRecord(row) {
   return record;
 }
 async function openEdit(row) {
+  if (row.is_deleted) return ElMessage.warning('该档案已删除，请先恢复档案');
   if (!canManage.value || saving.value || !(await confirmDraftSwitch())) return;
   const record = await loadEditRecord(row);
   if (!record) return;
@@ -273,7 +279,31 @@ async function openEdit(row) {
   formSnapshot = JSON.stringify(form);
   editVisible.value = true;
 }
+
+async function changeArchiveDeletion(row, restore = false) {
+  if (!canManage.value || saving.value || !row?.id || !row.updated_at) return;
+  const target = { id: row.id, version: row.updated_at };
+  const label = `${platformLabel(row.platform)} · ${row.nickname_id || row.account_nickname || row.name || row.code}`;
+  try {
+    await ElMessageBox.confirm(restore
+      ? `恢复“${label}”？将还原删除前的启停状态，黑名单及历史记录不变。`
+      : `仅删除当前“${label}”这一份平台档案，不删除关联的其他平台档案、共享联系方式及历史送样、任务、订单。可在“只看已删除档案”中恢复。`,
+    restore ? '恢复单个档案' : '删除单个档案', { type: 'warning', confirmButtonText: restore ? '确认恢复' : '确认删除', cancelButtonText: '取消' });
+  } catch { return; }
+  if (saving.value) return;
+  saving.value = true;
+  let response;
+  try { response = await (restore ? restoreInfluencerArchive : deleteInfluencerArchive)(target.id, target.version); }
+  catch { response = { success: false, message: '操作结果未确认，请先刷新档案列表核对，不要重复提交' }; }
+  saving.value = false;
+  if (!response?.success) return ElMessage.error(formatInfluencerError(response, '操作失败，请刷新后重试'));
+  editVisible.value = false; detailVisible.value = false;
+  ElMessage.success(restore ? '档案已恢复' : '当前平台档案已删除，其他平台档案不受影响');
+  page.value = 1;
+  await load();
+}
 async function openRelatedCreate(row) {
+  if (row.is_deleted) return ElMessage.warning('该档案已删除，请先恢复档案');
   if (!canManage.value || saving.value || row.is_blacklisted || !(await confirmDraftSwitch())) return;
   const source = await loadEditRecord(row);
   if (!source) return;

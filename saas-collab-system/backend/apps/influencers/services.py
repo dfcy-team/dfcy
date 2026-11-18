@@ -298,6 +298,8 @@ def _tenant_influencer(user, influencer_id, *, for_update, _historical_inactive_
         raise ValidationError(
             {"influencer": "Influencer does not exist in the current tenant."}
         ) from exc
+    if influencer.is_deleted:
+        raise ValidationError({'influencer': '该档案已删除，请先恢复档案。'})
     if influencer.status != Influencer.Status.ACTIVE and not _historical_inactive_link_allowed(
         user, influencer, _historical_inactive_scope
     ):
@@ -324,6 +326,8 @@ def _lock_influencer_identity(*, user, influencer, _historical_inactive_scope=No
     locked = next((profile for profile in identity_profiles if profile.pk == selected.pk), None)
     if locked is None:
         raise ValidationError({"influencer": "Influencer identity group is empty."})
+    if locked.is_deleted:
+        raise ValidationError({'influencer': '该档案已删除，请先恢复档案。'})
     if locked.status != Influencer.Status.ACTIVE and not _historical_inactive_link_allowed(
         user, locked, _historical_inactive_scope
     ):
@@ -1082,6 +1086,7 @@ def _sample_item_payload(item):
 def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
     """Replace item cost snapshots and aggregate cost in one transaction."""
     item_payloads = _normalize_item_payloads(item_payloads)
+    item_payloads = _resolve_sample_item_products(user, fulfillment, item_payloads)
     # Resolve and validate every requested warehouse before removing the old
     # snapshots. Country alone cannot select a warehouse when several exist.
     try:
@@ -1131,12 +1136,7 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
 
     sku_quantity = 0
     saved_items = []
-    for raw_payload, resolved_sku in zip(item_payloads, resolved_skus):
-        payload = _inherit_item_product(
-            raw_payload,
-            product_id=fulfillment.external_product_id,
-            product_name=fulfillment.product_name_snapshot,
-        )
+    for payload, resolved_sku in zip(item_payloads, resolved_skus):
         # Computed fields must never be accepted from a client or reused verbatim.
         for field_name in (
             "id",
@@ -1265,6 +1265,56 @@ def _inherit_item_product(payload, *, product_id, product_name):
     if not str(item.get("product_name") or "").strip() and product_name:
         item["product_name"] = product_name
     return item
+
+
+def _resolve_sample_item_products(user, fulfillment, payloads):
+    primary = str(fulfillment.external_product_id or "").strip()
+    primary_name = fulfillment.product_name_snapshot
+    if fulfillment.outreach_task_id or fulfillment.outreach_target_id:
+        return [_inherit_item_product(row, product_id=primary, product_name=primary_name) for row in payloads]
+
+    separator = r"[,，、;；\r\n]+"
+    primary_is_list = bool(re.search(separator, primary))
+    catalog = {}
+    items = []
+    for row in payloads:
+        product_id = str(row.get("external_product_id") or "").strip()
+        if not product_id or product_id == primary:
+            if primary_is_list:
+                if row.get("requested_sku") or row.get("sku"):
+                    raise ValidationError({"items": "请为每条 SKU 选择一个实际商品 ID。"})
+                items.append({**row, "external_product_id": ""})
+            else:
+                items.append(_inherit_item_product(row, product_id=primary, product_name=primary_name))
+            continue
+        if re.search(separator, product_id):
+            raise ValidationError({"items": "每条送样明细只能填写一个商品 ID。"})
+        if product_id not in catalog:
+            matches = resolve_outreach_products(
+                tenant=user.tenant, store_id=fulfillment.store_id, product_id=product_id,
+            )["candidates"]
+            if not matches:
+                raise ValidationError({"items": "明细商品不在送样店铺的商品目录中，请核对商品 ID。"})
+            catalog[product_id] = matches[0]
+        product = catalog[product_id]
+        sku = row.get("requested_sku")
+        selected = row.get("sku")
+        sku_codes = {str(sku or "").casefold()}
+        if selected is not None:
+            sku_codes.update({selected.sku_code.casefold(), selected.legacy_sku_code.casefold()})
+        if (sku or selected) and product["skus"] and sku_codes.isdisjoint(
+            {code.casefold() for code in product["skus"]}
+        ):
+            raise ValidationError({"items": "该 SKU 不属于所选商品，请按样品订单核对。"})
+        items.append({**row, "external_product_id": product_id, "product_name": product["product_name"]})
+    products_by_sku = {}
+    for item in items:
+        sku_key = (item.get("requested_sku") or "").casefold()
+        if sku_key:
+            previous = products_by_sku.setdefault(sku_key, item["external_product_id"])
+            if previous != item["external_product_id"]:
+                raise ValidationError({"items": "同一送样暂不支持将同一个 SKU 编码保存到不同商品。"})
+    return items
 
 
 def _normalize_sku(value):
@@ -5119,11 +5169,24 @@ def update_sample_fulfillment(
         items_mode = "append"
         item_payloads = append_item_payloads
     has_item_change = item_payloads is not None
-    identifier_only = bool(data) and set(data) <= {"fulfillment_no", "type_no"} and not has_item_change
+    identity_only = bool(data) and set(data) <= {"fulfillment_no", "type_no", "external_product_id"} and not has_item_change
     if not data and not has_item_change:
         raise ValidationError({"detail": "At least one editable fulfillment field is required."})
 
     changes = {}
+    if "external_product_id" in data:
+        product_id = str(data["external_product_id"] or "").strip()
+        if fulfillment.outreach_task_id or fulfillment.outreach_target_id or (fulfillment.external_product_id or "").strip():
+            raise ValidationError({"external_product_id": "仅未关联任务且商品 ID 为空的送样可以补录。"})
+        if not product_id or re.search(r"[,，、;；\r\n]+", product_id):
+            raise ValidationError({"external_product_id": "请填写一个有效的商品 ID。"})
+        matches = resolve_outreach_products(
+            tenant=user.tenant, store_id=fulfillment.store_id, product_id=product_id,
+        )["candidates"]
+        if not matches:
+            raise ValidationError({"external_product_id": "该商品不在原店铺目录中，请核对商品 ID。"})
+        changes["external_product_id"] = product_id
+        changes["product_name_snapshot"] = matches[0]["product_name"] or fulfillment.product_name_snapshot
     reserve_current(fulfillment)
     for field_name in ("fulfillment_no", "type_no"):
         if field_name in data:
@@ -5152,6 +5215,7 @@ def update_sample_fulfillment(
     before = {
         "fulfillment_no": fulfillment.fulfillment_no,
         "type_no": fulfillment.type_no,
+        "external_product_id": fulfillment.external_product_id,
         "sample_order_no": fulfillment.sample_order_no,
         "notes": fulfillment.notes,
         "link_type": fulfillment.link_type,
@@ -5162,7 +5226,7 @@ def update_sample_fulfillment(
     }
     now = timezone.now()
     auto_ship = (
-        not identifier_only
+        not identity_only
         and fulfillment.status == SampleFulfillment.Status.PENDING
         and bool(str(changes.get("sample_order_no", fulfillment.sample_order_no) or "").strip())
     )
@@ -5221,7 +5285,7 @@ def update_sample_fulfillment(
         )
     else:
         fulfillment.refresh_from_db()
-        if not identifier_only:
+        if not identity_only:
             _refresh_existing_sample_costs(user=user, fulfillment=fulfillment)
 
     _audit(
@@ -5233,6 +5297,7 @@ def update_sample_fulfillment(
         after={
             "fulfillment_no": fulfillment.fulfillment_no,
             "type_no": fulfillment.type_no,
+            "external_product_id": fulfillment.external_product_id,
             "sample_order_no": fulfillment.sample_order_no,
             "notes": fulfillment.notes,
             "link_type": fulfillment.link_type,
@@ -5242,7 +5307,7 @@ def update_sample_fulfillment(
             "calculated_cost": str(fulfillment.calculated_cost) if fulfillment.calculated_cost is not None else None,
         },
     )
-    if not identifier_only:
+    if not identity_only:
         _recompute_related_task(user=user, fulfillment=fulfillment)
     return fulfillment
 

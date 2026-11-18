@@ -113,13 +113,22 @@ class Influencer(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     objects = ProtectedInfluencerQuerySet.as_manager()
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deletion_previous_status = models.CharField(max_length=20, blank=True)
 
     class Meta:
         ordering = ["tenant_id", "code"]
-        constraints = [models.UniqueConstraint(fields=["tenant", "code"], name="uniq_influencer_code_per_tenant")]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "code"], name="uniq_influencer_code_per_tenant"),
+            models.CheckConstraint(condition=Q(is_deleted=False) | Q(status='inactive'), name='chk_inf_deleted_inactive'),
+            models.CheckConstraint(condition=Q(is_deleted=True, deleted_at__isnull=False) | Q(is_deleted=False, deleted_at__isnull=True), name='chk_inf_deleted_timestamp'),
+        ]
         indexes = [models.Index(fields=["tenant", "canonical_handle_digest"], name="idx_inf_primary_handle")]
 
     def save(self, *args, **kwargs):
+        if self.is_deleted and self.status != self.Status.INACTIVE:
+            raise ValidationError({"status": "请先恢复已删除档案，再修改启用状态。"})
         update_fields = kwargs.get("update_fields")
         update_fields = set(update_fields) if update_fields is not None else None
         writes_identity = update_fields is None or bool({"handle", "platform"} & update_fields)
@@ -1545,6 +1554,7 @@ class InfluencerPlatformAccount(TenantValidatedModel):
         FACEBOOK = "facebook", "Facebook"
         INSTAGRAM = "instagram", "Instagram"
         YOUTUBE = "youtube", "YouTube"
+        SHOPEE = "shopee", "Shopee"
 
     influencer = models.ForeignKey(Influencer, on_delete=models.PROTECT, related_name="platform_accounts")
     platform = models.CharField(max_length=20, choices=Platform.choices)

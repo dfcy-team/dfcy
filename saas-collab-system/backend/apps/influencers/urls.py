@@ -4,6 +4,7 @@ from .tiktok_dataset_api import TikTokDatasetQualityView
 from .views import (
     InfluencerCollectionView,
     InfluencerDetailView,
+    InfluencerArchiveDeletionView,
     InfluencerRelatedArchivesView,
     TikTokCreatorLookupView,
     InfluencerStatusView,
@@ -37,6 +38,7 @@ urlpatterns = [
     path("tiktok-datasets/<int:batch_id>/", TikTokDatasetQualityView.as_view(), name="tiktok-dataset-detail"),
     path("", InfluencerCollectionView.as_view(), name="influencer-collection"),
     path("<int:pk>/", InfluencerDetailView.as_view(), name="influencer-detail"),
+    path("<int:pk>/archive-deletion/", InfluencerArchiveDeletionView.as_view(), name="influencer-archive-deletion"),
     path("<int:pk>/related-archives/", InfluencerRelatedArchivesView.as_view(), name="influencer-related-archives"),
     path("<int:pk>/tiktok-creator/", TikTokCreatorLookupView.as_view(), name="influencer-tiktok-creator"),
     path("<int:pk>/status/", InfluencerStatusView.as_view(), name="influencer-status"),
