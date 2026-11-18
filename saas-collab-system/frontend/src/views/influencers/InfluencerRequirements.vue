@@ -9,6 +9,14 @@
       <h2>提交需求</h2>
       <label>需求标题<input :value="title" @input="title = $event.target.value" required maxlength="120" placeholder="例如：送样列表希望支持按仓库筛选" /></label>
       <label>需求说明<textarea :value="description" @input="description = $event.target.value" required maxlength="3000" rows="5" /></label>
+      <label>补充图片<input ref="fileInput" type="file" accept="image/jpeg,image/png,image/webp" multiple :disabled="saving" @change="selectImages" /></label>
+      <small>最多 3 张，每张不超过 2 MB。请遮挡密码、令牌和客户隐私。</small>
+      <div class="images">
+        <figure v-for="(image, index) in selectedImages" :key="image.url">
+          <a :href="image.url" target="_blank" rel="noopener"><img :src="image.url" alt="待提交图片预览" /></a>
+          <button type="button" :disabled="saving" @click="removeImage(index)">移除</button>
+        </figure>
+      </div>
       <button type="submit" :disabled="saving || !title.trim() || !description.trim()">{{ saving ? '提交中…' : '提交需求' }}</button>
     </form>
     <p v-if="error" role="alert">{{ error }}</p>
@@ -20,6 +28,10 @@
         <h3>{{ row.title }}</h3>
         <small>#{{ row.id }} · {{ row.author__username }} · {{ time(row.created_at) }}</small>
         <p>{{ row.description }}</p>
+        <button v-if="row.image_ids?.length" type="button" :disabled="imageLoading === row.id" @click="showImages(row)">查看图片（{{ row.image_ids.length }}）</button>
+        <div class="images">
+          <a v-for="image in displayedImages[row.id] || []" :key="image" :href="image" target="_blank" rel="noopener"><img :src="image" alt="需求反馈附件，点击查看大图" /></a>
+        </div>
       </article>
       <nav v-if="count > 20" aria-label="需求分页">
         <button :disabled="loading || page <= 1" @click="load(page - 1)">上一页</button>
@@ -31,8 +43,8 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue';
-import { requestApi } from '../../api/request';
+import { onMounted, onUnmounted, ref } from 'vue';
+import { requestApi, fetchApiFile } from '../../api/request';
 
 const url = '/api/internal/influencers/requirements/';
 const title = ref('');
@@ -46,6 +58,48 @@ const error = ref('');
 const notice = ref('');
 const loading = ref(false);
 const saving = ref(false);
+const selectedImages = ref([]);
+const displayedImages = ref({});
+const imageLoading = ref(null);
+const fileInput = ref(null);
+const allocatedUrls = new Set();
+const objectUrl = file => {
+  const value = URL.createObjectURL(file);
+  allocatedUrls.add(value);
+  return value;
+};
+function removeImage(index) {
+  const [image] = selectedImages.value.splice(index, 1);
+  URL.revokeObjectURL(image.url);
+  allocatedUrls.delete(image.url);
+}
+function selectImages(event) {
+  const files = [...event.target.files];
+  event.target.value = '';
+  if (selectedImages.value.length + files.length > 3 || files.some(file => file.size > 2 * 1024 * 1024 || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type))) {
+    error.value = '最多选择 3 张 JPG、PNG 或 WebP 图片，每张不超过 2 MB。';
+    return;
+  }
+  error.value = '';
+  selectedImages.value.push(...files.map(file => ({ file, url: objectUrl(file) })));
+}
+async function showImages(row) {
+  if (imageLoading.value || displayedImages.value[row.id]) return;
+  imageLoading.value = row.id;
+  const loaded = [];
+  try {
+    for (const id of row.image_ids) {
+      const response = await fetchApiFile(`${url}${row.id}/images/${id}/`);
+      if (!response.success) throw new Error('image unavailable');
+      loaded.push(objectUrl(response.blob));
+    }
+    displayedImages.value[row.id] = loaded;
+  } catch {
+    for (const value of loaded) { URL.revokeObjectURL(value); allocatedUrls.delete(value); }
+    error.value = '图片加载失败，请重试。';
+  } finally { imageLoading.value = null; }
+}
+onUnmounted(() => { for (const value of allocatedUrls) URL.revokeObjectURL(value); });
 const formatter = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', dateStyle: 'medium', timeStyle: 'short' });
 const time = value => formatter.format(new Date(value));
 
@@ -78,13 +132,18 @@ async function submit(event) {
   error.value = '';
   notice.value = '';
   try {
-    const result = await requestApi({ method: 'post', url, data: { title: title.value, description: description.value } });
+    const data = new FormData();
+    data.append('title', title.value);
+    data.append('description', description.value);
+    for (const image of selectedImages.value) data.append('images', image.file);
+    const result = await requestApi({ method: 'post', url, data });
     if (!result.success) {
       error.value = '未能确认提交结果，请先刷新需求列表核对，再决定是否重试。';
       return;
     }
     title.value = '';
     description.value = '';
+    while (selectedImages.value.length) removeImage(0);
     notice.value = '需求已提交。';
     await load();
   } catch {
@@ -108,5 +167,8 @@ button:disabled { opacity: .55; cursor: default; }
 article { border-top: 1px solid #dce5ef; padding: 12px 0; overflow-wrap: anywhere; }
 article p { white-space: pre-wrap; }
 nav { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.images { display: flex; flex-wrap: wrap; gap: 10px; }
+.images figure { display: grid; gap: 4px; margin: 0; }
+.images img { width: 128px; height: 96px; object-fit: contain; border: 1px solid #dce5ef; border-radius: 6px; }
 [role="alert"] { color: #b42318; }
 </style>

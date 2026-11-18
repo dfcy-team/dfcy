@@ -2435,3 +2435,11 @@ class InfluencerRequirement(models.Model):
     class Meta:
         ordering = ["-id"]
         indexes = [models.Index(fields=["tenant", "author", "-id"], name="inf_req_tenant_author_idx")]
+
+
+class InfluencerRequirementImage(models.Model):
+    requirement = models.ForeignKey(InfluencerRequirement, on_delete=models.CASCADE, related_name="images")
+    content = models.BinaryField()
+
+    class Meta:
+        ordering = ["id"]
