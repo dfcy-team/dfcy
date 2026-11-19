@@ -101,7 +101,7 @@ describe('operating suggestion component',()=>{
   });
   it('submits the imported preview token without making a new preview request', async () => {
     stageCockpitDraft(1, {
-      preview_token: 'existing-preview',
+      preview_token: 'test-placeholder-preview',
       parameters: { country_id: 3, source_kind: 'cycle', strategy_id: 9 },
       rows: [{ sku_id: 4, sku: 'SKU-A', suggested_quantity: 7 }],
     });
@@ -112,7 +112,7 @@ describe('operating suggestion component',()=>{
     expect(requests.some(request => request.url.endsWith('/preview/'))).toBe(false);
     expect(requests.find(request => request.method === 'post')).toMatchObject({
       url: '/api/internal/commerce/operating-orders/',
-      data: { preview_token: 'existing-preview', lines: [{ sku_id: 4, quantity: 7 }] },
+      data: { preview_token: 'test-placeholder-preview', lines: [{ sku_id: 4, quantity: 7 }] },
     });
     page.unmount();
   });
