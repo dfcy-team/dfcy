@@ -1142,6 +1142,45 @@ def test_sample_edit_can_mark_pending_record_completed_atomically():
     assert fulfillment.finalized_at is not None
 
 
+def test_sample_time_edit_preserves_shipment_deadline_and_cost(monkeypatch):
+    tenant, user, store, influencer = _records("sample-edit-time")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    _grant_all_scope(role, "influencers.fulfillment.view")
+    fulfillment, _ = create_sample_fulfillment(
+        user=user, request_key="sample-edit-time",
+        validated_data={"influencer": influencer, "store": store, "link_type": "YYJL",
+                        "external_product_id": "TIME-PRODUCT", "sample_order_no": "TIME-ORDER"},
+        item_payloads=[],
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+    url = f"/api/internal/influencers/sample-fulfillments/{fulfillment.pk}/"
+    fields = ("created_at", "shipped_at", "video_deadline_at", "status", "calculated_cost")
+    before = {field: getattr(fulfillment, field) for field in fields}
+    original_version = fulfillment.version
+    sent_at = (fulfillment.sample_sent_at - timedelta(days=1)).replace(microsecond=0)
+
+    def save(value, version):
+        return client.patch(url, {"sample_sent_at": value}, format="json", HTTP_IF_MATCH=f'"{version}"')
+
+    def unexpected_refresh(**kwargs):
+        pytest.fail("Time-only edit should not refresh costs.")
+
+    monkeypatch.setattr(influencer_services, "_refresh_existing_sample_costs", unexpected_refresh)
+    response = save(sent_at.isoformat(), original_version)
+    assert response.status_code == 200, response.data
+    fulfillment.refresh_from_db()
+    assert fulfillment.sample_sent_at == sent_at
+    assert {field: getattr(fulfillment, field) for field in fields} == before
+    assert fulfillment.version == original_version + 1
+    assert save(sent_at.isoformat(), original_version).status_code == 409
+    assert save("2026-11-19", fulfillment.version).status_code == 400
+    assert save((timezone.now() + timedelta(days=1)).isoformat(), fulfillment.version).status_code == 400
+    fulfillment.refresh_from_db()
+    assert fulfillment.sample_sent_at == sent_at
+
+
 def test_sample_edit_rejects_manual_intermediate_status():
     tenant, user, store, influencer = _records("sample-edit-intermediate-status")
     role = Role.objects.get(tenant=tenant, code="bd")

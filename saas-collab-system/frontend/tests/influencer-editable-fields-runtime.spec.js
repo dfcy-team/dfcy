@@ -57,6 +57,22 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('loads the stored Beijing time and sends a time-only patch without SKU changes', async () => {
+    serverSample = { ...sample, sample_sent_at: '2026-11-18T15:04:06Z' };
+    const wrapper = render(SampleFulfillmentList);
+    try {
+      await flushPromises();
+      await wrapper.vm.openEdit(sample);
+      expect(wrapper.vm.form.sample_sent_at).toBe('2026-11-18T23:04:06');
+      await wrapper.get('input[type="datetime-local"]').setValue('2026-11-17T22:03:02');
+      await wrapper.vm.submitEdit();
+      expect(writes()).toHaveLength(1);
+      expect(writes()[0].data).toEqual({ sample_sent_at: '2026-11-17T22:03:02+08:00' });
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it('filters by a permitted store absent from the current fulfillment page', async () => {
     request.mockImplementation(async (config) => ({
       success: true,

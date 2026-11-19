@@ -155,7 +155,11 @@
             <small v-if="editingSample" class="field-hint">修改类型不改变 YPDD 送样编号、建联关系或负责人；未手工指定新流水号时，按新类型自动分配类型流水号。</small>
             <small v-else class="field-hint">送样编号统一按 YPDD 递增；类型流水号由系统按类型自动生成，各类型独立，不需要选择建联任务。</small>
           </el-form-item>
-          <el-form-item label="送样日期">
+          <el-form-item v-if="editingSample" label="送样时间（北京时间）">
+            <el-input v-model="form.sample_sent_at" type="datetime-local" step="1" />
+            <small class="field-hint">仅修正送样时间，不修改创建时间、发货时间或视频截止时间。</small>
+          </el-form-item>
+          <el-form-item v-else label="送样日期">
             <el-input :model-value="todayLabel" readonly />
           </el-form-item>
           <el-form-item label="达人昵称" required>
@@ -328,7 +332,7 @@ const editingSample = ref(null);
 const inheritedTask = ref(null);
 const draftKey = ref('');
 const filters = reactive({ search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at' });
-const form = reactive({ fulfillment_no: '', type_no: '', outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', notes: '', link_type: 'YYJL', quick_tags: [] });
+const form = reactive({ fulfillment_no: '', type_no: '', outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', sample_sent_at: '', notes: '', link_type: 'YYJL', quick_tags: [] });
 const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '已完成']);
 const LEGACY_FULFILLMENT_STATUSES = new Set(['processing', 'creating', 'blank', '']);
 const FULFILLMENT_FILTER_STATUS_LABELS = Object.freeze(
@@ -531,11 +535,12 @@ watch([eligibleWarehouses, () => items.value.length], () => {
   }
 });
 const duplicateSampleWarning = computed(() => sampleDuplicateWarning(selectedInfluencer.value));
-const todayLabel = (() => {
-  const today = new Date();
-  const pad = (value) => String(value).padStart(2, '0');
-  return `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-})();
+const todayLabel = formatTaskDateTime(new Date()).slice(0, 10);
+
+function sampleTimeInput(value) {
+  if (!value || !Number.isFinite(Date.parse(value))) return '';
+  return formatTaskDateTime(value).replace(' ', 'T');
+}
 
 async function load() {
   loading.value = true;
@@ -784,6 +789,7 @@ async function openEdit(row) {
     store: row.store,
     product_name_snapshot: row.product_name_snapshot || '',
     external_product_id: row.external_product_id || '',
+    sample_sent_at: sampleTimeInput(row.sample_sent_at),
     sample_order_no: row.sample_order_no || '',
     notes: row.notes || '',
     link_type: row.link_type || 'DRJL',
@@ -874,7 +880,14 @@ async function submitEdit() {
   // Legacy rows remain editable before the separately approved number backfill.
   // An existing serial must not be cleared; a missing one may stay missing.
   if (!form.type_no.trim() && editingSample.value.type_no) return ElMessage.warning('请填写类型流水号');
+  const localTime = form.sample_sent_at.replace(/\.0+$/, '');
+  const input = localTime.length === 16 ? `${localTime}:00` : localTime;
+  const timestampChanged = input !== sampleTimeInput(editingSample.value.sample_sent_at);
+  if (timestampChanged && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(input)) {
+    return ElMessage.warning('请填写有效的送样时间');
+  }
   const identifiers = {
+    ...(timestampChanged ? { sample_sent_at: `${input}+08:00` } : {}),
     ...(form.fulfillment_no.trim() !== editingSample.value.fulfillment_no ? { fulfillment_no: form.fulfillment_no.trim() } : {}),
     ...(form.type_no.trim() && form.type_no.trim() !== (editingSample.value.type_no || '') ? { type_no: form.type_no.trim() } : {})
   };
@@ -892,10 +905,10 @@ async function submitEdit() {
     saving.value = true;
     const response = await updateSampleFulfillment(editingSample.value.id, identifiers, editingSample.value.version);
     saving.value = false;
-    if (!response.success) return ElMessage.error(formatInfluencerError(response, '编号修改失败'));
+    if (!response.success) return ElMessage.error(formatInfluencerError(response, timestampChanged ? '送样时间修改失败' : '编号修改失败'));
     visible.value = false;
     detailVisible.value = false;
-    ElMessage.success('编号已修改，原关联和成本保持不变');
+    ElMessage.success(timestampChanged ? '送样时间已修改，原关联和成本保持不变' : '编号已修改，原关联和成本保持不变');
     await load();
     return;
   }
