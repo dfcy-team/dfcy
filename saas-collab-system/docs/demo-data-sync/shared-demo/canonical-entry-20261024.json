@@ -1,0 +1,10 @@
+{
+  "canonical_url": "https://192.168.174.131:8443",
+  "mapped_alias": "https://192.168.2.10:8443",
+  "same_instance_confirmed_by_user": true,
+  "verified_health_status": 200,
+  "tls_chain_validation": true,
+  "tls_hostname_validation": true,
+  "trust": "explicit existing server public certificate; VERIFY_X509_PARTIAL_CHAIN, CERT_REQUIRED",
+  "http_upstream_switched": false
+}

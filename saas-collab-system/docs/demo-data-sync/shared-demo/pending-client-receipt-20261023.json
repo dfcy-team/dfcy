@@ -1,0 +1,25 @@
+{
+  "receipt": {
+    "id": 3,
+    "name": "shared-demo-admin-acceptance-20261023",
+    "tenant_id": 1,
+    "status": "disabled",
+    "approval_status": "pending",
+    "created_by": "root",
+    "designated_reviewer": "wudy",
+    "expires_at": "2026-10-30T10:33:20.446067+00:00",
+    "allowed_cidrs": [
+      "117.28.111.25/32"
+    ],
+    "resource_count": 10,
+    "review_performed": false,
+    "enabled": false
+  },
+  "private_destination": {
+    "private_file": "/opt/saas-demo-sync/private/readonly-client-20261023.json",
+    "mode": "0o600",
+    "credential_verified": true
+  },
+  "source_transient_removed": true,
+  "human_authorization_date": "2026-10-23"
+}

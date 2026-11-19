@@ -1,0 +1,57 @@
+# Temporary internal acceptance only. This does not change the 8443 frontend.
+# Requires the already-created isolated MySQL container and private env file.
+services:
+  shared-demo-acceptance:
+    image: sha256:3e08bd5b251cde934a4ec133f3e61bbc945dc673bfd9cd2838d94090c72cb3ee
+    container_name: saas-demo-shared-backend-20261023
+    restart: "no"
+    user: "0"
+    working_dir: /app
+    entrypoint: [gunicorn]
+    command: [config.wsgi:application, --bind, "0.0.0.0:8000", --workers, "1", --threads, "2", --timeout, "60", --access-logfile, "-", --error-logfile, "-"]
+    env_file:
+      - /opt/saas-demo-sync/private/shared-target.env
+    environment:
+      DEMO_SHARED_MAINTENANCE_FILE: /run/demo-maintenance/maintenance.flag
+    networks:
+      - acceptance
+    volumes:
+      - /opt/saas-demo-sync/runner/shared_demo_snapshot.py:/app/config/settings/shared_demo_snapshot.py:ro
+      - /opt/saas-demo-sync/runner/shared_middleware.py:/app/apps/demo_sync/shared_middleware.py:ro
+      - /opt/saas-demo-sync/maintenance:/run/demo-maintenance:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    mem_limit: 1024m
+    cpus: 1
+    pids_limit: 128
+  shared-demo-preview:
+    image: sha256:efbf21703c9cc8162752ac8a4208bb2dedf785abfe77cd58837626cc2b08f99e
+    container_name: saas-demo-shared-preview-20261024
+    restart: "no"
+    entrypoint: [nginx]
+    command: [-g, "daemon off;"]
+    ports:
+      - "127.0.0.1:18444:443"
+    networks: [preview_access, acceptance]
+    volumes:
+      - /opt/saas-demo-sync/runner/shared-preview-nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/saas-collab/tls/pilot-dfyy.crt:/etc/nginx/tls/tls.crt:ro
+      - /etc/saas-collab/tls/pilot-dfyy.key:/etc/nginx/tls/tls.key:ro
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /var/cache/nginx:rw,nosuid,size=64m
+      - /var/run:rw,nosuid,size=8m
+      - /tmp:rw,noexec,nosuid,size=16m
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+networks:
+  preview_access:
+    driver: bridge
+  acceptance:
+    external: true
+    name: saas-demo-shared-20261023

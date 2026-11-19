@@ -1,0 +1,24 @@
+{
+  "eligible_initial_admins": [
+    {
+      "id": 1,
+      "tenant_id": 1
+    }
+  ],
+  "enabled_sync_jobs": 0,
+  "data_scope_types": [
+    {
+      "scope_type": "all",
+      "count": 10
+    },
+    {
+      "scope_type": "own",
+      "count": 2
+    },
+    {
+      "scope_type": "custom",
+      "count": 1
+    }
+  ],
+  "custom_resource_policy_count": 0
+}

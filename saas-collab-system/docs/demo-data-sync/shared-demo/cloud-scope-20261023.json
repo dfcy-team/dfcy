@@ -1,0 +1,18 @@
+{
+  "first_sales_scope": [
+    {
+      "tenant_id": 1,
+      "store_id": 6,
+      "latest": "2026-10-23 04:04:08+00:00",
+      "rows": 4792
+    }
+  ],
+  "first_inventory_scope": [
+    {
+      "tenant_id": 1,
+      "warehouse_id": 2,
+      "latest": "2026-10-23 08:28:46.717716+00:00",
+      "rows": 89694
+    }
+  ]
+}
