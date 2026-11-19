@@ -28,6 +28,7 @@
     </el-table>
     <div class="pagination"><span>共 {{ total }} 条</span><el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[20, 50, 100]" layout="sizes, prev, pager, next" @change="loadAlerts" /></div>
       </el-tab-pane>
+      <el-tab-pane label="整款库存预警" name="snapshot"><InventoryWarningSnapshot v-if="activeTab === 'snapshot'" /></el-tab-pane>
       <el-tab-pane label="更多分析" name="analysis">
         <el-tabs v-model="analysisTab">
           <el-tab-pane label="评估状态" name="assessment"><CountryInventoryDecisions v-if="activeTab === 'analysis' && analysisTab === 'assessment'" mode="assessment" impact="alerts" /></el-tab-pane>
@@ -75,6 +76,7 @@
 </template>
 
 <script setup>
+import InventoryWarningSnapshot from './InventoryWarningSnapshot.vue';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';

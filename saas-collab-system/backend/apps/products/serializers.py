@@ -263,6 +263,7 @@ class ProductResearchSerializer(serializers.ModelSerializer):
 
 
 class ProductSPUSerializer(serializers.ModelSerializer):
+    first_sale_date = serializers.DateField(read_only=True)
     CONTROLLED_UPDATE_FIELDS = {"lifecycle_status", "sales_status"}
 
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
@@ -311,6 +312,7 @@ class ProductSPUSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductSPU
         fields = (
+            "first_sale_date",
             "id",
             "tenant_id",
             "spu_code",
@@ -533,6 +535,7 @@ class ProductCategoryBackgroundColorBulkSerializer(serializers.Serializer):
 
 
 class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
+    first_sale_date = serializers.DateField(read_only=True)
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     spu_code = serializers.CharField(source="spu.spu_code", read_only=True)
     legacy_spu_code = serializers.CharField(source="spu.legacy_spu_code", read_only=True)
@@ -566,6 +569,7 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
     class Meta:
         model = ProductSKU
         fields = (
+            "first_sale_date",
             "id",
             "tenant_id",
             "spu",

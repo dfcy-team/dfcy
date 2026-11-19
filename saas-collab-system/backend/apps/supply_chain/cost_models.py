@@ -40,7 +40,7 @@ class FeeRevision(AppendOnlyRecord):
     volume_percent = models.DecimalField(max_digits=5, decimal_places=2)
     billed_cbm = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
     notes = models.TextField(blank=True)
-    reason = models.TextField()
+    reason = models.TextField(blank=True)
     allocations = models.JSONField(default=list, blank=True)
     item_breakdown = models.JSONField(default=list, blank=True)
     cost_exchange = models.JSONField(default=dict, blank=True)

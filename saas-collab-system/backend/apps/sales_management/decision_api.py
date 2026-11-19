@@ -20,6 +20,7 @@ from . import operating
 
 
 class DecisionQuery(serializers.Serializer):
+    abc_grade = serializers.ChoiceField(choices=["", "A", "B", "C", "new", "no_sales", "unavailable"], default="")
     country_id = serializers.IntegerField(min_value=1, required=False)
     category_id = serializers.IntegerField(min_value=1, required=False)
     search = serializers.CharField(max_length=160, allow_blank=True, default='')
@@ -98,6 +99,8 @@ class CountryDecisions(CountryDecisionAPI):
                     if values['category_id'] not in visible:
                         raise serializers.ValidationError('类目不在当前国家已映射商品范围内，请重新选择。')
                     rows = rows.filter(spu__category_node_id__in=category_descendants(values['category_id'], catalog))
+            from .abc_access import filter_skus
+            rows = filter_skus(request.user, country, rows, values['abc_grade'])
             if values['search'].strip():
                 search = values['search'].strip()
                 rows = rows.filter(Q(sku_code__icontains=search) | Q(legacy_sku_code__icontains=search) |
@@ -142,7 +145,11 @@ class CountryDecisions(CountryDecisionAPI):
                 scopes = get_permission_data_scopes(request.user, operating.MANAGE, cache=permission_cache)
                 can_write = any(s['scope_type'] in ['all', 'own'] or (
                     s['scope_type'] == 'custom' and country.pk in operating.country_ids(s)) for s in scopes)
-        return Response({'data': {'countries': country_options, 'categories': category_options, 'results': result, 'count': count, 'summary': summary,
+        abc_meta = {}
+        if 'country_id' in values:
+            from .abc_access import decorate_rows
+            abc_meta = decorate_rows(request.user, country, result)
+        return Response({'data': {'abc_meta': abc_meta, 'countries': country_options, 'categories': category_options, 'results': result, 'count': count, 'summary': summary,
             'parameters': {'target_days': values['target_days'], 'window_days': values['window_days'],
                            'as_of': business_date().isoformat(), 'mapped_only': values['mapped_only'], 'include_virtual': False},
             'permissions': {'can_preview': can_write, 'can_create': can_write,

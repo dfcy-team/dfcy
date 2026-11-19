@@ -401,6 +401,14 @@ def test_platform_switch_filters_choices_and_facts_and_rejects_cross_platform_st
         assert data["selected_platform_id"] == platform.pk
         assert len(data["currencies"][0]["daily"]) == 1
         assert data["currencies"][0]["daily"][0]["amount"] == str(10 + stores.index(store))
+    selection = f"{stores[0].pk},{stores[1].pk},{stores[0].pk}"
+    result = client.get(url, {"store_ids": selection})
+    assert result.status_code == 200
+    data = result.json()["data"]
+    assert data["selected_store_ids"] == [store.pk for store in stores]
+    assert data["currencies"][0]["daily"][0]["amount"] == "21"
+    assert client.get(url, {"platform_id": platforms[0].pk, "store_ids": selection}).status_code == 403
+    assert client.get(url, {"store_ids": selection, "store_id": stores[0].pk}).status_code == 400
     assert client.get(url, {"platform_id": platforms[0].pk, "store_id": stores[1].pk}).status_code == 403
     assert client.get(url, {"platform_id": 9999999}).status_code == 403
     assert client.get(url + "?platform_id=1&platform_id=2").status_code == 400

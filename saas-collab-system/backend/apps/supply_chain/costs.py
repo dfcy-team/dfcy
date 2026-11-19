@@ -546,8 +546,6 @@ def save_fee(actor, kind, pk, payload, key, *, initial_batch_estimate=False):
     )
     if not allowed and not initial_estimate:
         raise ValidationError(explanation)
-    if not payload['reason'].strip():
-        raise ValidationError('请填写本次费用维护或更正原因。')
     record = fee_record(kind, obj)
     if payload['expected_version'] != (record.version if record else 0):
         raise ValidationError('费用版本已变化，请重新加载。')

@@ -41,6 +41,7 @@ class DemandInput(serializers.Serializer):
     lines = DemandLineInput(many=True, allow_empty=False)
     expected_version = serializers.IntegerField(min_value=1, required=False)
     preview_token = serializers.CharField(max_length=64, required=False)
+    snapshot_job_id = serializers.UUIDField(required=False)
     campaign = serializers.CharField(max_length=120, allow_blank=True, required=False)
     demand_start = serializers.DateField(allow_null=True, required=False)
     demand_end = serializers.DateField(allow_null=True, required=False)
@@ -203,6 +204,12 @@ class OperatingSubmit(OperatingAPI):
 
 class OperatingCancel(OperatingSubmit):
     target = 'cancelled'
+
+
+class OperatingDelete(OperatingAPI):
+    def post(self, request, pk):
+        obj = domain.delete_draft(request.user, pk, validated(VersionInput, request), key(request))
+        return Response({'data': {'id': obj.pk, 'deleted': True}})
 
 
 class OperatingPreview(OperatingAPI):

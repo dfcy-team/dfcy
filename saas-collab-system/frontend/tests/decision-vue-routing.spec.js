@@ -6,8 +6,7 @@ import { hasRouteCapability, menuItems } from '../src/router/menu';
 
 const inventoryRoutes = [
   ['/inventory/workbench', 'InventoryWorkbench'],
-  ['/inventory/warehouse-details', 'InventoryWorkbench, props: { warehouseDetails: true }'],
-  ['/inventory/category-query', 'CategoryInventory'],
+  ['/inventory/warehouse-details', 'WarehouseInventoryDetails'],
   ['/decision/inventory/alerts', 'InventoryAlertList'],
   ['/decision/inventory/replenishment', 'ReplenishmentSuggestionList']
 ];
@@ -33,7 +32,7 @@ describe('Vue decision routing', () => {
 
   it('places inventory alerts and replenishment under the dedicated inventory menu', () => {
     const inventory = menuItems.find((item) => item.label === '库存管理');
-    expect(inventory.children.map((item) => item.path)).toEqual(inventoryRoutes.map(([path]) => path));
+    expect(inventory.children.filter((item) => !item.sidebarHidden).map((item) => item.path)).toEqual(inventoryRoutes.map(([path]) => path));
     expect(inventory.permissions).toEqual(['sales_management.view', 'alerts.view', 'replenishment.view']);
 
     for (const [path] of inventoryRoutes) {
@@ -47,6 +46,7 @@ describe('Vue decision routing', () => {
     for (const [path, component] of [...inventoryRoutes, ...decisionRoutes]) {
       expect(source).toContain(`{ path: '${path.slice(1)}', component: ${component} }`);
     }
+    expect(source).toContain("{ path: 'inventory/category-query', redirect:");
     expect(source).not.toContain('DecisionEmbeddedPage');
     expect(source).not.toContain('/decision-app');
   });

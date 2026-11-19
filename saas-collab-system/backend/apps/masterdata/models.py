@@ -501,3 +501,48 @@ class ArchiveCodeRule(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["tenant", "kind"], name="uniq_archive_code_rule_tenant_kind")]
+
+
+class InventoryObservationSettings(models.Model):
+    tenant = models.OneToOneField(Tenant, on_delete=models.CASCADE, related_name="inventory_observation_settings")
+    new_product_observation_days = models.PositiveSmallIntegerField(default=30)
+    abc_enabled = models.BooleanField(default=True)
+    abc_window_days = models.PositiveSmallIntegerField(default=90)
+    abc_a_percent = models.DecimalField(max_digits=5, decimal_places=2, default=80)
+    abc_b_percent = models.DecimalField(max_digits=5, decimal_places=2, default=95)
+    abc_stability_days = models.PositiveSmallIntegerField(default=3)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class InventoryABCRun(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
+    country = models.ForeignKey(CountrySiteMaster, on_delete=models.PROTECT)
+    cutoff_date = models.DateField()
+    window_days = models.PositiveSmallIntegerField(default=90)
+    currency = models.CharField(max_length=8, blank=True)
+    status = models.CharField(max_length=16, default="queued")
+    config = models.JSONField(default=dict)
+    issues = models.JSONField(default=list)
+    net_total = models.DecimalField(max_digits=24, decimal_places=4, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["tenant", "country", "status", "cutoff_date"], name="abc_run_latest_idx")]
+
+
+class InventoryABCEntry(models.Model):
+    run = models.ForeignKey(InventoryABCRun, on_delete=models.CASCADE, related_name="entries")
+    entity_type = models.CharField(max_length=3)
+    entity_id = models.PositiveBigIntegerField()
+    grade = models.CharField(max_length=16)
+    candidate_grade = models.CharField(max_length=16, blank=True)
+    candidate_streak = models.PositiveSmallIntegerField(default=1)
+    revenue = models.DecimalField(max_digits=24, decimal_places=4, null=True)
+    share = models.DecimalField(max_digits=18, decimal_places=10, null=True)
+    cumulative_share = models.DecimalField(max_digits=18, decimal_places=10, null=True)
+    first_sale_date = models.DateField(null=True, blank=True)
+    changed_at = models.DateField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["run", "entity_type", "entity_id"], name="abc_entry_run_entity_uniq")]

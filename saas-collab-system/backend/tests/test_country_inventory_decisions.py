@@ -661,4 +661,13 @@ def test_category_inventory_drills_through_country_and_store(facts):
     assert sum(row['units'] for row in stores) == sku['sales']
     warehouse = api.get(url, {**params, 'level': 'warehouses', 'sku_id': sku['id']}).data['data']['results']
     assert warehouse[0]['available'] == sku['available']
+    warehouse_id = api.get(url, params).data['data']['warehouses'][0]['id']
+    scoped = api.get(url, {
+        'country_id': f['country'].pk, 'level': 'sku', 'warehouse_id': warehouse_id,
+        'category_ids': f'{nodes[0].pk},{nodes[-1].pk}',
+    })
+    assert scoped.status_code == 200, scoped.data
+    assert [row['id'] for row in scoped.data['data']['results']] == [f['sku'].pk]
+    denied = api.get(url, {'country_id': f['country'].pk, 'warehouse_id': 9223372036854775807})
+    assert denied.status_code == 404
     cache.clear()

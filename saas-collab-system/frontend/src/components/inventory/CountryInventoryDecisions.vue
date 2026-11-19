@@ -19,6 +19,10 @@
         <el-option v-for="country in countries" :key="country.id" :label="`${country.name} (${country.country_code || '—'})`" :value="country.id" />
       </el-select>
       <el-cascader v-if="mode === 'operations'" v-model="categoryId" :options="categories" :props="categoryProps" clearable filterable :placeholder="categories.length ? '全部类目' : '类目（先查询国家）'" aria-label="类目" :disabled="loading || saving || previewing || evaluating" />
+      <el-select v-if="mode === 'operations'" v-model="abcGrade" aria-label="ABC 等级" placeholder="全部等级" clearable
+        :disabled="loading || saving || previewing || evaluating" @change="applyFilters">
+        <el-option v-for="(label, grade) in abcGrades" :key="grade" :label="label" :value="grade" />
+      </el-select>
       <el-input v-model="search" clearable placeholder="搜索名称 / 规格 / 新旧 SKU" aria-label="搜索名称 / 规格 / 新旧 SKU" :disabled="loading || saving || previewing || evaluating" @keyup.enter="applyFilters" />
       <el-select v-model="windowDays" aria-label="销量窗口" :disabled="loading || saving || previewing || evaluating" @change="mode !== 'operations' && applyFilters()"><el-option v-for="days in [7, 15, 30]" :key="days" :label="`${days} 日销量`" :value="days" /></el-select>
       <label v-if="mode === 'operations'" for="inventory-target-days">备货目标（天）</label>
@@ -28,6 +32,7 @@
       <el-button v-if="mode === 'pending' || decisionState === 'pending'" :disabled="loading || queryBuilding || saving || previewing || evaluating || !countryId" @click="load({ forceRefresh: true })">重新校验数据</el-button>
       <el-button type="primary" :loading="loading" :disabled="saving || previewing || evaluating || !countryId" @click="applyFilters">查询</el-button>
     </div>
+    <InventoryAbcStatus v-if="mode === 'operations' && countryId" :country-id="countryId" />
     <div class="table-scroll">
       <el-table ref="tableRef" :data="displayRows" v-loading="loading" row-key="sku_id" stripe @selection-change="selectionChanged" @expand-change="expandedChanged" :empty-text="error ? '查询未完成，请重试；当前不能判断是否有库存' : queryBuilding ? '正在后台核对数据，请稍候…' : loading ? '正在读取经营汇总…' : mode === 'operations' && awaitingQuery ? '请选择国家并点击查询' : countryId ? '当前筛选无匹配 SKU' : '请选择国家并查询经营汇总'">
         <el-table-column v-if="(canWrite || canEvaluate) && ['replenishment', 'assessment'].includes(mode) && decisionState !== 'pending'" type="selection" width="48" :selectable="row => !queryBuilding && (canEvaluate || (Number.isInteger(row.suggested_quantity) && row.suggested_quantity > 0 && row.inventory_complete))" />
@@ -43,6 +48,9 @@
           </div>
         </template></el-table-column>
         <el-table-column label="SKU / 商品" min-width="280"><template #default="{row}"><div class="product"><DocumentProductImageV2 :image-path="safeImage(row.image_preview_url)" :alt="`${row.sku} 商品图片`"/><div><DocumentSkuV2 :sku="row.sku" :legacy-sku-code="row.legacy_sku_code"/><small>{{ row.product_name || '商品名称待核对' }}<span v-if="row.platform_mapping_status === 'unlinked'"> · 未关联平台商品</span></small></div></div></template></el-table-column>
+        <el-table-column label="ABC 等级" width="120">
+          <template #default="{ row }">{{ abcGrades[row.abc?.sku_grade] || '暂无分级' }}</template>
+        </el-table-column>
         <el-table-column v-if="mode === 'operations'" label="最近同步可售库存" min-width="150">
           <template #default="{row}">
             {{ display(syncedStock(row)) }}
@@ -82,6 +90,7 @@
 </template>
 
 <script setup>
+import InventoryAbcStatus from './InventoryAbcStatus.vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
@@ -124,6 +133,8 @@ const inventoryCount = status => rows.value.filter(row => (row.operations?.inven
 const salesTag = status => ({ unknown: 'info', no_sales: 'warning', observed_sales: 'success' }[status] || 'info');
 const inventoryTag = status => ({ unknown: 'info', out: 'danger', low: 'warning', over: 'warning', sufficient: 'success' }[status] || 'info');
 function viewEvidence(row) { tableRef.value?.toggleRowExpansion?.(row, true); }
+const abcGrade = ref('');
+const abcGrades = { A: 'A 类', B: 'B 类', C: 'C 类', new: '新品', no_sales: '无销量', unavailable: '暂无分级' };
 const rows = ref([]), countries = ref([]), categories = ref([]), categoryId = ref(null), countryId = ref(null), search = ref(''), windowDays = ref(30), targetDays = ref(60), page = ref(1), total = ref(0), loading = ref(false), error = ref(''), notice = ref(''), permissions = ref({ can_preview: false, can_create: false }), selectedRows = ref([]), expanded = ref(new Set()), tableRef = ref(null), summary = ref({}), decisionState = ref(props.mode === 'replenishment' ? 'positive' : props.mode === 'pending' ? 'pending' : props.mode === 'assessment' ? 'not_evaluated' : 'all');
 const replenishmentTabs = [{ value: 'positive', label: '有补货建议', count: 'positive' }, { value: 'ready', label: '全部可计算', count: 'ready' }, { value: 'pending', label: '待核对数据', count: 'pending' }];
 const assessmentTabs = [{ value: 'all', label: '全部', count: 'total' }, { value: 'normal', label: '正常', count: 'normal' }, { value: 'risk', label: '风险', count: 'risk' }, { value: 'not_evaluated', label: '未评估', count: 'not_evaluated' }, { value: 'no_rules', label: '无规则', count: 'no_rules' }];
@@ -185,8 +196,9 @@ async function load({ optionsOnly = false, forceRefresh = false } = {}) {
   try {
     const params = optionsOnly || !countryId.value ? { search: search.value.trim(), limit: 20, offset: 0, target_days: targetDays.value, window_days: windowDays.value, ...(props.mode === 'operations' ? {} : { decision_state: decisionState.value }) } : { country_id: countryId.value, search: search.value.trim(), limit: 20, offset: (page.value - 1) * 20, target_days: targetDays.value, window_days: windowDays.value, ...(props.mode === 'operations' ? {} : { decision_state: decisionState.value }) };
     if (props.mode === 'operations') { params.mapped_only = true; if (countryId.value && !optionsOnly && categoryId.value) params.category_id = Number(categoryId.value); }
+    if (props.mode === 'operations' && params.country_id && abcGrade.value) params.abc_grade = abcGrade.value;
     if (forceRefresh) params.refresh = true;
-    activeQueryFingerprint = JSON.stringify({ country_id: params.country_id || null, search: params.search, target_days: params.target_days, window_days: params.window_days, ...(props.mode === 'operations' ? { category_id: params.category_id || null } : { decision_state: params.decision_state }), offset: params.offset || 0 });
+    activeQueryFingerprint = JSON.stringify({ country_id: params.country_id || null, abc_grade: params.abc_grade || '', search: params.search, target_days: params.target_days, window_days: params.window_days, ...(props.mode === 'operations' ? { category_id: params.category_id || null } : { decision_state: params.decision_state }), offset: params.offset || 0 });
     const response = await api.fetchCountryInventoryDecisions(params);
     if (seq !== requestSequence) return;
     if (auth.authorizationStale) throw new Error('授权信息已过期，请刷新权限后再查看。');
@@ -252,7 +264,7 @@ async function createDraft() {
 }
 let createPending = null;
 let previewPending = null;
-function queryFingerprint() { return JSON.stringify({ country_id: countryId.value || null, search: search.value.trim(), target_days: targetDays.value, window_days: windowDays.value, ...(props.mode === 'operations' ? { category_id: categoryId.value || null } : { decision_state: decisionState.value }), offset: (page.value - 1) * 20 }); }
+function queryFingerprint() { return JSON.stringify({ country_id: countryId.value || null, abc_grade: props.mode === 'operations' ? abcGrade.value || '' : '', search: search.value.trim(), target_days: targetDays.value, window_days: windowDays.value, ...(props.mode === 'operations' ? { category_id: categoryId.value || null } : { decision_state: decisionState.value }), offset: (page.value - 1) * 20 }); }
 onMounted(() => { const query = router.currentRoute?.value?.query || {}; countryId.value = query.country_id ? Number(query.country_id) : null; search.value = String(query.search || query.sku || ''); load({ optionsOnly: !countryId.value || props.mode === 'operations' }); });
 onUnmounted(() => { ++requestSequence; activeQueryFingerprint = ''; if (buildPollTimer) clearTimeout(buildPollTimer); });
 </script>

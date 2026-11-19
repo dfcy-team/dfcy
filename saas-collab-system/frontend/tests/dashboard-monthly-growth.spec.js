@@ -20,6 +20,19 @@ const managedStores = [
 vi.mock('../src/api/salesManagement', () => ({ fetchMonthlySalesProgress: mocks.fetch }));
 vi.mock('../src/stores/auth', () => ({ useAuthStore: () => mocks.auth }));
 
+const mountDashboard = () => mount(MonthlySalesProgress, {
+  global: { stubs: {
+    ElSelect: {
+      props: ['modelValue', 'disabled', 'placeholder'],
+      emits: ['change'],
+      template: `<select multiple :disabled="disabled" :value="modelValue" @change="$emit('change', Array.from($event.target.selectedOptions, option => Number(option.value)))">
+        <option disabled>{{ placeholder }}</option><slot />
+      </select>`,
+    },
+    ElOption: { props: ['label', 'value'], template: '<option :value="value">{{ label }}</option>' },
+  } },
+});
+
 describe('dashboard monthly growth', () => {
   beforeEach(() => {
     mocks.fetch.mockReset();
@@ -47,7 +60,7 @@ describe('dashboard monthly growth', () => {
         }],
       },
     });
-    const wrapper = mount(MonthlySalesProgress);
+    const wrapper = mountDashboard();
     await flushPromises();
     expect(wrapper.text()).toContain('销售额日环比');
     expect(wrapper.text()).toContain('销量日环比');
@@ -65,7 +78,7 @@ describe('dashboard monthly growth', () => {
       cny_summary: { currency: 'CNY_TOTAL', previous: { amount: null, quantity: null }, daily: [],
         conversion: { status: 'missing_rates', missing_currencies: ['PHP'], rates: {}, rate_basis: 'saved reference rates' } },
     } });
-    const wrapper = mount(MonthlySalesProgress);
+    const wrapper = mountDashboard();
     await flushPromises();
     expect(wrapper.findAll('.currency-tabs button')[0].text()).toBe('CNY合计');
     await wrapper.findAll('.currency-tabs button')[0].trigger('click');
@@ -76,7 +89,7 @@ describe('dashboard monthly growth', () => {
 
   it('does not request data for a user without sales visibility', async () => {
     mocks.auth.actionPermissionSet = new Set();
-    const wrapper = mount(MonthlySalesProgress);
+    const wrapper = mountDashboard();
     await flushPromises();
     expect(mocks.fetch).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain('暂无销售数据查看权限');
@@ -87,11 +100,11 @@ describe('dashboard monthly growth', () => {
       month: '2026-10', through: '2026-10-31', today: '2026-11-02', stores: managedStores,
       selected_store_id: 12, currencies: [],
     } });
-    const wrapper = mount(MonthlySalesProgress);
+    const wrapper = mountDashboard();
     await flushPromises();
     await wrapper.get('#monthly-sales-month').setValue('2026-10');
     await flushPromises();
-    expect(mocks.fetch.mock.calls[1]).toEqual([12, null, '2026-10']);
+    expect(mocks.fetch.mock.calls[1]).toEqual([[12], null, '2026-10']);
     expect(wrapper.get('#monthly-sales-store').element.value).toBe('12');
   });
 
@@ -154,7 +167,7 @@ describe('dashboard monthly growth', () => {
         }],
       },
     });
-    const wrapper = mount(MonthlySalesProgress);
+    const wrapper = mountDashboard();
     await flushPromises();
     expect(wrapper.text()).toContain('↑ 新增');
     expect(wrapper.text()).not.toContain('Infinity');
@@ -169,7 +182,7 @@ describe('dashboard monthly growth', () => {
         currencies: [{ currency: 'MYR', previous: { amount: '13', quantity: 2 }, daily: [] }],
       },
     });
-    const wrapper = mount(MonthlySalesProgress);
+    const wrapper = mountDashboard();
     await flushPromises();
     expect(wrapper.text()).toContain('↓100%');
     expect(wrapper.text()).not.toContain('暂无销售订单');
@@ -183,7 +196,7 @@ describe('dashboard monthly growth', () => {
         stores: managedStores, selected_store_id: null, currencies: [],
       },
     });
-    const wrapper = mount(MonthlySalesProgress);
+    const wrapper = mountDashboard();
     await flushPromises();
     const select = wrapper.get('#monthly-sales-store');
     expect(select.element.value).toBe('');
@@ -192,7 +205,7 @@ describe('dashboard monthly growth', () => {
     expect(select.text()).toContain('Platform North');
     expect(select.text()).toContain('Platform South');
     expect(wrapper.text()).toContain('所选月份可见范围内暂无销售及广告数据');
-    expect(mocks.fetch).toHaveBeenCalledWith(null, null, expect.any(String));
+    expect(mocks.fetch).toHaveBeenCalledWith([], null, expect.any(String));
   });
 
   it('sends each selected store and ignores stale responses after rapid switches', async () => {
@@ -206,12 +219,12 @@ describe('dashboard monthly growth', () => {
         month: '2026-10', through: '2026-10-01', stores: managedStores, selected_store_id: 12,
         currencies: [{ currency: 'USD', previous: { amount: '1', quantity: 1 }, daily: [] }],
       } });
-    const wrapper = mount(MonthlySalesProgress);
+    const wrapper = mountDashboard();
     await flushPromises();
     const select = wrapper.get('#monthly-sales-store');
-    await select.setValue('11');
-    await select.setValue('12');
-    expect(mocks.fetch.mock.calls.map(([store, platform]) => [store, platform])).toEqual([[null, null], [11, null], [12, null]]);
+    await select.setValue(['11']);
+    await select.setValue(['11', '12']);
+    expect(mocks.fetch.mock.calls.map(([store, platform]) => [store, platform])).toEqual([[[], null], [[11], null], [[11, 12], null]]);
     await flushPromises();
     resolveStore({ success: true, data: {
       month: '2026-10', through: '2026-10-01', stores: managedStores, selected_store_id: 11,
@@ -233,17 +246,17 @@ describe('dashboard monthly growth', () => {
         ],
       } })
       .mockResolvedValueOnce({ success: false, http_status: 500 });
-    const wrapper = mount(MonthlySalesProgress);
+    const wrapper = mountDashboard();
     await flushPromises();
     await wrapper.get('.currency-tabs button:nth-child(2)').trigger('click');
     expect(wrapper.text()).toContain('EUR');
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
-    await wrapper.get('#monthly-sales-store').setValue('11');
+    await wrapper.get('#monthly-sales-store').setValue(['11']);
     await flushPromises();
     expect(wrapper.get('[role="alert"]').text()).toContain('销售数据暂时无法读取');
     expect(wrapper.text()).not.toContain('EUR');
     expect(wrapper.find('.latest-grid').exists()).toBe(false);
-    expect(mocks.fetch.mock.calls[1].slice(0, 2)).toEqual([11, null]);
+    expect(mocks.fetch.mock.calls[1].slice(0, 2)).toEqual([[11], null]);
   });
 
   it('filters by platform, clears the store, and retains platform choices with no data', async () => {
@@ -256,12 +269,12 @@ describe('dashboard monthly growth', () => {
         platforms: [{ id: 3, name: 'TikTok', code: 'tiktok' }, { id: 4, name: 'Shopee', code: 'shopee' }],
         stores: [], selected_platform_id: 3, selected_store_id: null, currencies: [],
       } });
-    const wrapper = mount(MonthlySalesProgress);
+    const wrapper = mountDashboard();
     await flushPromises();
     expect(wrapper.get('#monthly-sales-store').element.value).toBe('12');
     await wrapper.get('#monthly-sales-platform').setValue('3');
     await flushPromises();
-    expect(mocks.fetch.mock.calls.map(([store, platform]) => [store, platform])).toEqual([[null, null], [null, 3]]);
+    expect(mocks.fetch.mock.calls.map(([store, platform]) => [store, platform])).toEqual([[[], null], [[], 3]]);
     expect(wrapper.get('#monthly-sales-platform').element.value).toBe('3');
     expect(wrapper.get('#monthly-sales-platform').text()).toContain('Shopee');
     expect(wrapper.get('#monthly-sales-store').element.value).toBe('');
@@ -278,7 +291,7 @@ describe('dashboard monthly growth', () => {
         { date: '2026-10-04', amount: '1', quantity: 1, ad_spend: null },
       ] }],
     } });
-    const wrapper = mount(MonthlySalesProgress);
+    const wrapper = mountDashboard();
     await flushPromises();
     const cards = wrapper.findAll('.day-card');
     expect(cards[0].text()).toContain('持平');
@@ -298,7 +311,7 @@ describe('dashboard monthly growth', () => {
           ad_comparison: { current: '4', previous: '2', covered_stores: 2, total_stores: 61 } },
       ] }],
     } });
-    const wrapper = mount(MonthlySalesProgress);
+    const wrapper = mountDashboard();
     await flushPromises();
     expect(wrapper.get('.advertising-card').text()).toContain('100%');
     expect(wrapper.get('.advertising-card').text()).toContain('暂估 · 可比2/61店');
@@ -313,7 +326,7 @@ describe('dashboard monthly growth', () => {
         { date: '2026-10-02', amount: '0', quantity: 0, ad_spend: '9', ad_comparison: null },
       ] }],
     } });
-    const wrapper = mount(MonthlySalesProgress);
+    const wrapper = mountDashboard();
     await flushPromises();
     expect(wrapper.get('.advertising-card').text()).toContain('暂无共同完整店铺可比');
     expect(wrapper.findAll('.day-card')[1].text()).toContain('暂无可比数据');
@@ -325,7 +338,7 @@ describe('dashboard monthly growth', () => {
       month: '2026-10', through: '2026-10-01', advertising_status: 'forbidden',
       currencies: [{ currency: 'USD', previous: { amount: '1', quantity: 1, ad_spend: null }, daily: [] }],
     } });
-    const wrapper = mount(MonthlySalesProgress);
+    const wrapper = mountDashboard();
     await flushPromises();
     expect(wrapper.get('.advertising-card').text()).toContain('无权限');
     expect(wrapper.get('.day-card').text()).toContain('无权限');
@@ -336,7 +349,7 @@ describe('dashboard monthly growth', () => {
     mocks.fetch.mockResolvedValueOnce({ success: true, data: { platforms, stores: managedStores, currencies: [] } })
       .mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }))
       .mockResolvedValueOnce({ success: true, data: { platforms, stores: [managedStores[1]], selected_platform_id: 4, currencies: [] } });
-    const wrapper = mount(MonthlySalesProgress);
+    const wrapper = mountDashboard();
     await flushPromises();
     await wrapper.get('#monthly-sales-platform').setValue('3');
     expect(wrapper.get('#monthly-sales-store').element.disabled).toBe(true);

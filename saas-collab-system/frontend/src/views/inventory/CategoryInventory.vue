@@ -1,16 +1,31 @@
 <template>
-  <AppPage title="分类库存查询" subtitle="按国家查看各类商品最近一次同步的库存和店铺销量。">
+  <AppPage  :title="embedded ? '仓库库存明细查询' : '分类库存查询'" subtitle="按国家查看各类商品最近一次同步的库存和店铺销量。">
     <el-form inline @submit.prevent="apply">
       <el-form-item label="国家">
-        <el-select v-model="country" filterable style="width:180px" @change="reset">
+        <el-select v-model="country" filterable style="width:180px" @change="changeCountry">
           <el-option v-for="item in countries" :key="item.id" :label="item.name" :value="item.id" />
         </el-select>
+      </el-form-item>
+      <el-form-item label="仓库">
+        <el-select v-model="warehouse" clearable filterable aria-label="仓库">
+          <el-option v-for="item in warehouses" :key="item.id" :label="item.name" :value="item.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="商品类目">
+        <el-cascader v-model="selectedCategories" :options="categoryOptions"
+          :props="{ multiple: true, checkStrictly: true, emitPath: false }" clearable filterable collapse-tags />
       </el-form-item>
       <el-form-item label="销量周期">
         <el-select v-model="days" style="width:100px">
           <el-option v-for="day in [7,15,30]" :key="day" :value="day" :label="day + ' 天'" />
         </el-select>
       </el-form-item>
+      <el-form-item label="ABC 等级">
+        <el-select v-model="abcGrade" clearable placeholder="全部等级" aria-label="ABC 等级">
+          <el-option v-for="(label, grade) in abcGrades" :key="grade" :label="label" :value="grade" />
+        </el-select>
+      </el-form-item>
+      <el-form-item><el-checkbox v-model="stockedOnly">仅显示有库存</el-checkbox></el-form-item>
       <el-form-item label="商品"><el-input v-model="search" maxlength="160" clearable placeholder="名称、规格、新旧 SKU" /></el-form-item>
       <el-button type="primary" native-type="submit" :disabled="!country">查询</el-button>
     </el-form>
@@ -31,11 +46,15 @@
         <template #default="{row}">
           <el-button v-if="level !== 'sku'" link type="primary" @click="enter(row)">{{ row.name }}</el-button>
           <div v-else>{{ row.specification || row.name }}</div>
-          <small v-if="row.code">{{ row.code }}<span v-if="row.legacy"> · 旧 SKU {{ row.legacy }}</span></small>
+          <DocumentProductImageV2 v-if="row.image_preview_url" :image-path="row.image_preview_url" :alt="row.name" />
+          <small v-if="row.code">{{ row.code }}<span v-if="row.legacy"> · 旧{{ level === "spu" ? " SPU" : " SKU" }} {{ row.legacy }}</span></small>
         </template>
       </el-table-column>
       <el-table-column v-if="level === 'category'" label="商品款数"><template #default="{row}">{{ row.spu_count }}</template></el-table-column>
       <el-table-column v-if="level !== 'sku'" label="规格数"><template #default="{row}">{{ row.sku_count }}</template></el-table-column>
+      <el-table-column v-if="level !== 'category'" label="ABC 等级">
+        <template #default="{row}">{{ abcGrades[level === 'spu' ? row.abc?.spu_grade : row.abc?.sku_grade] || '暂无分级' }}</template>
+      </el-table-column>
       <el-table-column label="最近同步可售库存"><template #default="{row}">{{ format(row.available) }}</template></el-table-column>
       <el-table-column :label="'近 ' + (applied?.days || days) + ' 天销量'"><template #default="{row}">{{ format(row.sales) }}<small v-if="row.unlisted_stock_sku_count">{{ row.unlisted_stock_sku_count }} 个有库存无销售（未关联平台商品）</small></template></el-table-column>
       <el-table-column label="查看明细" min-width="165">
@@ -72,8 +91,12 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import AppPage from '../../components/AppPage.vue';
+import DocumentProductImageV2 from '../../components/supply-chain/DocumentProductImageV2.vue';
 import { requestApi } from '../../api/request';
 
+const abcGrade = ref(''), stockedOnly = ref(false);
+const abcGrades = { A: 'A 类', B: 'B 类', C: 'C 类', new: '新品', no_sales: '无销量', unavailable: '暂无分级' };
+defineProps({ embedded: Boolean });
 const countries = ref([]), country = ref(null), days = ref(30), search = ref('');
 const applied = ref(null), trail = ref([]), spu = ref(null), level = ref('category');
 const rows = ref([]), summary = ref(null), count = ref(0), page = ref(1), loading = ref(false), error = ref('');
@@ -82,6 +105,18 @@ const detailCount = ref(0), detailPage = ref(1), detailLoading = ref(false), det
 let sequence = 0, detailSequence = 0, detailParams;
 let mainController, detailController;
 
+const warehouses = ref([]), warehouse = ref(null), categories = ref([]), selectedCategories = ref([]);
+const categoryOptions = computed(() => {
+  const nodes = new Map(categories.value.map(item => [item.id, { value: item.id, label: item.name, children: [] }]));
+  const roots = [];
+  for (const item of categories.value) {
+    const node = nodes.get(item.id);
+    const parent = nodes.get(item.parent_id);
+    if (parent) parent.children.push(node);
+    else roots.push(node);
+  }
+  return roots;
+});
 const countryName = computed(() => countries.value.find(item => item.id === applied.value?.country_id)?.name);
 const metrics = computed(() => [
   ['商品款数', summary.value?.spu_count], ['规格数', summary.value?.sku_count],
@@ -113,10 +148,20 @@ function reset() {
   loading.value = false;
   error.value = '';
 }
+function changeCountry() {
+  warehouse.value = null;
+  warehouses.value = [];
+  selectedCategories.value = [];
+  categories.value = [];
+  apply();
+}
 function apply() {
   if (!country.value) return;
   reset();
-  applied.value = { country_id: country.value, days: days.value, search: search.value.trim() };
+  applied.value = { country_id: country.value, days: days.value, search: search.value.trim(),
+    ...(warehouse.value ? { warehouse_id: warehouse.value } : {}),
+    ...(selectedCategories.value.length ? { category_ids: selectedCategories.value.join(',') } : {}),
+    ...(abcGrade.value ? { abc_grade: abcGrade.value } : {}), ...(stockedOnly.value ? { stocked_only: true } : {}) };
   goRoot();
 }
 function goRoot() {
@@ -166,6 +211,8 @@ async function changePage(next) {
       ...(spu.value && { spu_id: spu.value.id }), offset: (next - 1) * 20 }, mainController.signal);
     if (seq !== sequence) return;
     rows.value = data.results;
+    warehouses.value = data.warehouses || [];
+    categories.value = data.categories || [];
     count.value = data.count;
     summary.value = data.summary;
   } catch (err) {

@@ -35,7 +35,7 @@ class FeeInput(SourceVersion):
     volume_percent = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100, allow_null=True)
     billed_cbm = serializers.DecimalField(max_digits=16, decimal_places=6, min_value=0, allow_null=True, default=None)
     notes = serializers.CharField(max_length=10000, allow_blank=True, default='')
-    reason = serializers.CharField(max_length=10000)
+    reason = serializers.CharField(max_length=10000, required=False, allow_blank=True, default='')
     measurements = MeasurementInput(many=True, required=False)
     item_breakdown = serializers.ListField(child=serializers.DictField(), required=False)
 

@@ -193,7 +193,10 @@ def notify_approval(approval_id):
 
 
 def emit_notification(tenant_id, scene, reference_type, reference_id):
-    for rule in FeishuConfigRule.objects.filter(tenant_id=tenant_id, kind="notification", enabled=True):
+    from apps.supply_chain.operating_notifications import CODE as OPERATING_ORDER_RULE
+
+    rules = FeishuConfigRule.objects.filter(tenant_id=tenant_id, kind="notification", enabled=True)
+    for rule in rules.exclude(code=OPERATING_ORDER_RULE):
         if rule.config.get("scene") == scene:
             enqueue_rule(rule, key=f"{scene}:{reference_type}:{reference_id}", reference_type=reference_type,
                          reference_id=reference_id, payload={"scene": scene})
@@ -376,6 +379,17 @@ def execute_delivery(pk, *, service=None):
                                 "sales_image_error": sanitize_text(str(image_error))[:180]}
                 else:
                     msg_type, content = "interactive", card(report["title"], report["summary"], "/reports/basic")
+            elif operation.reference_type == "operating_order":
+                from apps.sales_management.operating import order_for
+                order_id = payload.get("operating_order_id")
+                if not order_id or str(order_id) != operation.reference_id:
+                    raise ValidationError("运营订货通知引用无效。")
+                order = order_for(user, order_id, procurement=True)
+                if order.status != "submitted":
+                    raise ValidationError("运营订货单已撤销，请核对当前状态。")
+                count = order.lines.filter(is_active=True).count()
+                text = f"运营已确认订货单 {order.number}。目的国家 {order.country_code_snapshot}，共 {count} 个商品明细。请及时对接供应商并创建采购单。"
+                msg_type, content = "interactive", card("运营订货确认，请对接采购", text, "/supply-chain/purchase-orders")
             else:
                 # Automatic prewarnings disclose no source detail, only that the viewer should open the system.
                 automatic = payload.get("scene")

@@ -7,7 +7,10 @@
     <form class="filters" @submit.prevent="apply">
       <label>平台<select v-model="draft.platform" @change="draft.store_id = ''"><option value="">全部授权平台</option><option v-for="option in platforms" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
       <label>站点<select v-model="draft.region" @change="draft.store_id = ''"><option value="">全部站点</option><option v-for="site in regions" :key="site" :value="site">{{ site }}</option></select></label>
-      <label>店铺<select v-model="draft.store_id"><option value="">全部授权店铺</option><option v-for="option in stores" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+      <label>店铺<el-select v-model="selectedStores" multiple clearable filterable collapse-tags
+        aria-label="店铺" placeholder="全部授权店铺" :multiple-limit="100" class="store-filter">
+        <el-option v-for="option in stores" :key="option.value" :label="option.label" :value="String(option.value)" />
+      </el-select></label>
       <label>开始日期<input v-model="draft.date_from" type="date" required></label><label>结束日期<input v-model="draft.date_to" type="date" required></label>
       <div class="quick" role="group" aria-label="快捷日期"><button v-for="days in [1,7,15,30]" :key="days" type="button" :class="{ active: isRange(days) }" :aria-pressed="isRange(days)" @click="quick(days)">{{ days === 1 ? '昨日' : `近${days}天` }}</button></div>
       <label class="currency-filter">显示币种<select v-model="currency" @change="changeCurrency"><option value="">CNY（人民币汇总）</option><option v-for="code in currencies" :key="code" :value="code">{{ code }}</option></select></label>
@@ -25,7 +28,7 @@
       </section>
       <details v-if="data.cny_summary" class="summary-notes"><summary>人民币汇总 · 数据口径</summary><p>原币明细不变 · CNY 视图按国家档案参考汇率折算</p><p>ROI 分子：{{ data.cny_summary.roi_sales_scope }}</p><p>参考汇率日期：{{ data.cny_summary.rate_dates.join('、') || '暂无' }}</p></details>
       <p v-if="data.cny_summary?.ad_partial" class="notice">广告数据有在途，后续同步可能更新。</p><p v-if="data.cny_summary?.excluded_currencies?.length" class="notice">未换算币种：{{ data.cny_summary.excluded_currencies.join('、') }}</p>
-      <details class="summary-grid"><summary>各币种汇总（原币） <span>展开查看详情 · {{ visibleGroups.length }} 种</span></summary><article v-for="group in visibleGroups" :key="group.currency" class="summary-card"><div><span>{{ view === 'stores' ? '非取消订单GMV' : '商品行GMV' }}</span><b>{{ group.currency }}</b></div><strong>{{ amount(group.sales_amount) }}</strong><p :class="direction(group.change_percent)">{{ percent(group.change_percent) }} <span>较前一等长区间</span></p><dl><div><dt>广告花费</dt><dd>{{ adSpendValue(group.ad_spend, group.ad_reason) }} <span v-if="group.ad_spend != null">{{ group.currency }}</span></dd></div><div><dt>{{ group.ad_status === 'provisional' ? '暂估整店ROI' : '整店ROI' }}</dt><dd>{{ roiDisplay(group.roi, group.ad_spend, group.ad_reason) }} <small v-if="group.roi_delta != null">变化 {{ roiValue(group.roi_delta) }} 倍</small></dd></div></dl><p v-if="group.ad_sales_amount != null" class="note">ROI 计算销售额：{{ amount(group.ad_sales_amount) }} {{ group.currency }}</p><p v-if="group.ad_status === 'provisional' || group.ad_status === 'estimated'" class="note">暂估：有在途数据，后续同步后将更新。</p><p v-if="group.ad_basis" class="note">{{ group.ad_basis }}</p><p class="note">{{ group.ad_reason || '已入库数据，后续补采可能调整。' }}</p></article></details>
+      <details class="summary-grid"><summary>各币种汇总（原币） <span>展开查看详情 · {{ visibleGroups.length }} 种</span></summary><div class="currency-cards"><article v-for="group in visibleGroups" :key="group.currency" class="summary-card"><div><span>{{ view === 'stores' ? '非取消订单GMV' : '商品行GMV' }}</span><b>{{ group.currency }}</b></div><strong>{{ amount(group.sales_amount) }}</strong><p :class="direction(group.change_percent)">{{ percent(group.change_percent) }} <span>较前一等长区间</span></p><dl><div><dt>广告花费</dt><dd>{{ adSpendValue(group.ad_spend, group.ad_reason) }} <span v-if="group.ad_spend != null">{{ group.currency }}</span></dd></div><div><dt>{{ group.ad_status === 'provisional' ? '暂估整店ROI' : '整店ROI' }}</dt><dd>{{ roiDisplay(group.roi, group.ad_spend, group.ad_reason) }} <small v-if="group.roi_delta != null">变化 {{ roiValue(group.roi_delta) }} 倍</small></dd></div></dl><p v-if="group.ad_sales_amount != null" class="note">ROI 计算销售额：{{ amount(group.ad_sales_amount) }} {{ group.currency }}</p><p v-if="group.ad_status === 'provisional' || group.ad_status === 'estimated'" class="note">暂估：有在途数据，后续同步后将更新。</p><p v-if="group.ad_basis" class="note">{{ group.ad_basis }}</p><p class="note">{{ group.ad_reason || '已入库数据，后续补采可能调整。' }}</p></article></div></details>
       <div v-for="(notice,index) in data.notices || []" :key="index" class="notice">{{ typeof notice === 'string' ? notice : notice.message }}</div>
       <section class="results">
         <div class="results-head"><div><h2>{{ view === 'stores' ? '店铺经营表现' : `${selectedStoreName} · 商品链接` }}</h2><p>{{ view === 'stores' ? '点击店铺进入商品链接；按GMV降序，单页最多20条。' : '按商品行金额汇总，不含订单层运费税费；点击下降原因查看证据。' }}</p></div><button v-if="returnToDeclines" @click="returnToBoard">← 返回大屏下降排行</button><button v-else-if="view === 'products'" @click="backToStores">← 返回店铺</button>    <div class="list-tools" aria-label="列表显示与排序">
@@ -86,6 +89,10 @@ type Row = Record<string, any>;
 const router = useRouter(), route = useRoute(), auth = useAuthStore();
 const validIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 const draft = reactive({ ...dateRange(1), platform: '', store_id: '', region: '' });
+const selectedStores = computed<string[]>({
+  get: () => draft.store_id ? draft.store_id.split(',') : [],
+  set: values => { draft.store_id = [...new Set(values)].join(','); },
+});
 if (route.query.view === 'operations' && typeof route.query.date_from === 'string' && typeof route.query.date_to === 'string') { const dates = { date_from: route.query.date_from, date_to: route.query.date_to }; if (!validRange(dates)) Object.assign(draft, dates); }
 const applied = ref({ ...draft }), view = ref('stores'), page = ref(1), pageSize = 20;
 const data = ref<Row | null>(null), filters = ref<Row>({}), loading = ref(false), error = ref(''), filterError = ref(''), currency = ref('');
@@ -170,11 +177,15 @@ function toggleDeclines(event: Event) {
   if (declinesOpen.value && canProducts.value && currency.value && !declinesLoaded.value && !declinesLoading.value) loadDeclines();
   else if (!declinesOpen.value) clearDeclines();
 }
+function boardStoreScope(storeId: string, storeIds?: string) {
+  const multiple = storeIds || (storeId.includes(',') ? storeId : '');
+  return multiple ? { store_id: '', store_ids: multiple } : { store_id: storeId };
+}
 async function loadDeclines() {
   if (!canProducts.value || !currency.value || !data.value) return;
   const id = ++declinesGeneration; declinesController?.abort(); declinesController = new AbortController(); declinesLoading.value = true; declinesError.value = ''; declines.value = [];
   try {
-    const response = await fetchBoardDeclines({ ...applied.value, currency: currency.value, metric: 'amount' }, declinesController.signal);
+    const response = await fetchBoardDeclines({ ...applied.value, ...boardStoreScope(applied.value.store_id), currency: currency.value, metric: 'amount' }, declinesController.signal);
     if (!alive || id !== declinesGeneration) return;
     if (!response.success || ['mock','degraded'].includes(response.data?.api_status)) throw new Error();
     declines.value = response.data?.rows || []; declinesLoaded.value = true;
@@ -188,6 +199,7 @@ function openDecline(row: Row) {
   Object.assign(draft, { store_id: String(row.store_id) });
   selectedStoreName.value = row.store_name;
   view.value = 'products'; exactProductId.value = row.product_id; returnToDeclines.value = false;
+  currency.value = row.currency || currency.value;
   status.value = 'all'; sort.value = 'change_asc'; page.value = 1; load();
 }
 function apply() { const message = validRange(draft); if (message) { error.value = message; return; } routeScopeInvalid.value = false; exactProductId.value = ''; autoOpenReason.value = false; applied.value = { ...draft }; view.value = 'stores'; page.value = 1; currency.value = ''; currencies.value = []; status.value = 'all'; sort.value = 'sales_desc'; load(); }
@@ -199,7 +211,7 @@ function reloadList() { page.value = 1; load(); }
 function returnToBoard() {
   const source = returnScope.value || applied.value;
   const query = { date_from: source.date_from, date_to: source.date_to,
-    platform: source.platform || '', region: source.region || '', store_id: source.store_id || '', currency: source.currency || currency.value || '', metric: source.metric || 'amount', view: 'declines' };
+    platform: source.platform || '', region: source.region || '', ...boardStoreScope(source.store_id || '', source.store_ids), currency: source.currency || currency.value || '', metric: source.metric || 'amount', view: 'declines' };
   router.push({ path: '/sales-management/realtime-board', query });
 }
 function changeCurrency() { page.value = 1; load(); }
@@ -280,4 +292,12 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); });
 .filters>label{white-space:nowrap}.filters>label select,.filters>label input{flex:1;width:0}.filters .currency-filter select{flex:none;width:110px}
 @media(max-width:600px){.filters>label:not(.currency-filter) select,.filters>label:not(.currency-filter) input{flex:none;width:100%}}
 .ad-basis{width:180px;margin:4px 0 0 auto;text-align:left;white-space:normal}.operations .ad-basis summary{padding:2px 0;border:0;background:none;color:#2864b4;font-size:11px}.ad-basis p{margin:6px 0;line-height:1.6;overflow-wrap:anywhere;font-size:11px;color:#64748b}
+.filters>label:not(.currency-filter){min-width:0}
+.filters>label:not(.currency-filter) select,.filters>label:not(.currency-filter) input{height:36px;padding:0 11px;font-size:12px}
+.filters .store-filter{min-width:0;flex:1}
+.filters .store-filter :deep(.el-select__wrapper){min-height:36px;font-size:12px}
+.summary-grid[open]{display:block}
+.currency-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:10px;padding:8px 0}
+.currency-cards>.summary-card{min-width:0;margin:0;align-self:start}
+@media(max-width:600px){.filters .store-filter{flex:none;width:100%}}
 </style>

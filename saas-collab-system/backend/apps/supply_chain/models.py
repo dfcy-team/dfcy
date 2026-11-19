@@ -768,6 +768,7 @@ class ReplenishmentStrategy(Record):
     safety_days = models.PositiveSmallIntegerField(default=35)
     sales_model = models.CharField(max_length=16, default="weighted", choices=[("weighted", "加权日均"), ("ordinary", "普通30天日均")])
     sales_weights = models.JSONField(default=dict)
+    sku_policies = models.JSONField(default=dict, blank=True)
     active = models.BooleanField(default=True)
 
     class Meta:

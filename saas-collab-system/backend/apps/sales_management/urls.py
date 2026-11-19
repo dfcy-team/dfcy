@@ -1,4 +1,5 @@
 from django.urls import path
+from .abc_api import InventoryABCView
 from .registration_services import PREFIX
 from .registration_views import RegistrationView
 from . import operating_api as oa
@@ -32,6 +33,7 @@ from .views import (
 from .warehouse_order_api import OrderWarehouseView
 
 urlpatterns = [
+    path("inventory/abc/", InventoryABCView.as_view(), name="inventory-abc"),
     path("orders/<int:pk>/warehouse/", OrderWarehouseView.as_view(), name="sales-order-warehouse"),
     path('aftersales/', aa.AftersalesCollection.as_view(), name='order-aftersales'),
     path('aftersales/options/', aa.AftersalesOptions.as_view(), name='order-aftersales-options'),
@@ -56,6 +58,7 @@ urlpatterns = [
     path('operating-orders/references/', orf.OperatingReferences.as_view(), name='operating-references'),
     path('operating-orders/<int:pk>/', oa.OperatingDetail.as_view(), name='operating-detail'),
     path('operating-orders/<int:pk>/submit/', oa.OperatingSubmit.as_view(), name='operating-submit'),
+    path('operating-orders/<int:pk>/delete/', oa.OperatingDelete.as_view(), name='operating-delete'),
     path('operating-orders/<int:pk>/cancel/', oa.OperatingCancel.as_view(), name='operating-cancel'),
     path("filters/", CommerceFiltersView.as_view(), name="commerce-filters"),
     path("dashboard/monthly-sales/", DashboardMonthlySalesView.as_view(), name="commerce-dashboard-monthly-sales"),

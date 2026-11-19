@@ -33,14 +33,15 @@ describe('销售09:00快照', () => {
     expect(fetchSalesNineSnapshots).not.toHaveBeenCalled();
     await wrapper.findAll('.filters select')[0].setValue('shopee');
     await wrapper.findAll('.filters select')[1].setValue('PH');
-    await wrapper.findAll('.filters select')[2].setValue('14');
+    wrapper.getComponent({ name: 'ElSelect' }).vm.$emit('update:modelValue', ['14']);
+    await wrapper.vm.$nextTick();
     await wrapper.find('.filters').trigger('submit'); await flushPromises();
     expect(fetchSalesNineSnapshots).not.toHaveBeenCalled();
     await wrapper.find('.snapshot-state').trigger('click'); await flushPromises();
     expect(fetchSalesNineSnapshots).not.toHaveBeenCalled();
     await wrapper.find('.snapshot-query').trigger('submit'); await flushPromises();
     expect(fetchSalesNineSnapshots).toHaveBeenCalledTimes(1);
-    expect(fetchSalesNineSnapshots.mock.calls[0][0]).toMatchObject({ platform: 'shopee', store_id: 14, region: 'PH', page: 1, page_size: 20 });
+    expect(fetchSalesNineSnapshots.mock.calls[0][0]).toMatchObject({ platform: 'shopee', store_id: '14', region: 'PH', page: 1, page_size: 20 });
   });
 
   it('keeps missing values unknown and displays currency and order units', async () => {

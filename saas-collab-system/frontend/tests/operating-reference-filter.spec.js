@@ -15,11 +15,11 @@ const stubs = {
   'el-option': { props: ['label', 'value'], template: '<option :value="value">{{label}}</option>' }, 'el-input': true, 'el-input-number': true, 'el-date-picker': true,
   'el-button': { props: ['disabled', 'loading'], emits: ['click'], template: '<button :disabled="disabled || loading" @click="$emit(\'click\')"><slot/></button>' },
   'el-alert': { props: ['title'], template: '<p role="alert">{{title}}</p>' }, 'el-progress': { props: ['percentage'], template: '<div>{{percentage}}</div>' }, 'el-tag': true, 'el-pagination': { props: ['currentPage','pageSize','total'], emits: ['update:currentPage','current-change'], template: '<div />' }, 'el-table': { props: ['data', 'emptyText'], template: '<div><slot/></div>' }, 'el-table-column': true, 'el-checkbox': true,
-  'el-dialog': true, 'el-descriptions': true, 'el-descriptions-item': true, OperatingProductImageV2: true, DocumentSkuV2: true,
+  'el-dialog': true, 'el-drawer': true, 'el-descriptions': true, 'el-descriptions-item': true, OperatingProductImageV2: true, DocumentSkuV2: true,
 };
-const mountReference = () => {
+const mountReference = (props = {}) => {
   setActivePinia(createPinia()); const auth = useAuthStore(); auth.setCurrentUser({ user_type: 'internal', permissions: ['supply.v2.view'], action_permission_codes: ['supply.v2.view'] });
-  return mount(Reference, { props: { parameters: { country_id: 2, source_kind: 'cycle' } }, global: { stubs, directives: { loading: () => {} } } });
+  return mount(Reference, { props: { parameters: { country_id: 2, source_kind: 'cycle' }, ...props }, global: { stubs, directives: { loading: () => {} } } });
 };
 
 describe('nightly replenishment results and global pagination', () => {
@@ -34,6 +34,28 @@ describe('nightly replenishment results and global pagination', () => {
     expect(wrapper.vm.summary.awaiting_procurement_count).toBe(4);expect(wrapper.vm.summary.arrival_risk_count).toBe(2);
     wrapper.vm.filter='all'; await wrapper.vm.loadRows(0); expect(api.daily).toHaveBeenCalledTimes(1); expect(api.rows.mock.lastCall[1].quantity_filter).toBe('all');
     await wrapper.vm.loadRows(1); expect(api.rows.mock.lastCall[1].offset).toBe(20); wrapper.unmount();
+  });
+
+  it('expands grouped results and hands selected SKUs to the draft only on basket confirmation', async () => {
+    api.rows.mockResolvedValueOnce(success({ rows: [{ spu_id: 9 }] }));
+    const wrapper = mountReference({ floatingBasket: true });
+    await flushPromises();
+    expect(api.rows.mock.lastCall[1]).toMatchObject({ group_by: 'spu', offset: 0 });
+    const sku = { sku_id: 7, suggested_quantity: 3 };
+    api.rows.mockResolvedValueOnce(success({ rows: [sku], count: 1 }));
+    await wrapper.vm.loadSkuDetails({ spu_id: 9 });
+    expect(api.rows.mock.lastCall[1]).toMatchObject({ group_by: 'sku', spu_id: 9, quantity_filter: 'all' });
+    expect(wrapper.vm.skuDetails[9].rows).toEqual([sku]);
+    wrapper.vm.toggle(sku, true);
+    await wrapper.setProps({ handoffSearch: 'ZERO-SKU' });
+    await flushPromises();
+    expect(api.rows.mock.lastCall[1]).toMatchObject({ search: 'ZERO-SKU', quantity_filter: 'all', offset: 0 });
+    expect(wrapper.vm.selectedRows).toEqual([sku]);
+    wrapper.vm.openBasket();
+    expect(wrapper.emitted('select')).toBeUndefined();
+    wrapper.vm.confirmBasket();
+    expect(wrapper.emitted('select')[0][0]).toMatchObject({ parameters: { job_id: 'job-abc' }, rows: [sku] });
+    wrapper.unmount();
   });
 
   it('ignores stale nightly results after switching countries', async () => {

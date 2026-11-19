@@ -41,9 +41,11 @@ def _require(actor, permission):
     return scopes
 
 
-def orders_for(actor, permission=VIEW):
+def orders_for(actor, permission=VIEW, *, include_deleted=False):
     scopes = _require(actor, permission)
     rows = OperatingOrder.objects.filter(tenant=actor.tenant)
+    if not include_deleted:
+        rows = rows.exclude(status="deleted")
     if any(s['scope_type'] == DataScope.ScopeType.ALL for s in scopes):
         return rows
     allowed = Q(pk__in=[])
@@ -100,11 +102,25 @@ def allocated(line):
         purchase_line__order__status='cancelled').aggregate(total=Sum('allocated_quantity'))['total'] or 0
 
 
+def _compact_order_calculation(calculation):
+    """Return order-facing fields, keeping full evidence only in the stored audit snapshot."""
+    line_fields = ('sku_id', 'sku', 'sku_code', 'legacy_sku_code', 'product_name',
+        'suggested_quantity', 'available_stock', 'valid_incoming', 'forecast_daily_sales',
+        'submitted_demand', 'draft_reserved_demand')
+    parameter_fields = ('country_id', 'source_kind', 'sku_ids', 'strategy_id', 'sales_end',
+        'algorithm_version', 'activity_start', 'activity_end', 'activity_factor')
+    return {**calculation, 'lines': [{key: row[key] for key in line_fields if key in row}
+            for row in calculation.get('lines', [])],
+            'parameters': {key: value for key, value in (calculation.get('parameters') or {}).items()
+                           if key in parameter_fields}, 'evidence_stored': True}
+
+
 def visible_calculation(actor, calculation):
     if actor and calculation:
         from apps.commerce.country_decisions import permission_signature
         if calculation.get('permission_signature') != permission_signature(actor):
             return {'restricted': True, 'notice': '当前账号数据授权已变化，历史计算依据不可读取；单据数量仍按原单保存。'}
+        return _compact_order_calculation(calculation)
     return calculation
 
 
@@ -147,7 +163,115 @@ def _require_operating_sku(sku):
     return sku
 
 
+DAILY_SNAPSHOT_BASIS = 'daily_replenishment_snapshot_v1'
+
+
+def _validate_daily_selection(actor, snapshot, payload, current=None):
+    """Validate saved evidence and selection without recomputing stock or sales."""
+    from apps.commerce import country_decisions
+    if snapshot.get('country_id') != payload['country_id'] or snapshot.get('source_kind') != payload['source_kind']:
+        raise ValidationError('国家或订货来源与补货快照不一致，请重新选择商品。')
+    if snapshot.get('permission_signature') != country_decisions.permission_signature(actor):
+        raise PermissionDenied('补货快照的数据授权已变化，请重新查询并选择商品。')
+    ids = [row['sku_id'] for row in payload['lines']]
+    if not 1 <= len(ids) <= 100 or len(ids) != len(set(ids)):
+        raise ValidationError('每单请选择1–100个不重复的SKU。')
+    eligible = {row['sku_id'] for row in snapshot.get('lines', [])
+                if row.get('suggested_quantity') is not None and Decimal(str(row['suggested_quantity'])) > 0}
+    if not set(ids) <= eligible:
+        raise ValidationError('新增商品不在所选补货快照中，或没有正数建议，请返回补货建议重新选择。')
+    country = _country(actor, payload['country_id'])
+    allowed = set(country_decisions.skus_for(actor, country).filter(pk__in=ids, is_active=True).values_list('pk', flat=True))
+    if allowed != set(ids):
+        raise PermissionDenied('部分商品已不可用或不在当前授权范围，请重新选择。')
+    # The tenant lock in save_order serializes concurrent snapshot consumption.
+    duplicate = OperatingOrder.objects.filter(tenant_id=actor.tenant_id,
+        calculation_snapshot__demand_basis=DAILY_SNAPSHOT_BASIS,
+        calculation_snapshot__source_job_id=snapshot['source_job_id'],
+        lines__is_active=True, lines__sku_id__in=ids).exclude(status__in=['cancelled', 'deleted'])
+    if current:
+        duplicate = duplicate.exclude(pk=current.pk)
+    if duplicate.exists():
+        raise ValidationError('该快照的部分商品已带入有效运营订货单，请查看原单，避免重复订货。')
+    adjusted = any(Decimal(str(row['quantity'])) != Decimal(str(next(
+        item['suggested_quantity'] for item in snapshot['lines'] if item['sku_id'] == row['sku_id'])))
+        for row in payload['lines'])
+    if adjusted and not payload.get('notes', '').strip():
+        raise ValidationError({'notes': '订货数量与快照建议不同，请填写调整原因后再保存。'})
+    return {**snapshot, 'operator_reviewed_quantities': payload['lines'],
+            'operator_adjustment_reason': payload.get('notes', '').strip() if adjusted else ''}
+
+
+def _daily_snapshot_calculation(actor, payload, current=None):
+    from apps.commerce.country_decisions import permission_signature
+    from apps.supply_chain.daily_replenishment import daily_job_for_actor, DailyRows
+    from apps.supply_chain.replenishment import restore_snapshot_suggestion
+    from types import SimpleNamespace
+    requested = str(payload.get('snapshot_job_id') or '')
+    existing = current.calculation_snapshot if current else {}
+    if existing.get('demand_basis') == DAILY_SNAPSHOT_BASIS and (
+            not requested or requested == existing.get('source_job_id')):
+        return _validate_daily_selection(actor, existing, payload, current)
+    job = daily_job_for_actor(actor, requested)
+    if job.country_id != payload['country_id'] or payload['source_kind'] != 'cycle':
+        raise ValidationError('所选补货快照与国家或订货来源不一致。')
+    ids = [row['sku_id'] for row in payload['lines']]
+    if not 1 <= len(ids) <= 100 or len(ids) != len(set(ids)):
+        raise ValidationError('每单请选择1–100个不重复的SKU。')
+    selected = DailyRows().row_queryset(SimpleNamespace(user=actor), job).filter(sku_id__in=ids)
+    lines = []
+    fields = ('sku_code', 'sku', 'legacy_sku_code', 'product_name', 'product_details',
+        'available_stock', 'valid_incoming', 'submitted_demand', 'draft_reserved_demand',
+        'forecast_daily_sales', 'on_hand_days', 'supply_cover_days', 'replenishment_gap',
+        'formula_evidence', 'calculation_evidence', 'business_decision', 'recognized_reference',
+        'source_snapshot_ids', 'source_run_ids')
+    for row in selected.iterator(chunk_size=20):
+        original = restore_snapshot_suggestion(row.payload)
+        quantity = row.suggested_quantity
+        if quantity is None:
+            reference = original.get('recognized_reference') or {}
+            quantity = reference.get('quantity_reference') if reference.get('confirmed_deductions') else None
+        lines.append({**{key: original[key] for key in fields if key in original},
+            'sku_id': row.sku_id, 'sku': original.get('sku_code') or original.get('sku') or row.sku_code,
+            'suggested_quantity': quantity})
+    params = {**(job.config.get('parameters') or {}), 'country_id': job.country_id, 'sku_ids': ids}
+    snapshot = {'demand_basis': DAILY_SNAPSHOT_BASIS, 'source_job_id': str(job.pk),
+        'source_kind': 'cycle', 'country_id': job.country_id, 'strategy_id': job.strategy_id,
+        'strategy_version': job.strategy_version, 'sales_end': params.get('sales_end'),
+        'generated_at': job.updated_at.isoformat(), 'formula': '沿用每日补货快照，SKU独立计算结果',
+        'permission_signature': permission_signature(actor), 'parameters': params, 'lines': lines}
+    return _validate_daily_selection(actor, snapshot, payload, current)
+
+
+def _validate_trusted_calculation(actor, calculation, payload, current=None):
+    """Check an existing server snapshot without reading or recomputing sales/inventory."""
+    from apps.commerce.country_decisions import permission_signature, skus_for
+    if calculation.get('permission_signature') != permission_signature(actor):
+        raise PermissionDenied('单据依据的数据授权已变化，请重新选择来源数据。')
+    source_country = calculation.get('country_id', (calculation.get('parameters') or {}).get('country_id'))
+    if source_country is not None and source_country != payload['country_id']:
+        raise ValidationError('单据国家与来源数据不一致。')
+    source_kind = calculation.get('source_kind', (calculation.get('parameters') or {}).get('source_kind'))
+    if source_kind and source_kind != payload['source_kind']:
+        raise ValidationError('单据来源与原始数据不一致。')
+    if current is None and calculation.get('demand_basis') == 'weighted_replenishment_v1':
+        from apps.supply_chain.models import ReplenishmentStrategy
+        if not ReplenishmentStrategy.objects.filter(tenant_id=actor.tenant_id,
+                pk=calculation.get('strategy_id'), country_id=payload['country_id'],
+                version=calculation.get('strategy_version'), active=True).exists():
+            raise ValidationError('来源建议对应的策略已更新或停用，请重新选择来源数据。')
+    eligible = {row['sku_id'] for row in calculation.get('lines', []) if row.get('suggested_quantity') is not None}
+    ids = {row['sku_id'] for row in payload['lines']}
+    if not ids <= eligible:
+        raise ValidationError('部分商品不在原单据依据中，请从补货建议重新选择。')
+    country = _country(actor, payload['country_id'])
+    if set(skus_for(actor, country).filter(pk__in=ids, is_active=True).values_list('pk', flat=True)) != ids:
+        raise PermissionDenied('部分商品已不可用或不在授权范围。')
+
+
 def _calculation(actor, payload, current=None):
+    if payload.get('snapshot_job_id') or (current and current.calculation_snapshot.get('demand_basis') == DAILY_SNAPSHOT_BASIS):
+        return _daily_snapshot_calculation(actor, payload, current)
     if payload['source_kind'] == 'new_goods':
         return {}
     preview = OperatingSuggestion.objects.filter(tenant=actor.tenant, created_by=actor,
@@ -158,24 +282,21 @@ def _calculation(actor, payload, current=None):
     edited_id = preview.snapshot.get('edited_order_id')
     if edited_id and (current is None or current.pk != edited_id):
         raise ValidationError('这份建议仅用于修改原草稿，不能用于另建或修改其他单据。')
-    if (preview.snapshot.get('demand_basis') != 'weighted_replenishment_v1' and
-            (current is None or current.calculation_snapshot.get('preview_token') != preview.token)):
-        # Tenant serialization makes preview consumption and demand reservation atomic.
-        if OperatingOrder.objects.filter(tenant_id=actor.tenant_id).exclude(status='cancelled').exclude(
+    if current is None or current.calculation_snapshot.get('preview_token') != preview.token:
+        # Consume a server-generated source once, without recalculating its evidence.
+        if OperatingOrder.objects.filter(tenant_id=actor.tenant_id).exclude(status__in=['cancelled', 'deleted']).exclude(
                 pk=current.pk if current else None).filter(calculation_snapshot__preview_token=preview.token).exists():
-            raise ValidationError('此建议已生成有效运营订货单，请查看原单或重新计算，避免重复订货。')
-        from apps.commerce.supply_pipeline import open_demand
-        _, signature = open_demand(actor, preview.country, [r['sku_id'] for r in preview.snapshot['lines']],
-                                   exclude_order_id=edited_id)
-        if signature != preview.snapshot.get('open_demand_signature'):
-            raise ValidationError('开放运营需求已变化，请刷新建议后复核，避免重复订货。')
+            raise ValidationError('此建议已生成有效运营订货单，请查看原单，避免重复订货。')
+        if preview.snapshot.get('demand_basis') != 'weighted_replenishment_v1':
+            from apps.commerce.supply_pipeline import open_demand
+            _, signature = open_demand(actor, preview.country, [r['sku_id'] for r in preview.snapshot['lines']],
+                                       exclude_order_id=edited_id)
+            if signature != preview.snapshot.get('open_demand_signature'):
+                raise ValidationError('开放运营需求已变化，请重新选择来源数据，避免重复订货。')
     from apps.commerce.country_decisions import permission_signature
     if preview.snapshot.get('permission_signature') != permission_signature(actor):
         raise PermissionDenied('计算依据的数据授权已变化，请重新生成建议。')
-    if preview.snapshot.get('demand_basis') == 'weighted_replenishment_v1':
-        from apps.supply_chain.replenishment import validate_strategy_snapshot
-        validate_strategy_snapshot(actor, preview.snapshot,
-            exclude_order_id=current.pk if current else edited_id)
+    _validate_trusted_calculation(actor, preview.snapshot, payload, current)
     eligible = {r['sku_id'] for r in preview.snapshot['lines'] if r['suggested_quantity'] is not None}
     if any(r['sku_id'] not in eligible for r in payload['lines']):
         raise ValidationError('选中商品缺少有效库存/销量依据；新货请采用手工订货。')
@@ -183,7 +304,7 @@ def _calculation(actor, payload, current=None):
 
 
 def _require_current_demand_basis(snapshot):
-    if snapshot.get('demand_basis') not in {'direct_and_bundle_snapshot_v1', 'weighted_replenishment_v1'}:
+    if snapshot.get('demand_basis') not in {'direct_and_bundle_snapshot_v1', 'weighted_replenishment_v1', DAILY_SNAPSHOT_BASIS}:
         raise ValidationError('补货已纳入组合销量折算，请重新生成建议并保存草稿。')
 
 
@@ -205,13 +326,14 @@ def save_order(actor, payload, key, pk=None):
     country = _country(actor, payload['country_id'])
     if payload['order_date'] > business_date():
         raise ValidationError('运营订货日期不能晚于今天。')
-    calculation = (_calculation(actor, payload, obj if pk else None) if pk is None or payload.get('preview_token')
+    calculation = (_calculation(actor, payload, obj if pk else None) if pk is None or payload.get('preview_token') or payload.get('snapshot_job_id')
+                   or (obj and obj.calculation_snapshot.get('demand_basis') == DAILY_SNAPSHOT_BASIS)
                    or (obj and obj.source_kind != payload['source_kind']) else obj.calculation_snapshot)
     if payload['source_kind'] != 'new_goods':
         _require_current_demand_basis(calculation)
+        if calculation.get('demand_basis') != DAILY_SNAPSHOT_BASIS:
+            _validate_trusted_calculation(actor, calculation, payload, obj)
         if calculation.get('demand_basis') == 'weighted_replenishment_v1':
-            from apps.supply_chain.replenishment import validate_strategy_snapshot
-            validate_strategy_snapshot(actor, calculation, exclude_order_id=obj.pk if obj else None)
             suggested = {row['sku_id']: row['suggested_quantity'] for row in calculation.get('lines', [])}
             adjusted = any(suggested.get(row['sku_id']) is not None and
                 row['quantity'] != suggested[row['sku_id']] for row in payload['lines'])
@@ -219,7 +341,7 @@ def save_order(actor, payload, key, pk=None):
                 raise ValidationError({'notes': '订货数量与系统建议不同，请填写调整原因后再保存。'})
             calculation = {**calculation,
                 'operator_adjustment_reason': payload.get('notes', '').strip() if adjusted else ''}
-    if obj and not payload.get('preview_token') and payload['source_kind'] != 'new_goods':
+    if obj and not payload.get('preview_token') and not payload.get('snapshot_job_id') and payload['source_kind'] != 'new_goods':
         old_ids = set(obj.lines.filter(is_active=True).values_list('sku_id', flat=True))
         if country.pk != obj.country_id or any(r['sku_id'] not in old_ids for r in payload['lines']):
             raise ValidationError('更换国家或新增商品时，请重新生成库销比建议。')
@@ -262,19 +384,48 @@ def action(actor, pk, payload, key, target):
     if target == 'cancelled' and any(allocated(r) for r in obj.lines.filter(is_active=True)):
         raise ValidationError('已有有效采购分配，不能取消运营需求；先处理采购草稿。')
     _country(actor, obj.country_id)
-    if target == 'submitted' and obj.source_kind != 'new_goods':
-        _require_current_demand_basis(obj.calculation_snapshot)
-        if obj.calculation_snapshot.get('demand_basis') == 'weighted_replenishment_v1':
-            from apps.supply_chain.replenishment import validate_strategy_snapshot
-            validate_strategy_snapshot(actor, obj.calculation_snapshot, exclude_order_id=obj.pk)
     for row in obj.lines.filter(is_active=True):
         sku = services._master(ProductSKU, actor, row.sku_id, is_active=True)
         if target == 'submitted':
             _require_operating_sku(sku)
+    if target == 'submitted' and obj.source_kind != 'new_goods':
+        _require_current_demand_basis(obj.calculation_snapshot)
+        if obj.calculation_snapshot.get('demand_basis') == DAILY_SNAPSHOT_BASIS:
+            _validate_daily_selection(actor, obj.calculation_snapshot, {
+                'country_id': obj.country_id, 'source_kind': obj.source_kind, 'notes': obj.notes,
+                'lines': list(obj.lines.filter(is_active=True).values('sku_id', 'quantity'))}, obj)
+        else:
+            _validate_trusted_calculation(actor, obj.calculation_snapshot, {
+                'country_id': obj.country_id, 'source_kind': obj.source_kind, 'notes': obj.notes,
+                'lines': list(obj.lines.filter(is_active=True).values('sku_id', 'quantity'))}, obj)
     with domain_write():
         obj.status, obj.version = target, obj.version + 1
         obj.save()
         services._event(actor, obj, target, key, payload)
+    if target == 'submitted':
+        from apps.supply_chain.operating_notifications import enqueue_confirmed
+        enqueue_confirmed(obj)
+    return obj
+
+
+@transaction.atomic
+def delete_draft(actor, pk, payload, key):
+    _require(actor, MANAGE)
+    services._tenant_lock(actor)
+    obj = orders_for(actor, MANAGE, include_deleted=True).filter(pk=pk).first()
+    if obj is None:
+        raise NotFound('运营订货单不存在或不在授权范围。')
+    if services._prior_event(actor, obj, 'deleted', key, payload):
+        return obj
+    services._version(obj, payload['expected_version'])
+    if obj.status != 'draft':
+        raise ValidationError('仅草稿状态的运营订货单可以删除。')
+    if OperatingAllocation.objects.filter(tenant_id=actor.tenant_id, operating_line__order=obj).exists():
+        raise ValidationError('该订货单存在采购关联，不能删除。')
+    with domain_write():
+        obj.status, obj.version = 'deleted', obj.version + 1
+        obj.save()
+        services._event(actor, obj, 'deleted', key, payload)
     return obj
 
 

@@ -246,6 +246,60 @@ class ReplenishmentJobDetail(ReadAPI):
         return Response({"data": _serialize(job)})
 
 
+def _legacy_replenishment_reference(line):
+    """Persist the legacy trial result with the same inputs as the daily row."""
+    from decimal import Decimal, InvalidOperation
+
+    def number(value):
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            parsed = Decimal(str(value))
+            return parsed if parsed.is_finite() else None
+        except (InvalidOperation, ValueError):
+            return None
+
+    evidence = (line.get("formula_evidence") or {}).get("sales") or {}
+    observed = (line.get("recognized_reference") or {}).get("observed_sales_windows") or {}
+    windows = {str(item["days"]): item for item in line.get("sales_windows", ()) if item.get("days")}
+    units, partial = [], False
+    for days in ("7", "15", "30"):
+        window = windows.get(days, {})
+        value = number((evidence.get(days) or {}).get("units"))
+        if value is None:
+            value = number(window.get("units"))
+        if value is None:
+            seen = number(observed.get(days))
+            if seen is None:
+                seen = number(window.get("recognized_units"))
+            if seen is not None and seen > 0:
+                value, partial = seen, True
+        units.append(value)
+    daily = None if None in units else sum(
+        amount / days * Decimal(weight)
+        for amount, days, weight in zip(units, (7, 15, 30), ("0.5", "0.3", "0.2"))
+    )
+    stock = number(line.get("available_stock"))
+    if stock is None:
+        stock = number((line.get("recognized_reference") or {}).get("observed_available_stock"))
+        if stock is None:
+            known = []
+            for warehouse in line.get("warehouses", ()):
+                amount = number(warehouse.get("available_qty"))
+                if amount is None:
+                    amount = number(warehouse.get("last_synced_qty"))
+                if amount is not None:
+                    known.append(amount)
+            stock = sum(known) if known else None
+        partial |= stock is not None
+    pipeline = line.get("pipeline") or {}
+    transit = number(pipeline.get("transporting")) if pipeline.get("authorized") else None
+    production = number(pipeline.get("production_unshipped")) if pipeline.get("authorized") else None
+    quantity = None if None in (daily, stock, transit, production) else 90 * daily - stock - transit - production
+    return {"daily": float(daily) if daily is not None else None,
+            "quantity": float(quantity) if quantity is not None else None, "partial": partial}
+
+
 class ReplenishmentJobRows(ReplenishmentJobDetail):
     default_quantity_filter = "positive"
 
@@ -254,6 +308,35 @@ class ReplenishmentJobRows(ReplenishmentJobDetail):
 
     def result_identity(self, job):
         return {}
+
+    @staticmethod
+    def suggestion_queryset(qs):
+        from django.db.models import Case, DecimalField, F, Value, When
+        from django.db.models.fields.json import KeyTextTransform
+        from django.db.models.functions import Cast, Ceil, Coalesce, Greatest, NullIf
+
+        field = DecimalField(max_digits=30, decimal_places=8)
+
+        def number(path):
+            return Cast(NullIf(KeyTextTransform.from_lookup('payload__' + path), Value('null')), field)
+
+        reference = 'recognized_reference__'
+        ambiguous = Q()
+        for issue in ('dispatch_allocation_overallocated', 'shipment_receipt_overallocated',
+                      'wms_allocation_requires_review', 'wms_receipt_overlap_unresolved'):
+            ambiguous |= Q(payload__pipeline__issues__icontains=issue)
+        incoming = Case(When(Q(payload__pipeline__authorized=True) & ~ambiguous,
+                             then=Coalesce(number('pipeline__effective_incoming'), Value(0), output_field=field) + Coalesce(number('pipeline__unknown_eta'), Value(0), output_field=field)),
+                        default=Value(0), output_field=field)
+        zero = Value(0, output_field=field)
+        legacy = Greatest(zero, Ceil(number(reference + 'target_stock_reference')
+            - number(reference + 'observed_available_stock') - incoming
+            - Coalesce(number('submitted_demand'), zero) - Coalesce(number('draft_reserved_demand'), zero)))
+        observed = Case(When(payload__recognized_reference__has_observed_basis=True,
+            then=Case(When(payload__recognized_reference__confirmed_deductions__isnull=False,
+                           then=number(reference + 'quantity_reference')),
+                      default=legacy, output_field=field)), output_field=field)
+        return qs.annotate(display_suggestion=Coalesce(Cast(F('suggested_quantity'), field), observed))
 
     def get(self, request, pk):
         job = self.get_job(request, pk)
@@ -266,14 +349,57 @@ class ReplenishmentJobRows(ReplenishmentJobDetail):
         if not 1 <= limit <= 20 or offset < 0:
             raise ValidationError("每页最多20条，offset须为非负数。")
         quantity_filter = request.query_params.get("quantity_filter", self.default_quantity_filter)
-        if quantity_filter not in {"positive", "all", "zero", "unknown", "observed"}:
+        if quantity_filter not in {"positive", "all", "zero", "unknown", "observed", "with_data", "action", "purchase", "expedite", "no_sales", "sufficient", "inactive"}:
             raise ValidationError({"quantity_filter": "筛选值无效。"})
-        qs = self.row_queryset(request, job)
-        if quantity_filter == "positive": qs = qs.filter(suggested_quantity__gt=0)
+        qs = self.suggestion_queryset(self.row_queryset(request, job))
+        from django.db.models import Count
+        display_counts = {}
+        if not (request.query_params.get('group_by') == 'sku' and request.query_params.get('spu_id')):
+            display_counts = qs.aggregate(suggested=Count('pk', filter=Q(display_suggestion__gt=0)),
+                                          pending=Count('pk', filter=Q(display_suggestion__isnull=True)),
+                                          purchase=Count('pk', filter=Q(payload__business_decision__category='purchase')),
+                                          expedite=Count('pk', filter=Q(payload__business_decision__requires_expedite=True)),
+                                          no_sales=Count('pk', filter=Q(payload__business_decision__category='no_sales')),
+                                          sufficient=Count('pk', filter=Q(payload__business_decision__category='sufficient')))
+        if quantity_filter in {'action', 'purchase', 'expedite', 'no_sales', 'sufficient', 'inactive'}:
+            categories_filter = ['purchase', 'expedite'] if quantity_filter == 'action' else [quantity_filter]
+            selected = Q(payload__business_decision__category__in=categories_filter)
+            if quantity_filter == 'expedite':
+                selected = Q(payload__business_decision__requires_expedite=True)
+            legacy = Q(payload__business_decision__isnull=True)
+            if 'purchase' in categories_filter:
+                selected |= legacy & Q(display_suggestion__gt=0)
+            if 'expedite' in categories_filter:
+                selected |= legacy & Q(risk_level='arrival_gap')
+            qs = qs.filter(selected)
+        elif quantity_filter == "positive": qs = qs.filter(suggested_quantity__gt=0)
         elif quantity_filter == "zero": qs = qs.filter(suggested_quantity=0)
         elif quantity_filter == "unknown": qs = qs.filter(suggested_quantity__isnull=True)
         elif quantity_filter == "observed":
             qs = qs.filter(Q(suggested_quantity__gt=0) | Q(payload__recognized_reference__has_observed_basis=True))
+        elif quantity_filter == "with_data":
+            from django.db.models import DecimalField, Value
+            from django.db.models.fields.json import KeyTextTransform
+            from django.db.models.functions import Cast, NullIf
+            def numeric(path):
+                return Cast(NullIf(KeyTextTransform.from_lookup("payload__" + path), Value("null")),
+                            DecimalField(max_digits=24, decimal_places=4))
+            qs = qs.alias(
+                known_stock=numeric("available_stock"),
+                observed_stock=numeric("recognized_reference__observed_available_stock"),
+                sales_7=numeric("formula_evidence__sales__7__units"),
+                sales_15=numeric("formula_evidence__sales__15__units"),
+                sales_30=numeric("formula_evidence__sales__30__units"),
+                observed_sales=numeric("recognized_reference__observed_sales_windows__30"),
+                pending_purchase=numeric("pipeline__production_unshipped"),
+                incoming=numeric("pipeline__effective_incoming"),
+                demand=numeric("submitted_demand"),
+            ).filter(
+                Q(known_stock__isnull=False) | Q(observed_stock__isnull=False) |
+                Q(sales_7__isnull=False) | Q(sales_15__isnull=False) | Q(sales_30__isnull=False) |
+                Q(observed_sales__gt=0) | Q(pending_purchase__gt=0) | Q(incoming__gt=0) |
+                Q(demand__gt=0) | Q(suggested_quantity__isnull=False)
+            )
         risk = request.query_params.get("risk_filter", "").strip()
         if risk and risk not in {"awaiting_procurement", "arrival_gap", "data_check", "new_or_zero_sales",
                 "out_of_stock", "replenish", "normal", "manual_review"}:
@@ -281,14 +407,212 @@ class ReplenishmentJobRows(ReplenishmentJobDetail):
         if risk == "awaiting_procurement": qs = qs.filter(has_submitted_demand=True)
         elif risk: qs = qs.filter(risk_level=risk)
         term = request.query_params.get("search", "").strip()
+        from apps.products.models import ProductCategory, ProductSKU
+        from django.db.models import DecimalField, F, OuterRef, Subquery
+        from django.db.models.fields.json import KeyTextTransform
+        from django.db.models.functions import Cast, NullIf
+        from django.db.models import Value
+
+        categories = list(ProductCategory.objects.filter(tenant_id=job.tenant_id)
+                          .values('id', 'parent_id', 'name'))
+        products = ProductSKU.objects.filter(tenant_id=job.tenant_id)
         if term:
-            qs = qs.filter(Q(sku_code__icontains=term) | Q(legacy_sku_code__icontains=term) | Q(product_name__icontains=term))
+            qs = qs.filter(Q(sku_code__icontains=term) | Q(legacy_sku_code__icontains=term) |
+                Q(product_name__icontains=term) | Q(sku_id__in=products.filter(
+                    Q(spu__spu_code__icontains=term) | Q(spu__legacy_spu_code__icontains=term) |
+                    Q(spu__product_name__icontains=term)).values('pk')))
+        selected = request.query_params.get('category_ids', '')
+        if selected:
+            try:
+                ids = {int(value) for value in selected.split(',')}
+            except ValueError:
+                raise ValidationError({'category_ids': '品类参数无效。'})
+            if not ids <= {category['id'] for category in categories}:
+                raise ValidationError({'category_ids': '品类参数无效。'})
+            for _ in range(2):
+                ids.update([category['id'] for category in categories if category['parent_id'] in ids])
+            qs = qs.filter(sku_id__in=products.filter(spu__category_node_id__in=ids).values('pk'))
+        abc_grade = request.query_params.get("abc_grade", "").strip()
+        if abc_grade:
+            if abc_grade not in {"A", "B", "C", "new", "no_sales", "unavailable"}:
+                raise ValidationError({"abc_grade": "ABC 等级无效。"})
+            from apps.sales_management.abc_access import filter_skus
+            abc_products = filter_skus(request.user, job.country, products, abc_grade)
+            qs = qs.filter(sku_id__in=abc_products.values("pk"))
+        group_by = request.query_params.get('group_by', '').strip()
+        if group_by not in {'', 'spu', 'sku'}:
+            raise ValidationError({'group_by': '分组参数无效。'})
+        if group_by in {'spu', 'sku'}:
+            from django.db.models import Count, Sum, DecimalField, Value
+            from django.db.models.functions import Coalesce
+            if group_by == 'sku' and request.query_params.get('spu_id'):
+                try:
+                    spu_id = int(request.query_params['spu_id'])
+                except (TypeError, ValueError):
+                    raise ValidationError({'spu_id': 'SPU参数无效。'})
+                spu = products.filter(spu_id=spu_id).values_list('spu_id', flat=True).first()
+                if spu is None:
+                    raise ValidationError({'spu_id': 'SPU参数无效。'})
+                qs = qs.filter(sku_id__in=products.filter(spu_id=spu_id).values('pk'))
+                count = qs.count()
+                page = list(qs.order_by('sku_id')[offset:offset + limit])
+                codes = {sku_id: (spu_code, legacy, name, image, status) for sku_id, spu_code, legacy, name, image, status in products.filter(
+                    pk__in=[row.sku_id for row in page]).values_list('pk', 'spu__spu_code', 'spu__legacy_spu_code', 'spu__product_name', 'image_url', 'spu__sales_status')}
+                from .replenishment import restore_snapshot_suggestion
+                rows = []
+                for row in page:
+                    values = codes.get(row.sku_id, ('', '', '', '', ''))
+                    image_url = f'/api/internal/supply-chain/v2/options/skus/{row.sku_id}/image/' if values[3] and values[4] == 'on_sale' else ''
+                    rows.append(dict(restore_snapshot_suggestion(row.payload), sku_id=row.sku_id, spu_id=spu_id,
+                        spu_code=values[0], legacy_spu_code=values[1], spu_name=values[2],
+                        image_preview_url=image_url,
+                        legacy_reference=row.payload.get('legacy_reference') or _legacy_replenishment_reference(row.payload)))
+                from apps.sales_management.abc_access import decorate_rows
+                abc_meta = decorate_rows(request.user, job.country, rows)
+                return Response({'data': {'abc_meta': abc_meta, 'status': job.status, 'rows': rows, 'count': count,
+                    'total': job.total, 'processed': job.processed, 'counts': {**job.counts, **display_counts},
+                    'limit': limit, 'offset': offset, 'has_more': offset + len(rows) < count,
+                    'quantity_filter': quantity_filter, 'group_by': 'sku', 'spu_id': spu_id,
+                    'categories': categories, **self.result_identity(job)}})
+            if group_by == 'spu':
+                from apps.products.models import ProductSPU
+                from django.db.models import Case, When, IntegerField, Min
+                import hashlib
+                sort = request.query_params.get('sort', 'urgency')
+                direction = request.query_params.get('direction', 'asc')
+                allowed = {'urgency', 'spu_code', 'legacy_spu_code', 'spu_name', 'sku_count',
+                           'sales_7', 'sales_15', 'sales_30', 'available_stock', 'production_unshipped',
+                           'incoming_quantity', 'suggested_quantity'}
+                if sort not in allowed or direction not in {'asc', 'desc'}:
+                    raise ValidationError({'sort': '排序参数无效。'})
+                from django.db.models.expressions import RawSQL
+                sku_table = ProductSKU._meta.db_table
+                spu_table = ProductSPU._meta.db_table
+                row_table = ReplenishmentCalculationRow._meta.db_table
+                def grouped_rows(query):
+                    return query.extra(tables=[sku_table, spu_table], where=[
+                        f'{row_table}.sku_id = {sku_table}.id',
+                        f'{sku_table}.spu_id = {spu_table}.id',
+                        f'{sku_table}.tenant_id = %s', f'{spu_table}.tenant_id = %s'],
+                        params=[job.tenant_id, job.tenant_id]).annotate(
+                            report_spu_id=RawSQL(f'{sku_table}.spu_id', []))
+                matched = grouped_rows(qs)
+                matched_ids = products.filter(pk__in=qs.order_by().values('sku_id')).order_by().values('spu_id').distinct()
+                full = grouped_rows(self.suggestion_queryset(self.row_queryset(request, job))).filter(
+                    sku_id__in=products.filter(spu_id__in=Subquery(matched_ids)).values('pk'))
+                field = DecimalField(max_digits=30, decimal_places=8)
+                def numeric(path):
+                    # JSON object keys '7'/'15'/'30' are not array indexes.
+                    from django.db import connection
+                    from django.db.models import TextField
+                    if any(part.isdigit() for part in path.split('__')) and connection.vendor in {'mysql', 'sqlite'}:
+                        quoted_path = '$.' + '.'.join(json.dumps(part) for part in path.split('__'))
+                        payload_column = connection.ops.quote_name(row_table) + '.payload'
+                        function = 'JSON_UNQUOTE(JSON_EXTRACT(' if connection.vendor == 'mysql' else 'JSON_EXTRACT('
+                        suffix = ', %s))' if connection.vendor == 'mysql' else ', %s)'
+                        raw = RawSQL(function + payload_column + suffix, [quoted_path], output_field=TextField())
+                    else:
+                        raw = KeyTextTransform.from_lookup('payload__' + path)
+                    return Cast(NullIf(raw, Value('null')), field)
+                def known(*paths):
+                    return Coalesce(*[numeric(path) for path in paths], output_field=field)
+                stock = known('available_stock', 'recognized_reference__observed_available_stock')
+                incoming = known('business_decision__incoming_quantity', 'pipeline__effective_incoming')
+                metrics = full.order_by().values('report_spu_id').annotate(
+                    sku_count=Count('pk'), suggested_quantity=Sum('display_suggestion'),
+                    available_stock=Sum(stock),
+                    sales_7=Sum(known('formula_evidence__sales__7__units', 'recognized_reference__observed_sales_windows__7')),
+                    sales_15=Sum(known('formula_evidence__sales__15__units', 'recognized_reference__observed_sales_windows__15')),
+                    sales_30=Sum(known('formula_evidence__sales__30__units', 'recognized_reference__observed_sales_windows__30')),
+                    production_unshipped=Sum(numeric('pipeline__production_unshipped')),
+                    incoming_quantity=Sum(incoming),
+                    purchase_count=Count('pk', filter=Q(payload__business_decision__category='purchase')),
+                    expedite_count=Count('pk', filter=Q(payload__business_decision__requires_expedite=True)),
+                    urgency=Min(Case(When(payload__business_decision__requires_expedite=True, then=Value(0)),
+                        When(payload__business_decision__category='purchase', then=Value(1)),
+                        default=Value(2), output_field=IntegerField())))
+                if sort in {'spu_code', 'legacy_spu_code', 'spu_name'}:
+                    column = 'product_name' if sort == 'spu_name' else sort
+                    metrics = metrics.annotate(group_sort=Min(RawSQL(f'{spu_table}.{column}', [])))
+                    sort = 'group_sort'
+                count = metrics.count()
+                ordering = F(sort).asc(nulls_last=True) if direction == 'asc' else F(sort).desc(nulls_last=True)
+                page_groups = list(metrics.order_by(ordering, 'report_spu_id')[offset:offset + limit])
+                page_ids = [item['report_spu_id'] for item in page_groups]
+                spus = {item['id']: item for item in ProductSPU.objects.filter(
+                    tenant_id=job.tenant_id, pk__in=page_ids).values('id', 'spu_code', 'legacy_spu_code', 'product_name')}
+                matches = {item['report_spu_id']: item['matched_sku_count'] for item in matched.filter(
+                    sku_id__in=products.filter(spu_id__in=page_ids).values('pk')).order_by().values('report_spu_id').annotate(matched_sku_count=Count('pk'))}
+                representatives = {}
+                # Stable pseudo-random representative among authorized on-sale snapshot SKUs.
+                images = products.filter(spu_id__in=page_ids, is_active=True, spu__sales_status='on_sale',
+                    pk__in=self.row_queryset(request, job).values('sku_id')).exclude(image_url__isnull=True).exclude(image_url='')
+                for sku_id, sid in images.values_list('pk', 'spu_id').iterator(chunk_size=200):
+                    score = hashlib.sha256(f'{job.pk}:{sku_id}'.encode()).hexdigest()
+                    if sid not in representatives or score < representatives[sid][0]:
+                        representatives[sid] = (score, sku_id)
+                rows = []
+                for metric in page_groups:
+                    sid = metric.pop('report_spu_id'); spu = spus.get(sid, {})
+                    rep = representatives.get(sid, (None, None))[1]
+                    rows.append({**metric, 'spu_id': sid, 'spu_code': spu.get('spu_code', ''),
+                        'legacy_spu_code': spu.get('legacy_spu_code', ''), 'spu_name': spu.get('product_name', ''),
+                        'matched_sku_count': matches.get(sid, 0), 'image_sku_id': rep,
+                        'image_preview_url': f'/api/internal/supply-chain/v2/options/skus/{rep}/image/' if rep else ''})
+                from apps.sales_management.abc_access import decorate_rows
+                abc_meta = decorate_rows(request.user, job.country, rows)
+                return Response({'data': {'abc_meta': abc_meta, 'status': job.status, 'rows': rows, 'count': count, 'total': job.total,
+                    'processed': job.processed, 'counts': {**job.counts, **display_counts}, 'limit': limit,
+                    'offset': offset, 'has_more': offset + len(rows) < count, 'quantity_filter': quantity_filter,
+                    'group_by': 'spu', 'categories': categories, **self.result_identity(job)}})
+        sort = request.query_params.get('sort', 'sku_code')
+        direction = request.query_params.get('direction', 'asc')
+        numeric_paths = {
+            'sales_7': 'formula_evidence__sales__7__units',
+            'sales_15': 'formula_evidence__sales__15__units',
+            'sales_30': 'formula_evidence__sales__30__units',
+            'available_stock': 'available_stock',
+            'production_unshipped': 'pipeline__production_unshipped',
+            'valid_incoming': 'valid_incoming',
+            'submitted_demand': 'submitted_demand',
+            'legacy_daily_sales': 'legacy_reference__daily',
+            'legacy_purchase_quantity': 'legacy_reference__quantity',
+        }
+        if direction not in {'asc', 'desc'} or sort not in {
+            'sku_code', 'legacy_sku_code', 'spu_code', 'legacy_spu_code', 'product_name', 'suggested_quantity', 'urgency', *numeric_paths,
+        }:
+            raise ValidationError({'sort': '排序参数无效。'})
+        if sort == 'urgency':
+            from django.db.models import Case, IntegerField, When
+            qs = qs.annotate(urgency=Case(
+                When(payload__business_decision__requires_expedite=True, then=Value(0)),
+                When(payload__business_decision__category='purchase', then=Value(1)),
+                default=Value(2), output_field=IntegerField()))
+        if sort == 'suggested_quantity':
+            sort = 'display_suggestion'
+        if sort in {'spu_code', 'legacy_spu_code'}:
+            qs = qs.annotate(report_sort=Subquery(products.filter(pk=OuterRef('sku_id')).values('spu__' + sort)[:1]))
+            sort = 'report_sort'
+        elif sort in numeric_paths:
+            raw = KeyTextTransform.from_lookup('payload__' + numeric_paths[sort])
+            qs = qs.annotate(report_sort=Cast(NullIf(raw, Value('null')), DecimalField(max_digits=24, decimal_places=4)))
+            sort = 'report_sort'
         count = qs.count()
-        rows = [r.payload for r in qs.order_by("sku_code", "sku_id")[offset:offset + limit]]
-        return Response({"data": {"status": job.status, "rows": rows, "count": count,
-            "total": job.total, "processed": job.processed, "counts": job.counts,
+        ordering = F(sort).asc(nulls_last=True) if direction == 'asc' else F(sort).desc(nulls_last=True)
+        page = list(qs.order_by(ordering, 'sku_id')[offset:offset + limit])
+        codes = {sku_id: (spu, legacy) for sku_id, spu, legacy in products.filter(
+            pk__in=[row.sku_id for row in page]).values_list('pk', 'spu__spu_code', 'spu__legacy_spu_code')}
+        from .replenishment import restore_snapshot_suggestion
+        rows = [dict(restore_snapshot_suggestion(row.payload), spu_code=codes.get(row.sku_id, ('', ''))[0],
+                     legacy_spu_code=codes.get(row.sku_id, ('', ''))[1],
+                     legacy_reference=row.payload.get("legacy_reference") or _legacy_replenishment_reference(row.payload)) for row in page]
+        from apps.sales_management.abc_access import decorate_rows
+        abc_meta = decorate_rows(request.user, job.country, rows)
+        return Response({"data": {"abc_meta": abc_meta, "status": job.status, "rows": rows, "count": count,
+            "total": job.total, "processed": job.processed, "counts": {**job.counts, **display_counts},
             "limit": limit, "offset": offset, "has_more": offset + len(rows) < count,
-            "quantity_filter": quantity_filter, **self.result_identity(job)}})
+            "quantity_filter": quantity_filter, "categories": categories, **self.result_identity(job)}})
+
 
 
 def _daily_calculation(job):

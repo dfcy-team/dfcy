@@ -616,6 +616,16 @@ const AppMenu = defineComponent({
   border-left: 1px solid #3b4960;
 }
 
+:deep(.navigation-surface .menu .el-sub-menu > .el-menu > .el-menu-item),
+:deep(.navigation-surface .menu .el-sub-menu > .el-menu > .el-sub-menu > .el-sub-menu__title) {
+  min-width: 0;
+  padding-left: 12px;
+}
+
+:deep(.navigation-surface .menu .el-sub-menu > .el-menu > .el-sub-menu > .el-sub-menu__title) {
+  padding-right: 34px;
+}
+
 :deep(.navigation-surface .menu .el-sub-menu .el-menu-item) {
   color: #b7c5d6;
   padding-left: 12px;

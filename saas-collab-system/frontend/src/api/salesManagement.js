@@ -27,7 +27,9 @@ export const fetchMonthlySalesProgress = (storeId = null, platformId = null, mon
     timeout: 60000,
   params: {
       ...(month ? { month } : {}),
-      ...(storeId === null || storeId === undefined ? {} : { store_id: storeId }),
+      ...(Array.isArray(storeId)
+        ? (storeId.length ? { store_ids: storeId.join(',') } : {})
+        : (storeId == null ? {} : { store_id: storeId })),
       ...(platformId === null || platformId === undefined ? {} : { platform_id: platformId })
   }
 });

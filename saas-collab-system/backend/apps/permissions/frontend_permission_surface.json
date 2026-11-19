@@ -155,6 +155,10 @@
       "permission_code": "sales_management.operating_orders.manage"
     },
     {
+      "file": "src/components/inventory/InventoryAbcStatus.vue",
+      "permission_code": "masterdata.settings.manage"
+    },
+    {
       "file": "src/components/supply-chain/BatchPaymentsV2.vue",
       "permission_code": "supply.v2.manage"
     },
@@ -1351,6 +1355,10 @@
       "permission_code": "sales_management.skus.view"
     },
     {
+      "file": "src/views/inventory/ReplenishmentSuggestionList.vue",
+      "permission_code": "sales_management.operating_orders.manage"
+    },
+    {
       "file": "src/views/lifecycle/ClearanceRequestList.vue",
       "permission_code": "workflow.approvals.submit"
     },
@@ -1851,5 +1859,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "561cff21fd7b2161db2950c9dea838b6508443ec68c8813d764e66a55f3549a6"
+  "surface_hash": "9d41c06bc162129e885f014ba9658fd44e12de3518763d245ad6fedb49942dfd"
 }

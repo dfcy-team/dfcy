@@ -1,9 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { canAccessPath, filterMenuItems, flattenMenuItems, menuItems } from '../src/router/menu';
+import { canAccessPath, canAccessWarehouseExceptions, filterMenuItems, filterSidebarMenuItems, flattenMenuItems, menuItems } from '../src/router/menu';
 
 describe('current deployment menu baseline', () => {
+  it('consolidates inventory menus without granting access to the other inventory view', () => {
+    const category = 'menu.sales_management.category_inventory.view';
+    const warehouse = 'menu.sales_management.warehouse_details.view';
+    const user = (menu, actions) => ({ user_type: 'internal', menu_permission_codes: [menu], action_permission_codes: actions });
+    const categoryUser = user(category, ['sales_management.skus.view']);
+    const warehouseUser = user(warehouse, ['sales_management.view']);
+    for (const actor of [categoryUser, warehouseUser]) {
+      const links = flattenMenuItems(filterSidebarMenuItems(actor)).map(item => item.path);
+      expect(links).toContain('/inventory/warehouse-details');
+      expect(links).not.toContain('/inventory/category-query');
+      expect(canAccessPath(actor, '/inventory/warehouse-details')).toBe(true);
+    }
+    expect(canAccessWarehouseExceptions(categoryUser)).toBe(false);
+    expect(canAccessPath(warehouseUser, '/inventory/category-query')).toBe(false);
+  });
+
   it('keeps the approved top-level order and exposes the reorganized workspaces', () => {
     expect(menuItems.map((item) => item.label)).toEqual([
       '工作台', '基础档案', '产品开发', '供应链协同', '库存管理', '全球刊登', '销售管理', '营销管理', '达人管理',

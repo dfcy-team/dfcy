@@ -448,6 +448,11 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
 
     sync_job = locked_job
     adapter.bind_run(run)
+    rejected_auth_token = None
+    if sync_job.resource_type == "inventory_snapshot" and sync_job.warehouse_authorization_id:
+        authorization = getattr(adapter, "warehouse_authorization", None) or sync_job.warehouse_authorization
+        rejected_auth_token = authorization.token_id
+
     schedule = (sync_job.sync_scope or {}).get("schedule", {})
     budget_seconds = 240 if history_segment else int(schedule.get("execution_budget_seconds") or 0)
     if sync_job.resource_type == "warehouse_order_lookup" and "execution_budget_seconds" not in schedule:
@@ -497,8 +502,16 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             "started_from_initial_cursor": not bool(cursor.cursor_value),
             "coverage_certified": False,
         }
+        previous_source = (run.masked_log or {}).get("decision_source")
+        if sync_job.resource_type == "inventory_snapshot" and previous_source:
+            decision_source["started_from_initial_cursor"] = all(
+                previous_source.get(field) == decision_source[field]
+                for field in ("resource_type", "platform", "time_from", "time_to")
+            ) and previous_source.get("started_from_initial_cursor") is True
         run.masked_log = sanitize_payload({**(run.masked_log or {}), "decision_source": decision_source})
         _save_run(run, update_fields=["masked_log"])
+
+    from .credential_coordination import job_refresh_wait, request_rejected_inventory_refresh, wait_metadata
 
     last_retry_error = ""
     cached_page = None
@@ -506,7 +519,6 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
     while True:
         try:
             _renew_lease(sync_job, run)
-            from .credential_coordination import job_refresh_wait, wait_metadata
             if job_refresh_wait(sync_job):
                 waiting = wait_metadata((run.masked_log or {}).get("renewal_wait"))
                 if waiting is not None:
@@ -710,6 +722,11 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                     run.masked_log = {**(run.masked_log or {}), "ads_lease_wait": {
                         **((run.masked_log or {}).get("ads_lease_wait") or {}),
                         "active": False, "timed_out_at": timezone.now().isoformat()}}
+            if request_rejected_inventory_refresh(sync_job, run, exc, rejected_auth_token):
+                with transaction.atomic():
+                    run.masked_log = {**(run.masked_log or {}), "renewal_wait": wait_metadata()}
+                    _yield_sync_slice(sync_job, run, credential_wait=True)
+                return run, True
             configuration_error = isinstance(exc, ReadonlyConfigurationError)
             lock_error = _mysql_lock_error(exc)
             last_retry_error = ("数据库死锁，正在按原分页断点有限重试。" if lock_error == 1213 else

@@ -77,6 +77,10 @@ def test_nine_snapshot_uses_live_scope_tenant_and_bounded_pagination():
     assert [r['store_id'] for r in data['rows']] == [store.pk]
     assert '999999' not in str(data) and '888888' not in str(data)
     assert client.get(URL, {'date': DAY.isoformat(), 'store_id': extra.pk}).json()['data']['rows'] == []
+    selected = client.get(URL, {'date': DAY.isoformat(), 'store_id': f'{store.pk},{extra.pk},{store.pk}'})
+    assert selected.status_code == 200
+    assert [row['store_id'] for row in selected.json()['data']['rows']] == [store.pk]
+    assert client.get(URL, {'date': DAY.isoformat(), 'store_id': f'{store.pk},bad'}).status_code == 400
 
 
 @pytest.mark.django_db

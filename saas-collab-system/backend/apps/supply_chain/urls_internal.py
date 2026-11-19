@@ -1,3 +1,4 @@
+from .operating_notifications import ConfigAPI as OperatingNotificationConfig
 from .supplier_deposits import SupplierDeposits
 from .inbound_notice_api import InboundNoticeDetail, InboundNoticeImage
 from .inbound_result import InboundResult
@@ -40,6 +41,7 @@ urlpatterns = [
     path('inbound-notices/<int:pk>/<str:kind>/<int:sku_id>/image/', InboundNoticeImage.as_view(), name='sc2-inbound-notice-image'),
     path('inbound-notices/<int:pk>/', InboundNoticeDetail.as_view(), name='sc2-inbound-notice-detail'),
     path("inbound-results/<str:token>/", InboundResult.as_view(), name="sc2-inbound-result"),
+    path('settings/operating-notification/', OperatingNotificationConfig.as_view(), name='sc2-operating-notification'),
     path('settings/inbound-notification/', InboundNotifyConfig.as_view()),
     path('inbound-orders/<int:pk>/notifications/', InboundNotifyStatus.as_view()),
     path('monthly-payables/shipment-drilldown/', MonthlyShipmentDrilldown.as_view()),

@@ -1379,6 +1379,9 @@ def get_adapter_for_config(config, resource_type=None):
         return MarketplaceRefundAdapter(config)
     if resource_type == SyncJob.ResourceType.INVENTORY_SNAPSHOT and config.platform == PlatformChoices.JIFENG_WMS:
         return JifengInventoryAdapter(config)
+    if config.platform == PlatformChoices.JIFENG_WMS and resource_type == SyncJob.ResourceType.INBOUND:
+        from .jifeng_inbound import JifengInboundAdapter
+        return JifengInboundAdapter(config)
     if resource_type == SyncJob.ResourceType.INVENTORY_SNAPSHOT and config.platform == PlatformChoices.BEST_ECAPI:
         return BestInventoryAdapter(config)
     return DisabledProductionAdapter()

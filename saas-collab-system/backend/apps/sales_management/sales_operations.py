@@ -52,12 +52,13 @@ def _params(request):
     if view not in {"stores", "products"}:
         raise ValidationError({"view": "view 仅支持 stores 或 products。"})
     store_id = request.query_params.get("store_id")
-    if store_id and (
-        not store_id.isascii() or not store_id.isdecimal() or len(store_id) > 19
-        or not 1 <= int(store_id) <= MAX_STORE_ID
+    store_keys = store_id.split(",") if store_id else []
+    if len(store_keys) > 100 or any(
+        not key.isascii() or not key.isdecimal() or len(key) > 19
+        or not 1 <= int(key) <= MAX_STORE_ID for key in store_keys
     ):
-        raise ValidationError({"store_id": "store_id 必须为正整数。"})
-    if view == "products" and not store_id:
+        raise ValidationError({"store_id": "请选择最多 100 个有效店铺。"})
+    if view == "products" and len(store_keys) != 1:
         raise ValidationError({"store_id": "商品视图必须指定单个店铺。"})
     sort = request.query_params.get("sort", "sales_desc")
     valid_sorts = {"sales_desc", "change_asc", "loss_desc", "orders_desc"}
@@ -103,7 +104,8 @@ def _params(request):
     return {
         "date_from": start, "date_to": end,
         "previous_from": previous_start, "previous_to": previous_end,
-        "platform": platform or None, "store_id": int(store_id) if store_id else None,
+        "platform": platform or None, "store_id": int(store_keys[0]) if len(store_keys) == 1 else None,
+        "store_ids": list(dict.fromkeys(map(int, store_keys))) if len(store_keys) > 1 else [],
         "currency": currency or None, "view": view, "page": 1 if product_id is not None else page, "page_size": page_size,
         "sort": sort, "status": status,
         "region": region or None,
@@ -130,6 +132,8 @@ def _orders(request, params):
         orders = orders.filter(currency=params["currency"])
     if params["region"]:
         orders = orders.filter(store__country_code__iexact=params["region"])
+    if params.get("store_ids"):
+        orders = orders.filter(store_id__in=params["store_ids"])
     return orders
 
 
@@ -187,59 +191,6 @@ def _payload(request):
         ))
         item_period = Q(local_day__gte=p["date_from"], local_day__lte=p["date_to"]) & ~Q(sales_order__normalized_status="cancelled")
         item_previous = Q(local_day__gte=p["previous_from"], local_day__lte=p["previous_to"]) & ~Q(sales_order__normalized_status="cancelled")
-    # Currency summaries keep full sales totals, while ROI uses only the stores
-    # with positive observed advertising expense in the corresponding period.
-    roi_sales = {}
-    if p['view'] == 'stores' and ad_expenses:
-        current_pairs, previous_pairs = Q(pk__in=[]), Q(pk__in=[])
-        for (sid, code), expenses in ad_expenses.items():
-            if expenses[0] is not None and expenses[0] > ZERO:
-                current_pairs |= Q(store_id=sid, currency=code)
-            if expenses[1] is not None and expenses[1] > ZERO:
-                previous_pairs |= Q(store_id=sid, currency=code)
-        roi_sales = {r['currency']: r for r in orders.order_by().values('currency').annotate(
-            roi_gmv=Sum('order_total_amount', filter=period & current_valid & current_pairs),
-            previous_roi_gmv=Sum('order_total_amount', filter=previous & current_valid & previous_pairs),
-        )}
-    currency_groups = []
-    if product_items is None:
-        currency_query = orders.order_by().values("currency").annotate(
-            sales=Sum("order_total_amount", filter=period & current_valid),
-            prev_sales=Sum("order_total_amount", filter=previous & current_valid),
-            order_count=Count("pk", filter=period & current_valid, distinct=True),
-        ).filter(Q(sales__isnull=False) | Q(prev_sales__isnull=False)).order_by("currency")
-    else:
-        currency_query = product_items.values("sales_order__currency").annotate(
-            sales=Sum("line_total_amount", filter=item_period),
-            prev_sales=Sum("line_total_amount", filter=item_previous),
-        ).filter(Q(sales__isnull=False) | Q(prev_sales__isnull=False)).order_by("sales_order__currency")
-    for agg in currency_query:
-        cur, prev = agg["sales"], agg["prev_sales"]
-        currency = agg.get("currency", agg.get("sales_order__currency"))
-        group_expenses = (None, None)
-        if product_items is None:
-            current_expenses = [values[0] for (sid, cur), values in ad_expenses.items() if cur == currency and values[0] is not None]
-            previous_expenses = [values[1] for (sid, cur), values in ad_expenses.items() if cur == currency and values[1] is not None]
-            group_expenses = (
-                sum(current_expenses, ZERO) if current_expenses else None,
-                sum(previous_expenses, ZERO) if previous_expenses else None,
-            )
-            matched = roi_sales.get(currency, {})
-            spend, roi, roi_delta, ad_reason = roi_values(matched.get('roi_gmv'), matched.get('previous_roi_gmv'), group_expenses)
-            if roi is not None:
-                ad_reason += '；汇总ROI仅采用已有广告费的店铺GMV，不等于全部店铺GMV除以部分广告费。'
-            if ad_permission_reason:
-                ad_reason = ad_permission_reason
-        else:
-            spend, roi, roi_delta, ad_reason = None, None, None, "商品级广告费未采集，无法计算 ROI。"
-        currency_groups.append({
-            "currency": currency, "sales_amount": None if cur is None else _decimal_string(cur),
-            "previous_sales_amount": None if prev is None else _decimal_string(prev),
-            "order_count": int(agg.get("order_count") or 0) if product_items is None else None,
-            "change_percent": _percent(cur, prev), "ad_spend": spend, "roi": roi,
-            "roi_delta": roi_delta, "ad_reason": ad_reason,
-        })
-
     if p["view"] == "stores":
         grouped = orders.order_by().values("store_id", "store__name", "store__country_code", "currency").annotate(
             sales=Sum("order_total_amount", filter=period & current_valid),
@@ -260,6 +211,56 @@ def _payload(request):
             tenant_id=Max("sales_order__tenant_id"), platform_id=Max("sales_order__platform_id"),
             image_variant_id=Max("platform_variant_id"), variant_count=Count("platform_variant_id", distinct=True),
         ).filter(Q(sales__isnull=False) | Q(prev_sales__isnull=False))
+
+    currency_groups = []
+    if product_items is None:
+        totals = {}
+        for store in grouped:
+            total = totals.setdefault(store["currency"], {
+                "currency": store["currency"], "sales": None, "prev_sales": None,
+                "order_count": 0, "roi_gmv": None, "previous_roi_gmv": None,
+            })
+            current_spend, previous_spend = ad_expenses.get((store["store_id"], store["currency"]), (None, None))
+            for field, roi_field, expense in (
+                ("sales", "roi_gmv", current_spend), ("prev_sales", "previous_roi_gmv", previous_spend),
+            ):
+                amount = store[field]
+                if amount is not None:
+                    total[field] = (total[field] or ZERO) + amount
+                    if expense is not None and expense > ZERO:
+                        total[roi_field] = (total[roi_field] or ZERO) + amount
+            total["order_count"] += store["order_count"]
+        currency_query = [totals[code] for code in sorted(totals)]
+    else:
+        currency_query = product_items.values("sales_order__currency").annotate(
+            sales=Sum("line_total_amount", filter=item_period),
+            prev_sales=Sum("line_total_amount", filter=item_previous),
+        ).filter(Q(sales__isnull=False) | Q(prev_sales__isnull=False)).order_by("sales_order__currency")
+    for agg in currency_query:
+        cur, prev = agg["sales"], agg["prev_sales"]
+        currency = agg.get("currency", agg.get("sales_order__currency"))
+        group_expenses = (None, None)
+        if product_items is None:
+            current_expenses = [values[0] for (sid, cur), values in ad_expenses.items() if cur == currency and values[0] is not None]
+            previous_expenses = [values[1] for (sid, cur), values in ad_expenses.items() if cur == currency and values[1] is not None]
+            group_expenses = (
+                sum(current_expenses, ZERO) if current_expenses else None,
+                sum(previous_expenses, ZERO) if previous_expenses else None,
+            )
+            spend, roi, roi_delta, ad_reason = roi_values(agg["roi_gmv"], agg["previous_roi_gmv"], group_expenses)
+            if roi is not None:
+                ad_reason += '；汇总ROI仅采用已有广告费的店铺GMV，不等于全部店铺GMV除以部分广告费。'
+            if ad_permission_reason:
+                ad_reason = ad_permission_reason
+        else:
+            spend, roi, roi_delta, ad_reason = None, None, None, "商品级广告费未采集，无法计算 ROI。"
+        currency_groups.append({
+            "currency": currency, "sales_amount": None if cur is None else _decimal_string(cur),
+            "previous_sales_amount": None if prev is None else _decimal_string(prev),
+            "order_count": int(agg.get("order_count") or 0) if product_items is None else None,
+            "change_percent": _percent(cur, prev), "ad_spend": spend, "roi": roi,
+            "roi_delta": roi_delta, "ad_reason": ad_reason,
+        })
 
     grouped = grouped.annotate(sales_delta=F("sales") - F("prev_sales"), loss_amount=F("prev_sales") - F("sales"))
     if p["view"] == "products":
@@ -399,11 +400,11 @@ def _payload(request):
     if p["view"] == "stores":
         # ROI numerator is scoped to stores with an observed expense.
         for group in summary_groups:
-            group["ad_sales_amount"] = _decimal_string(roi_sales.get(group["currency"], {}).get("roi_gmv"))
+            group["ad_sales_amount"] = _decimal_string(totals[group["currency"]].get("roi_gmv"))
     return {
         "filters": {"date_from": p["date_from"].isoformat(), "date_to": p["date_to"].isoformat(),
                     "previous_from": p["previous_from"].isoformat(), "previous_to": p["previous_to"].isoformat(),
-                    "region": p["region"], "platform": p["platform"], "store_id": p["store_id"],
+                    "region": p["region"], "platform": p["platform"], "store_id": p["store_id"], **({"store_ids": p["store_ids"]} if p["store_ids"] else {}),
                     "currency": p["currency"], "view": p["view"], "sort": p["sort"], "status": p["status"],
                     "product_id": p["product_id"]},
         "currency_groups": currency_groups, "cny_summary": cny_summary(

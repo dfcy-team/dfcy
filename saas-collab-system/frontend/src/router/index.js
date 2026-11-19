@@ -30,7 +30,7 @@ const Dashboard = () => import('../views/dashboard/Index.vue');
 const BusinessOverview = () => import('../views/analytics/BusinessOverview.vue');
 const SalesAnalysis = () => import('../views/analytics/SalesAnalysis.vue');
 const InventoryAnalysis = () => import('../views/analytics/InventoryAnalysis.vue');
-const CategoryInventory = () => import('../views/inventory/CategoryInventory.vue');
+const WarehouseInventoryDetails = () => import('../views/inventory/WarehouseInventoryDetails.vue');
 const InventoryWorkbench = () => import('../views/inventory/InventoryWorkbench.vue');
 const AdvertisingOverview = () => import('../views/analytics/AdvertisingOverview.vue');
 const AdvertisingPerformance = () => import('../views/analytics/AdvertisingPerformance.vue');
@@ -188,8 +188,8 @@ const routes = [
       { path: 'analytics/sales', component: SalesAnalysis },
       { path: 'analytics/inventory', component: InventoryAnalysis },
       { path: 'inventory/workbench', component: InventoryWorkbench },
-      { path: 'inventory/warehouse-details', component: InventoryWorkbench, props: { warehouseDetails: true } },
-      { path: 'inventory/category-query', component: CategoryInventory },
+      { path: 'inventory/warehouse-details', component: WarehouseInventoryDetails },
+      { path: 'inventory/category-query', redirect: '/inventory/warehouse-details' },
       { path: 'analytics/advertising-overview', component: AdvertisingOverview },
       { path: 'analytics/advertising-performance', component: AdvertisingPerformance },
       { path: 'marketing/campaigns', component: PlatformCampaigns },

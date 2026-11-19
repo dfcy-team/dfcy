@@ -458,6 +458,8 @@ CELERY_BROKER_TRANSPORT_OPTIONS = {"queue_order_strategy": "round_robin", "socke
 # deployment rollback disables their schedule.
 INVENTORY_DECISION_BACKGROUND_SCHEDULE_ENABLED = env_bool("INVENTORY_DECISION_BACKGROUND_SCHEDULE_ENABLED", False)
 INVENTORY_DECISION_BACKGROUND_TASKS_ENABLED = env_bool("INVENTORY_DECISION_BACKGROUND_TASKS_ENABLED", False)
+INVENTORY_COMPLETE_BATCH_READS_ENABLED = env_bool("INVENTORY_COMPLETE_BATCH_READS_ENABLED", False)
+INVENTORY_SNAPSHOT_MAINTENANCE_TENANT_ID = int(os.getenv("INVENTORY_SNAPSHOT_MAINTENANCE_TENANT_ID", "0"))
 REPLENISHMENT_MAINTENANCE_ENABLED = env_bool("REPLENISHMENT_MAINTENANCE_ENABLED", False)
 CELERY_TASK_ROUTES = {
     "apps.flash_sales.tasks.dispatch": {"queue": "shopee-flash-control"},
@@ -553,6 +555,12 @@ CELERY_BEAT_SCHEDULE = {
         "args": (50,),
     },
 }
+if INVENTORY_SNAPSHOT_MAINTENANCE_TENANT_ID > 0:
+    CELERY_BEAT_SCHEDULE["maintain-inventory-snapshots"] = {
+        "task": "apps.alerts.tasks.maintain_inventory_snapshots",
+        "schedule": 300.0,
+        "options": {"expires": 290},
+    }
 if REPLENISHMENT_MAINTENANCE_ENABLED:
     CELERY_BEAT_SCHEDULE.update({
         "purge-expired-replenishment-calculations": {
