@@ -50,13 +50,38 @@ beforeEach(() => {
     let data = { count: 0, results: [] };
     if (config.method === 'get' && config.url.endsWith('/sample-fulfillments/23/')) data = serverSample;
     if (config.url.endsWith('/outreach-task-options/')) data = { stores: [{ id: 3, name: 'Synthetic store', country_code: 'PH' }], bd_users: [{ id: 9, username: 'synthetic' }] };
-    if (config.url.endsWith('/sample-fulfillment-options/')) data = { warehouses: [] };
+    if (config.url.endsWith('/sample-fulfillment-options/')) data = { warehouses: [], owners: [], stores: [] };
     if (config.method === 'patch') data = { ...(config.url.includes('/outreach-tasks/') ? task : sample), ...config.data };
     return { success: true, data };
   });
 });
 
 describe('editable task number and sample type', () => {
+  it('filters by a permitted store absent from the current fulfillment page', async () => {
+    request.mockImplementation(async (config) => ({
+      success: true,
+      data: config.url.endsWith('/sample-fulfillment-options/')
+        ? { owners: [], stores: [{ id: 3, name: 'Page one shop' }, { id: 9, name: 'Other shop' }] }
+        : { count: 21, results: [config.params.store
+          ? { ...sample, store: 9, store_name: 'Other shop' }
+          : { ...sample, store_name: 'Page one shop' }] }
+    }));
+    const wrapper = render(SampleFulfillmentList);
+    try {
+      await flushPromises();
+      const storeFilter = wrapper.get('.toolbar select[placeholder="全部店铺"]');
+      expect(storeFilter.findAll('option').map((option) => option.text())).toEqual(['Page one shop', 'Other shop']);
+      await storeFilter.setValue('9');
+      await wrapper.findAll('.toolbar button').find((button) => button.text() === '查询').trigger('click');
+      await flushPromises();
+      expect(request.mock.calls.at(-1)[0].params).toMatchObject({ page: 1, store: '9' });
+      expect(storeFilter.findAll('option').map((option) => option.text())).toEqual(['Page one shop', 'Other shop']);
+      expect(request.mock.calls.filter(([config]) => config.params?.filters_only === 'true')).toHaveLength(1);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it.each(['task', 'standalone'])('passes the selected store for country-scoped nickname creation (%s)', async (kind) => {
     const wrapper = render(kind === 'task' ? OutreachTaskList : SampleFulfillmentList);
     await flushPromises();

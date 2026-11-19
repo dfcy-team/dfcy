@@ -18,8 +18,8 @@
     <el-card class="workspace-card" shadow="never">
       <div class="toolbar">
         <el-input v-model="filters.search" clearable placeholder="搜索达人/送样编号/建联编号/产品/订单" @keyup.enter="applyFilters" />
-        <el-select v-model="filters.store" clearable filterable placeholder="全部店铺">
-          <el-option v-for="store in rowStores" :key="store.id" :label="store.name" :value="store.id" />
+        <el-select v-model="filters.store" clearable filterable placeholder="全部店铺" :loading="filterOptionsLoading" @visible-change="retryFilterOptions">
+          <el-option v-for="store in filterStoreOptions" :key="store.id" :label="store.name" :value="store.id" />
         </el-select>
         <el-select v-model="filters.status" clearable placeholder="全部状态" @change="applyFilters">
           <el-option v-for="(label, value) in FULFILLMENT_FILTER_STATUS_LABELS" :key="value" :label="label" :value="value" />
@@ -377,7 +377,9 @@ const fulfilledStatuses = ['shipped', 'delivered', 'received', 'creating', 'publ
 const fulfilledCount = computed(() => rows.value.filter((row) => fulfilledStatuses.includes(row.status) || row.shipped_at || row.sample_order_no).length);
 const pendingCount = computed(() => rows.value.filter((row) => row.status === 'pending').length);
 const exceptionCount = computed(() => rows.value.filter((row) => ['overdue', 'cancelled'].includes(row.status)).length);
-const rowStores = computed(() => [...new Map(rows.value.filter((row) => row.store).map((row) => [row.store, { id: row.store, name: row.store_name || `店铺 ${row.store}` }])).values()]);
+const filterStoreOptions = ref([]);
+const filterOptionsLoading = ref(false);
+const filterOptionsFailed = ref(false);
 const hasValue = (value) => value !== undefined && value !== null && value !== '';
 const sampleInfluencerName = (row) => creatorHandleFirst(row);
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
@@ -652,9 +654,26 @@ async function openCreate(selection = {}) {
   }
 }
 
-async function loadOwnerOptions() {
-  const response = await fetchSampleFulfillmentOptions({ owners_only: 'true' });
-  if (response.success) ownerOptions.value = response.data?.owners || [];
+async function loadFilterOptions() {
+  if (filterOptionsLoading.value) return;
+  filterOptionsLoading.value = true;
+  try {
+    const response = await fetchSampleFulfillmentOptions({ filters_only: 'true' });
+    if (!response.success || !Array.isArray(response.data?.stores)) {
+      filterOptionsFailed.value = true;
+      ElMessage.error(formatInfluencerError(response, '筛选选项加载失败，请重新打开店铺下拉重试'));
+      return;
+    }
+    filterStoreOptions.value = response.data.stores;
+    ownerOptions.value = response.data.owners || [];
+    filterOptionsFailed.value = false;
+  } finally {
+    filterOptionsLoading.value = false;
+  }
+}
+
+function retryFilterOptions(visible) {
+  if (visible && filterOptionsFailed.value) void loadFilterOptions();
 }
 
 async function selectTask(id) {
@@ -919,7 +938,7 @@ async function submitEdit() {
 }
 
 onMounted(async () => {
-  await Promise.all([load(), loadOwnerOptions()]);
+  await Promise.all([load(), loadFilterOptions()]);
   if (canManage.value) {
     const selection = querySelection();
     if (selection.taskId) await openCreate(selection);

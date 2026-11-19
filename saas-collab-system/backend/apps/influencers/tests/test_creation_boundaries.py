@@ -1931,6 +1931,14 @@ def test_fulfillment_option_owners_use_exists_and_keep_tenant_visibility_scope(m
         username="owner-exists-hidden", tenant=tenant,
         user_type=CustomUser.UserType.INTERNAL,
     )
+    historical_store = StoreMaster.objects.create(
+        tenant=tenant, platform=store.platform, code="owner-exists-historical",
+        name="Historical store", country_code="PH", currency="PHP",
+    )
+    hidden_store = StoreMaster.objects.create(
+        tenant=tenant, platform=store.platform, code="owner-exists-hidden",
+        name="Hidden store", country_code="PH", currency="PHP",
+    )
     for index in range(2):
         SampleFulfillment.objects.create(
             tenant=tenant,
@@ -1944,12 +1952,12 @@ def test_fulfillment_option_owners_use_exists_and_keep_tenant_visibility_scope(m
     hidden_sample = SampleFulfillment.objects.create(
         tenant=tenant, fulfillment_no="OWNER-EXISTS-HIDDEN",
         request_key="owner-exists-hidden", request_hash="owner-hidden-hash",
-        influencer=influencer, store=store, owner=hidden_owner,
+        influencer=influencer, store=hidden_store, owner=hidden_owner,
     )
     deleted_sample = SampleFulfillment.objects.create(
         tenant=tenant, fulfillment_no="OWNER-EXISTS-DELETED",
         request_key="owner-exists-deleted", request_hash="owner-deleted-hash",
-        influencer=influencer, store=store, owner=outsider,
+        influencer=influencer, store=historical_store, owner=outsider,
     )
     QuerySet.update(
         SampleFulfillment.objects.filter(pk=deleted_sample.pk), is_deleted=True,
@@ -1982,12 +1990,23 @@ def test_fulfillment_option_owners_use_exists_and_keep_tenant_visibility_scope(m
     assert response.json()["data"]["owners"] == [{
         "id": user.id, "username": user.username, "full_name": user.full_name,
     }]
+    assert "stores" not in response.json()["data"]
     owner_sql = next(
         query["sql"] for query in queries.captured_queries
         if re.search(r"FROM\s+[`\"]?accounts_customuser[`\"]?", query["sql"], re.I)
         and re.search(r"[`\"]?influencers_samplefulfillment[`\"]?", query["sql"], re.I)
     )
     assert owner_sql.upper().count("EXISTS") >= 2
+
+    response = client.get("/api/internal/influencers/sample-fulfillment-options/?filters_only=true")
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "owners": [{"id": user.id, "username": user.username, "full_name": user.full_name}],
+        "stores": [
+            {"id": store.id, "name": store.name, "country_code": "PH"},
+            {"id": historical_store.id, "name": historical_store.name, "country_code": "PH"},
+        ],
+    }
 
 
 def test_fulfillment_options_do_not_scan_influencers():
