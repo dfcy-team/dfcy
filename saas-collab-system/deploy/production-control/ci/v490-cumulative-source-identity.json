@@ -28,7 +28,7 @@
     "supply_chain.0080_optional_fee_revision_reason"
   ],
   "runtime_parent_sha": "19fb4e543731533eff29423bfd0e97ebcf17d203",
-  "baseline_file_sha256": "de0ce245c8cbdaaf870375b253407f16a53b9a0fc9285b32de262a476f9df61e",
+  "baseline_file_sha256": "0004e6f3a3415e0b6d8ffb0003f71ab1882ed3cf223f0637aed20d5fc4a0d4ae",
   "migration_rehearsal": {
     "status": "PASS",
     "tables_before": 406,
@@ -74,17 +74,17 @@
     },
     "old_columns_unchanged": true,
     "protected_tables": 160,
-    "protected_rows": 640065,
+    "protected_rows": 690193,
     "applied_nodes_sha256": "c3dc80a93b7c0d4d88c85fc03e604160c988940665e44a1886e1a42fca9c4009",
     "source_tree_sha": "c52594561e5da18f5cec0df774b2c554c6217ea1",
     "local_candidate_commit": "ee8798f2023b5c4f0d8e1025e6046cd41d34eafc",
-    "backup_sha256": "0ac5f71c098ec6ba5859a37a7c2b4893939d972c9cfab71895c8bae742fcefd2",
+    "backup_sha256": "a2bde255a4fdfe18076184f38e5d089f3f5a7a720ffd65e4b04488e704026e75",
     "network": "none",
     "candidate_source_sha": "a51ed631963adf93b907af4af252b519fd73f89a",
     "parent_sha": "19fb4e543731533eff29423bfd0e97ebcf17d203",
     "generated_only_paths": [],
     "migration_sha256": "4c55b830536b3758dfa8871e67ed666f9e8474fd480fba0d358b77873d304ef4",
-    "receipt_sha256": "69614346f21adee62e71a1f3ec0a938f65b258538b82469faf482e71361853bd"
+    "receipt_sha256": "f9b92fb0e87d621c3a1fb52b37584835e33da50f7ac4238648d377f279a0e843"
   },
   "files": {
     "saas-collab-system/backend/apps/alerts/inventory_snapshot_maintenance.py": "7f7cc7bd3e4e19e05cacb918ad2d126c7a83b90cfc7d42e6539b62a6e46699ea",
