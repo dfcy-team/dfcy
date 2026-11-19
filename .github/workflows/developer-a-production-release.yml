@@ -248,6 +248,13 @@ jobs:
           ref: ${{ github.sha }}
           path: .v460-reflow-control
           persist-credentials: false
+      - name: Check out protected V490 cumulative release control
+        if: inputs.action == 'deploy' && inputs.release_sha == '40c9e20ee33433fc783c4898fc03f7ba1e3deff6'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .v490-cumulative-control
+          persist-credentials: false
       - name: Check out protected V472 cumulative release control
         if: inputs.action == 'deploy' && inputs.release_sha == '19fb4e543731533eff29423bfd0e97ebcf17d203'
         uses: actions/checkout@v4
@@ -387,6 +394,8 @@ jobs:
             python .v460-reflow-control/saas-collab-system/deploy/production-control/ci/verify_v460_reflow_source.py
           elif [[ "$action" = deploy && "$release_sha" = 19fb4e543731533eff29423bfd0e97ebcf17d203 ]]; then
             python .v472-cumulative-control/saas-collab-system/deploy/production-control/ci/verify_v472_cumulative_source.py
+          elif [[ "$action" = deploy && "$release_sha" = 40c9e20ee33433fc783c4898fc03f7ba1e3deff6 ]]; then
+            python .v490-cumulative-control/saas-collab-system/deploy/production-control/ci/verify_v490_cumulative_source.py
           elif [[ "$action" != rollback ]]; then
             git fetch --no-tags origin main
             git merge-base --is-ancestor "$release_sha" origin/main || { echo 'The requested commit is not reachable from main.' >&2; exit 1; }
