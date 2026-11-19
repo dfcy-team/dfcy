@@ -23734,6 +23734,70 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/alerts/inventory/warnings/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "alerts.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAlertViewer"
+      ],
+      "owner": "alerts",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "a4afcebbb61800c45c500cc123f380a97252a62190e3aa41e5db8fb8b137beac",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/alerts/inventory/warnings/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "alerts.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAlertViewer"
+      ],
+      "owner": "alerts",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "a4afcebbb61800c45c500cc123f380a97252a62190e3aa41e5db8fb8b137beac",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/alerts/inventory/warnings/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAlertViewer"
+      ],
+      "owner": "alerts"
+    },
+    {
+      "route": "api/internal/alerts/inventory/warnings/rebuild/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAlertEvaluator"
+      ],
+      "owner": "alerts"
+    },
+    {
+      "route": "api/internal/alerts/inventory/warnings/rebuild/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "alerts.evaluate",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAlertEvaluator"
+      ],
+      "owner": "alerts",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "a4afcebbb61800c45c500cc123f380a97252a62190e3aa41e5db8fb8b137beac",
+      "risk": "normal"
+    },
+    {
       "route": "api/internal/analytics/advertising/",
       "method": "GET",
       "action": "read",
@@ -25084,6 +25148,61 @@
       "owner": "sales_management"
     },
     {
+      "route": "api/internal/commerce/inventory/abc/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/inventory/abc/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/inventory/abc/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/inventory/abc/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "masterdata.settings.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
       "route": "api/internal/commerce/inventory/category-query/",
       "method": "GET",
       "action": "read",
@@ -25510,6 +25629,33 @@
     },
     {
       "route": "api/internal/commerce/operating-orders/<int:pk>/cancel/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.operating_orders.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/operating-orders/<int:pk>/delete/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/operating-orders/<int:pk>/delete/",
       "method": "POST",
       "action": "create",
       "permission_code": "sales_management.operating_orders.manage",
@@ -37197,6 +37343,53 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/master-data/inventory-observation-settings/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "masterdata.settings.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "masterdata",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/master-data/inventory-observation-settings/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "masterdata.settings.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "masterdata",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/master-data/inventory-observation-settings/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "masterdata"
+    },
+    {
+      "route": "api/internal/master-data/inventory-observation-settings/",
+      "method": "PUT",
+      "action": "update",
+      "permission_code": "masterdata.settings.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "masterdata",
+      "risk": "normal"
+    },
+    {
       "route": "api/internal/master-data/platform-sites/migration-preview/",
       "method": "GET",
       "action": "read",
@@ -43550,6 +43743,61 @@
       "owner": "sales_management"
     },
     {
+      "route": "api/internal/sales-management/inventory/abc/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/inventory/abc/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/inventory/abc/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/inventory/abc/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "masterdata.settings.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
       "route": "api/internal/sales-management/inventory/category-query/",
       "method": "GET",
       "action": "read",
@@ -43976,6 +44224,33 @@
     },
     {
       "route": "api/internal/sales-management/operating-orders/<int:pk>/cancel/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.operating_orders.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/operating-orders/<int:pk>/delete/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/operating-orders/<int:pk>/delete/",
       "method": "POST",
       "action": "create",
       "permission_code": "sales_management.operating_orders.manage",
@@ -51942,7 +52217,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "bc8c54ad40cf580f3af9a231ec2835ae1f869476f98eb4863f42a2ef211526e8"
+      "guard_source_sha256": "f53e696dd7b634d15d0919f61249067fc6be3e9ba1b146f71a3de21213312e1e"
     },
     {
       "route": "api/internal/supply-chain/v2/replenishment-daily/<uuid:pk>/rows/",
@@ -51955,7 +52230,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "bc8c54ad40cf580f3af9a231ec2835ae1f869476f98eb4863f42a2ef211526e8"
+      "guard_source_sha256": "f53e696dd7b634d15d0919f61249067fc6be3e9ba1b146f71a3de21213312e1e"
     },
     {
       "route": "api/internal/supply-chain/v2/replenishment-daily/<uuid:pk>/rows/",
@@ -52069,7 +52344,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "bc8c54ad40cf580f3af9a231ec2835ae1f869476f98eb4863f42a2ef211526e8"
+      "guard_source_sha256": "f53e696dd7b634d15d0919f61249067fc6be3e9ba1b146f71a3de21213312e1e"
     },
     {
       "route": "api/internal/supply-chain/v2/replenishment-jobs/<uuid:pk>/rows/",
@@ -52082,7 +52357,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "bc8c54ad40cf580f3af9a231ec2835ae1f869476f98eb4863f42a2ef211526e8"
+      "guard_source_sha256": "f53e696dd7b634d15d0919f61249067fc6be3e9ba1b146f71a3de21213312e1e"
     },
     {
       "route": "api/internal/supply-chain/v2/replenishment-jobs/<uuid:pk>/rows/",
@@ -52119,7 +52394,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "e1265242629b5d9bb2aa3cfc04b0fb9e5141451f7563902f07980f285bfacdcd"
+      "guard_source_sha256": "eda45a30fcb33ddb4d4afa32d6eb81e9f7ec68d07a3890ca91b11874f0d27891"
     },
     {
       "route": "api/internal/supply-chain/v2/replenishment-strategies/",
@@ -52170,7 +52445,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "5e8b4593e44dd1012ba5ce401da62a56ba3d4b1d7f08e27e2dd06d3e14ce7d1f"
+      "guard_source_sha256": "57c2be3f62cd6b5250ee948fb6419c1d553c6e61f6ee9117b338b28f0f8d622d"
     },
     {
       "route": "api/internal/supply-chain/v2/settings/inbound-notification/",
@@ -52313,6 +52588,61 @@
       "method": "POST",
       "action": "create",
       "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/settings/operating-notification/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/settings/operating-notification/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/settings/operating-notification/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/settings/operating-notification/",
+      "method": "PUT",
+      "action": "update",
+      "permission_code": "supply.v2.manage",
       "policy": "catalog_permission",
       "permission_classes": [
         "IsAuthenticated",
@@ -57493,5 +57823,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "14b2ed3365f7045b3c3f9adb5bcaa90632dbfc869dacda3cd3a6f1081c65fab3"
+  "catalog_hash": "24d64c752cdf24eaedeaa3c4be4e1eb81eadfcc61e1b3452c0f275ffb3a05d1a"
 }
