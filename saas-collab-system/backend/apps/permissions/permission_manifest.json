@@ -2748,6 +2748,114 @@
       "owner": "listings"
     },
     {
+      "code": "marketing.flash_sales.configure",
+      "name": "配置店内闪购",
+      "module": "marketing",
+      "action": "flash_sales.configure",
+      "permission_type": "action",
+      "description": "仅当前租户授权店铺；查看不授予平台写入权限。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "marketing.flash_sales.configure",
+      "resource_code": "marketing.flash_sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "marketing"
+    },
+    {
+      "code": "marketing.flash_sales.delete",
+      "name": "删除店内闪购",
+      "module": "marketing",
+      "action": "flash_sales.delete",
+      "permission_type": "action",
+      "description": "仅当前租户授权店铺；查看不授予平台写入权限。",
+      "risk": "high",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "marketing.flash_sales.delete",
+      "resource_code": "marketing.flash_sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "marketing"
+    },
+    {
+      "code": "marketing.flash_sales.execute",
+      "name": "执行店内闪购",
+      "module": "marketing",
+      "action": "flash_sales.execute",
+      "permission_type": "action",
+      "description": "仅当前租户授权店铺；查看不授予平台写入权限。",
+      "risk": "high",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "marketing.flash_sales.execute",
+      "resource_code": "marketing.flash_sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "marketing"
+    },
+    {
+      "code": "marketing.flash_sales.notifications",
+      "name": "管理全局通知店内闪购",
+      "module": "marketing",
+      "action": "flash_sales.notifications",
+      "permission_type": "action",
+      "description": "仅当前租户授权店铺；查看不授予平台写入权限。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "marketing.flash_sales.notifications",
+      "resource_code": "marketing.flash_sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "marketing"
+    },
+    {
+      "code": "marketing.flash_sales.plans",
+      "name": "管理计划店内闪购",
+      "module": "marketing",
+      "action": "flash_sales.plans",
+      "permission_type": "action",
+      "description": "仅当前租户授权店铺；查看不授予平台写入权限。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "marketing.flash_sales.plans",
+      "resource_code": "marketing.flash_sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "marketing"
+    },
+    {
+      "code": "marketing.flash_sales.view",
+      "name": "查看店内闪购",
+      "module": "marketing",
+      "action": "flash_sales.view",
+      "permission_type": "action",
+      "description": "仅当前租户授权店铺；查看不授予平台写入权限。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "marketing.flash_sales.view",
+      "resource_code": "marketing.flash_sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "marketing"
+    },
+    {
       "code": "masterdata.manage",
       "name": "维护基础档案与服务商标识",
       "module": "masterdata",
@@ -36210,6 +36318,332 @@
       "owner": "listings"
     },
     {
+      "route": "api/internal/marketing/flash-sales/activities/<int:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "cf64db779d01c7547aae451223c2cd14d0da91779467d29fd7196afcce7c407e"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/activities/<int:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "cf64db779d01c7547aae451223c2cd14d0da91779467d29fd7196afcce7c407e"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/activities/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/activities/<int:pk>/source/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "17956e7693e4fd898dfdad17bea5ae80a78cdebfaf3094db5f1aef1b956b0a13"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/activities/<int:pk>/source/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "17956e7693e4fd898dfdad17bea5ae80a78cdebfaf3094db5f1aef1b956b0a13"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/activities/<int:pk>/source/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/batches/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/batches/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "5d2a793526479d152b6fc5adec4fad203169d4df973312cb9eb03ac081880247"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/batches/<uuid:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "1c377e00d84041dbe3ea509527c92fa1e9f1d80e3db28491b35886751083c6c7"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/batches/<uuid:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "1c377e00d84041dbe3ea509527c92fa1e9f1d80e3db28491b35886751083c6c7"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/batches/<uuid:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/batches/<uuid:pk>/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "a644f869ea832e1611a8a2f7b1e82cca457983b9a9e8a0c517f96032cbe6fc4d"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/configs/<int:store_id>/",
+      "method": "DELETE",
+      "action": "delete",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "af3858bbdc77ccb2e19a9642fe673ee45efcb8b8a79be69c12257dedf279f57b"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/configs/<int:store_id>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/configs/<int:store_id>/",
+      "method": "PUT",
+      "action": "update",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "2d7522a31d1a2092c2872eca5ce4926f4463f0546cdbb8c284711967c5d852d4"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/notifications/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/notifications/",
+      "method": "PUT",
+      "action": "update",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "b10510f928f668b87c2122668736103a33181418ca0ad3e036367e5e9d72720e"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/plans/",
+      "method": "DELETE",
+      "action": "delete",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "d9b04c53ee88927947027d7e6f8fd91f9b91b99039aeccb281f19bf9914c2cf5"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/plans/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/plans/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "f6c43069fe4f60535776b617121061aac179b1bfa03bbb434034ca42bf3bd8b8"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/plans/<int:pk>/",
+      "method": "DELETE",
+      "action": "delete",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "d9b04c53ee88927947027d7e6f8fd91f9b91b99039aeccb281f19bf9914c2cf5"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/plans/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/plans/<int:pk>/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "f6c43069fe4f60535776b617121061aac179b1bfa03bbb434034ca42bf3bd8b8"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/previews/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/previews/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "ab7f64ed12e3208716f4b86cabd952c40c3a7d41d82d26777d5723916eb9c54c"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/workspace/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "91f9fc929c0bdf94b1ff5e1694487fe8f55ddb3bff67040b418689f6c3b28bfb"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/workspace/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales",
+      "guard_source_sha256": "91f9fc929c0bdf94b1ff5e1694487fe8f55ddb3bff67040b418689f6c3b28bfb"
+    },
+    {
+      "route": "api/internal/marketing/flash-sales/workspace/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "flash_sales"
+    },
+    {
       "route": "api/internal/master-data/<str:resource>/",
       "method": "GET",
       "action": "read",
@@ -55591,5 +56025,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "9197d716c7fd493a17ff06bc38ed182ebff7029e035f7763d156b14d07ea88b2"
+  "catalog_hash": "8de18fad8d153ec0a6871de243ec86644ace9eb3785aee7bb51ecefd8dbb7af2"
 }
