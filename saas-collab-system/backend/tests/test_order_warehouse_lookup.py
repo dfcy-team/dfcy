@@ -2,7 +2,7 @@ from datetime import timedelta
 from unittest.mock import Mock, patch
 
 import pytest
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.test import APIClient
@@ -88,6 +88,44 @@ def test_rollback_does_not_publish(setup_order, django_capture_on_commit_callbac
                 raise RuntimeError('rollback')
         assert not publish.called
     assert not OrderWarehouseLookup.objects.filter(order=order).exists()
+
+
+def test_tiktok_cancel_signal_closes_lookup_without_changing_items(
+        setup_order, django_capture_on_commit_callbacks):
+    order, _, _ = setup_order
+    type(order.platform).objects.filter(pk=order.platform_id).update(platform_type='tiktok')
+    previous_items = list(order.items.values('id', 'seller_sku', 'internal_sku_id'))
+    row = request_lookup(order.pk)
+    revision = row.revision
+    with patch('apps.sales_management.warehouse_orders.publish_lookup') as publish:
+        with django_capture_on_commit_callbacks(execute=True):
+            order.raw_status = 'CANCELLED'
+            order.normalized_status = 'cancelled'
+            order.save(update_fields=['raw_status', 'normalized_status'])
+    row.refresh_from_db()
+    assert row.status == 'cancelled'
+    assert row.revision != revision
+    assert row.next_query_at is row.polling_until is row.lease_until is None
+    assert not row.snapshot and row.warehouse_id is None
+    assert lookup_data(order)['status_label'] == '订单已取消'
+    assert list(order.items.values('id', 'seller_sku', 'internal_sku_id')) == previous_items
+    assert not publish.called
+
+
+def test_tiktok_cancelled_pending_worker_preserves_prior_evidence(setup_order):
+    order, _, _ = setup_order
+    type(order.platform).objects.filter(pk=order.platform_id).update(platform_type='tiktok')
+    row = request_lookup(order.pk)
+    evidence = {'packages': [{'tracking_no': 'TEST-TRACKING'}]}
+    OrderWarehouseLookup.objects.filter(pk=row.pk).update(snapshot=evidence)
+    models.QuerySet.update(type(order).objects.filter(pk=order.pk),
+                           raw_status='CANCELLED', normalized_status='cancelled')
+    with patch('apps.sales_management.warehouse_orders.fetch_packages') as query:
+        assert synchronize(row.pk, str(row.revision)) == 'cancelled'
+    row.refresh_from_db()
+    assert row.snapshot == evidence
+    assert row.status == 'cancelled'
+    assert not query.called
 
 
 def test_lookup_database_failure_does_not_rollback_order(setup_order, caplog):
