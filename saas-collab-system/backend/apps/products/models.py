@@ -248,6 +248,7 @@ class ProductSKU(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="product_skus")
     spu = models.ForeignKey(ProductSPU, on_delete=models.CASCADE, related_name="skus")
     product_type = models.CharField(max_length=20, choices=ProductType.choices, default="")
+    first_sale_date = models.DateField(null=True, blank=True)
     sku_code = models.CharField(max_length=80)
     legacy_sku_code = models.CharField(max_length=160, blank=True, db_index=True)
     product_name = models.CharField(max_length=200, blank=True, default="")

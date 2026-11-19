@@ -149,7 +149,7 @@ def test_dimension_fallback_ignores_declared_zero_and_tie_break_is_deterministic
 
 
 @pytest.mark.parametrize('field,value', [('amount', '-1'), ('amount', '1.00001'), ('volume_percent', '101'),
-    ('volume_percent', '-1'), ('method', 'quantity'), ('state', 'paid'), ('reason', ' '), ('billed_cbm', '1')])
+    ('volume_percent', '-1'), ('method', 'quantity'), ('state', 'paid'), ('reason', 'x' * 10001), ('billed_cbm', '1')])
 def test_fee_typed_validation_and_arrival_guard(world, field, value):
     buyer, api, shipment = pilot(world)
     body = fee_body(get(api, 'shipment', shipment), '1')
@@ -158,6 +158,19 @@ def test_fee_typed_validation_and_arrival_guard(world, field, value):
     body = {**fee_body(get(api, 'shipment', shipment), '1'), field: value}
     assert write(api, f'costs/shipment/{shipment.pk}/fee/', body, 'bad', 'put').status_code == (422 if field == 'billed_cbm' else 400)
     assert not FeeRevision.objects.exists()
+
+
+@pytest.mark.parametrize('reason', [None, ' '], ids=['omitted', 'blank'])
+def test_fee_saves_with_optional_adjustment_reason(world, reason):
+    buyer, api, shipment = pilot(world)
+    shipment = mark(buyer, shipment)
+    body = fee_body(get(api, 'shipment', shipment), '0')
+    body.pop('reason')
+    if reason is not None:
+        body['reason'] = reason
+    response = write(api, f'costs/shipment/{shipment.pk}/fee/', body, 'optional-reason', 'put')
+    assert response.status_code == 200, response.data
+    assert FeeRevision.objects.get().reason == ''
 
 
 def test_partial_receipt_costs_excess_and_additional_skus_and_settlement_independence(world):

@@ -1,10 +1,12 @@
 from django.urls import path
+from .inventory_observation_views import InventoryObservationSettingsView
 
 from .code_rule_views import ArchiveCodeRuleView
 from .views import MasterDataCollectionView, MasterDataDetailView, MasterDataStatusView, PlatformCatalogView, PlatformSiteMigrationView, StorePersonOptionsView
 
 
 urlpatterns = [
+    path("inventory-observation-settings/", InventoryObservationSettingsView.as_view(), name="inventory-observation-settings"),
     path("archive-code-rules/", ArchiveCodeRuleView.as_view(), name="archive-code-rules"),
     path("platforms/catalog/", PlatformCatalogView.as_view(), name="platform-catalog"),
     path("store-person-options/", StorePersonOptionsView.as_view(), name="store-person-options"),

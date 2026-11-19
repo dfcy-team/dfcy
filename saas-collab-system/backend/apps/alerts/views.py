@@ -52,6 +52,24 @@ def inventory_alert_list(request):
     serializer.is_valid(raise_exception=True)
     query = serializer.validated_data
     queryset = _alert_queryset(request).prefetch_related(None)
+    abc_grade = request.query_params.get("abc_grade", "").strip()
+    if abc_grade:
+        from rest_framework.exceptions import ValidationError
+        from apps.masterdata.models import CountrySiteMaster, InventoryABCEntry
+        from apps.sales_management.abc_access import published_run
+        if abc_grade not in {"A", "B", "C", "new", "no_sales", "unavailable"}:
+            raise ValidationError({"abc_grade": "ABC 等级无效。"})
+        country_code = query.get("country_code", "").strip().upper()
+        country = CountrySiteMaster.objects.filter(tenant=request.user.tenant, country_code__iexact=country_code).first() if country_code else None
+        if not country:
+            raise ValidationError({"country_code": "筛选 ABC 等级时请选择有效国家。"})
+        run, _ = published_run(request.user, country)
+        if run:
+            entries = InventoryABCEntry.objects.filter(run=run, entity_type="sku")
+            queryset = queryset.exclude(sku_id__in=entries.exclude(grade="unavailable").values("entity_id")) if abc_grade == "unavailable" else queryset.filter(sku_id__in=entries.filter(**{("candidate_grade" if run.status == "partial" and abc_grade in {"A", "B", "C", "new"} else "grade"): abc_grade}).values("entity_id"))
+        elif abc_grade != "unavailable":
+            queryset = queryset.none()
+
     if query.get('source_mode'):
         queryset = queryset.filter(source_summary__mode=query['source_mode'])
     if query.get('country_code'):
@@ -74,10 +92,20 @@ def inventory_alert_list(request):
     for field in ("status", "alert_type", "severity"):
         if query.get(field):
             queryset = queryset.filter(**{field: query[field]})
-    return success_response(
-        paginated_data(request, queryset, InventoryAlertSerializer, page=query["page"], page_size=query["page_size"],
-                       serializer_context={'list_view': True})
-    )
+    payload = paginated_data(request, queryset, InventoryAlertSerializer, page=query["page"], page_size=query["page_size"], serializer_context={'list_view': True})
+    from apps.masterdata.models import CountrySiteMaster
+    from apps.sales_management.abc_access import decorate_rows
+    countries = {country.pk: country for country in CountrySiteMaster.objects.filter(tenant=request.user.tenant)}
+    by_code = {country.country_code.upper(): country for country in countries.values()}
+    grouped = {}
+    for row in payload["results"]:
+        country = countries.get(row.get("country_id")) or by_code.get(str(row.get("warehouse_code", "")).removeprefix("COUNTRY:").upper())
+        row["sku_id"] = row.get("sku")
+        row["spu_id"] = row.get("spu")
+        if country:
+            grouped.setdefault(country.pk, []).append(row)
+    payload["abc_meta"] = {str(pk): decorate_rows(request.user, countries[pk], rows) for pk, rows in grouped.items()}
+    return success_response(payload)
 
 
 @api_view(["GET"])

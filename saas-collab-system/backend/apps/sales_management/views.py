@@ -924,16 +924,21 @@ class DashboardMonthlySalesView(APIView):
             if platform_id not in platforms:
                 raise PermissionDenied("当前账号无权查看该平台的数据。")
             stores = [store for store in stores if store["platform_id"] == platform_id]
-        store_id = request.query_params.get("store_id")
-        if store_id is not None:
-            if (len(request.query_params.getlist("store_id")) != 1 or not store_id.isascii()
-                    or not store_id.isdecimal() or len(store_id) > 19
-                    or not 0 < int(store_id) <= 9223372036854775807):
-                raise ValidationError({"store_id": "店铺 ID 必须为有效的正整数。"})
-            store_id = int(store_id)
-            if not any(store["id"] == store_id for store in stores):
-                raise PermissionDenied("当前账号无权查看该店铺的销售数据。")
-        selected_stores = [store for store in stores if store_id is None or store["id"] == store_id]
+        single = request.query_params.getlist("store_id")
+        multiple = request.query_params.getlist("store_ids")
+        if len(single) > 1 or len(multiple) > 1 or (single and multiple):
+            raise ValidationError({"store_ids": "请提供一组店铺 ID。"})
+        raw_ids = multiple[0].split(",", 250) if multiple else single
+        if len(raw_ids) > 250 or any(
+            not value.isascii() or not value.isdecimal() or len(value) > 19
+            or not 0 < int(value) <= 9223372036854775807 for value in raw_ids
+        ):
+            raise ValidationError({"store_ids": "店铺 ID 必须为有效的正整数，最多选择 250 家。"})
+        store_ids = list(dict.fromkeys(map(int, raw_ids)))
+        selected_ids = set(store_ids)
+        if not selected_ids.issubset({store["id"] for store in stores}):
+            raise PermissionDenied("当前账号无权查看所选店铺的销售数据。")
+        selected_stores = [store for store in stores if not selected_ids or store["id"] in selected_ids]
         scoped_orders = SalesOrder.objects.filter(tenant_id=request.user.tenant_id)
         scoped_orders = filter_sales_queryset(
             request.user, self.read_permission_code, scoped_orders, permission_cache=permission_cache,
@@ -953,11 +958,11 @@ class DashboardMonthlySalesView(APIView):
             end_utc = datetime.combine(through + timedelta(days=1), time.min, tzinfo=zone).astimezone(UTC)
             stores_by_timezone.setdefault(store["timezone"], []).append(store["id"])
             utc_ranges.append((start_utc, end_utc))
-        for zone_name, store_ids in stores_by_timezone.items():
+        for zone_name, zone_store_ids in stores_by_timezone.items():
             zone = ZoneInfo(zone_name)
             start_utc = datetime.combine(previous_day, time.min, tzinfo=zone).astimezone(UTC)
             end_utc = datetime.combine(through + timedelta(days=1), time.min, tzinfo=zone).astimezone(UTC)
-            date_scope |= Q(store_id__in=store_ids, created_at_utc__gte=start_utc, created_at_utc__lt=end_utc)
+            date_scope |= Q(store_id__in=zone_store_ids, created_at_utc__gte=start_utc, created_at_utc__lt=end_utc)
 
         orders = scoped_orders.filter(date_scope).exclude(normalized_status="cancelled")
         item_totals = (
@@ -1047,7 +1052,8 @@ class DashboardMonthlySalesView(APIView):
             "selected_platform_id": platform_id,
             "advertising_status": advertising_status,
             "stores": [{key: store[key] for key in ("id", "code", "name", "platform_store_name")} for store in stores],
-            "selected_store_id": store_id,
+            "selected_store_id": store_ids[0] if len(store_ids) == 1 else None,
+            "selected_store_ids": store_ids,
             "month": month_start.strftime("%Y-%m"),
             "through": through.isoformat(),
             "today": today.isoformat(),
@@ -1404,6 +1410,15 @@ def inventory_workbench_payload(request, permission_code):
                 raise ValueError
         except (TypeError, ValueError):
             raise ValidationError({"warehouse_id": "仓库 ID 必须为正整数。"}) from None
+    focus_limit, focus_offset = 50, 0
+    if sales_report:
+        try:
+            focus_offset = int(request.query_params.get("offset", 0))
+            focus_limit = int(request.query_params.get("limit", 50))
+            if focus_offset < 0 or not 1 <= focus_limit <= 100:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValidationError({"pagination": "每页须为 1–100 条，偏移量须为非负整数。"}) from None
     sku = request.query_params.get("sku")
     if sku is not None:
         sku = sku.strip()
@@ -1418,11 +1433,25 @@ def inventory_workbench_payload(request, permission_code):
         if warehouse_id is not None:
             source = source.filter(warehouse_id=warehouse_id)
         source = filter_sku_codes(source, tenant_id=request.user.tenant_id, code=sku, mode=sku_mode, source_field="source_sku", warehouse_field="warehouse_id", mapping_as_of=mapping_as_of)
-    latest = _inventory_latest(source)
+    current_source = source
+    if settings.INVENTORY_COMPLETE_BATCH_READS_ENABLED:
+        from .inventory_batches import published_inventory_filter
+
+        current_source = source.filter(published_inventory_filter(request.user.tenant_id))
+    latest = _inventory_latest(current_source)
     if sku_mode == "related" and sku:
         latest = latest_identity_inventory(latest, evidence_queryset=source)
     if include_virtual == "false":
         latest = latest.exclude(internal_sku__inventory_type="virtual")
+
+    report_source = latest
+    if sales_report:
+        if warehouse_id is not None:
+            report_source = report_source.filter(warehouse_id=warehouse_id)
+        if sku and not sku_mode:
+            report_source = report_source.filter(
+                Q(source_sku__icontains=sku) | Q(internal_sku__sku_code__icontains=sku)
+            )
 
     out = Q(available_qty__lte=0)
     stock_no_sales = Q(pk__in=[])
@@ -1437,7 +1466,7 @@ def inventory_workbench_payload(request, permission_code):
 
         zero_candidates = latest.filter(available_qty=0, on_hand_qty=0, internal_sku_id__isnull=False)
         if sales_report:
-            zero_candidates = latest.filter(
+            zero_candidates = report_source.filter(
                 Q(on_hand_qty__gt=0) | Q(available_qty__lte=0), internal_sku_id__isnull=False,
             )
         sku_ids_by_country = {}
@@ -1548,11 +1577,6 @@ def inventory_workbench_payload(request, permission_code):
 
     category_counts = {}
     if sales_report:
-        report_source = latest
-        if warehouse_id is not None:
-            report_source = report_source.filter(warehouse_id=warehouse_id)
-        if sku and not sku_mode:
-            report_source = report_source.filter(Q(source_sku__icontains=sku) | Q(internal_sku__sku_code__icontains=sku))
         category_counts = report_source.aggregate(**{key: Count("pk", filter=value) for key, value in categories.items()})
         focus_source = report_source.filter(categories[risk] if risk else stock_no_sales | sales_no_stock)
     elif risk:
@@ -1579,7 +1603,6 @@ def inventory_workbench_payload(request, permission_code):
         focus_total = aggregate["sku_count"] - aggregate["mapped"]
     else:
         focus_total = aggregate["manager"]
-    focus_limit = 50
     focus_rows = [] if summary_only else focus_source.select_related("warehouse", "internal_sku", "internal_sku__spu").annotate(
         risk_rank=Case(
             When(out, then=Value(0)),
@@ -1587,7 +1610,7 @@ def inventory_workbench_payload(request, permission_code):
             When(locked, then=Value(2)),
             default=Value(3),
         )
-    ).order_by("risk_rank", "-snapshot_at_utc", "pk")[:focus_limit]
+    ).order_by("risk_rank", "-snapshot_at_utc", "pk")[focus_offset:focus_offset + focus_limit]
     focus = []
     for row in focus_rows:
         row_risk = "out" if row.available_qty <= 0 else (
@@ -1644,6 +1667,7 @@ def inventory_workbench_payload(request, permission_code):
         "focus": focus,
         "focus_total": focus_total,
         "focus_limit": focus_limit,
+        "focus_offset": focus_offset,
         "focus_risk": risk,
     }
 

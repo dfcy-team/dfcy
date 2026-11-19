@@ -160,3 +160,24 @@ def test_sync_still_fences_rotation_while_a_page_is_running(monkeypatch):
     SyncRun.objects.create(tenant=record.tenant, sync_job=job, status="running")
     assert not automatic_refresh.automatic_refresh_allowed(record)
     assert automatic_refresh.automatic_refresh_allowed(record, ignore_running=True)
+
+
+def test_inventory_rejection_requests_refresh_only_once(monkeypatch):
+    _, authorization = due_warehouse(monkeypatch)
+    job = SyncJob.objects.create(
+        tenant=authorization.tenant, integration_config=authorization.integration_config,
+        warehouse_authorization=authorization, resource_type="inventory_snapshot",
+    )
+    run = SyncRun.objects.create(
+        tenant=authorization.tenant, sync_job=job, run_id="reactive", idempotency_key="reactive",
+    )
+    from apps.integrations.credential_coordination import request_rejected_inventory_refresh
+
+    token = authorization.token_id
+    error = RuntimeError("OAUTH_AUTH_REJECTED")
+    assert request_rejected_inventory_refresh(job, run, error, token)
+    authorization.refresh_from_db()
+    run.refresh_from_db()
+    assert authorization.oauth_expires_at <= timezone.now()
+    assert run.masked_log["rejected_inventory_refresh"]["generation"] != token
+    assert not request_rejected_inventory_refresh(job, run, error, token)

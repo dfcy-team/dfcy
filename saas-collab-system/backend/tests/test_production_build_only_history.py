@@ -293,6 +293,13 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "apps/masterdata/migrations/0021_seed_russia.py",
             "apps/supply_chain/migrations/0056_supply_payment_batches.py",
             # Freight container records postdate this frozen archive.
+            "apps/alerts/migrations/0008_inventory_warning_snapshot.py",
+            "apps/masterdata/migrations/0025_inventory_observation_settings.py",
+            "apps/masterdata/migrations/0026_inventory_abc.py",
+            "apps/products/migrations/0032_productsku_first_sale_date.py",
+            "apps/sales_management/migrations/0011_operating_order_deleted_status.py",
+            "apps/supply_chain/migrations/0079_replenishment_sku_policies.py",
+            "apps/supply_chain/migrations/0080_optional_fee_revision_reason.py",
             "apps/supply_chain/migrations/0057_freightchannel_container_records.py",
             "apps/supply_chain/migrations/0058_shipment_discount_adjustment.py",
             "apps/supply_chain/migrations/0059_fee_revision_quantity_method.py",

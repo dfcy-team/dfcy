@@ -33,3 +33,12 @@ def build_inventory_decision_views():
         if not any(chunk.values()) or monotonic() >= deadline:
             break
     return result
+
+
+@shared_task(soft_time_limit=270, time_limit=300)
+def maintain_inventory_snapshots():
+    tenant_id = settings.INVENTORY_SNAPSHOT_MAINTENANCE_TENANT_ID
+    if tenant_id <= 0:
+        return {'skipped': True, 'reason': 'inventory_snapshot_maintenance_disabled'}
+    from .inventory_snapshot_maintenance import maintain_tenant
+    return {'status': maintain_tenant(tenant_id)}

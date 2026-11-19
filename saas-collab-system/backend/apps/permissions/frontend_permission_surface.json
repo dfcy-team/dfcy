@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "14b2ed3365f7045b3c3f9adb5bcaa90632dbfc869dacda3cd3a6f1081c65fab3",
+  "catalog_hash": "24d64c752cdf24eaedeaa3c4be4e1eb81eadfcc61e1b3452c0f275ffb3a05d1a",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -153,6 +153,10 @@
     {
       "file": "src/components/inventory/CountryInventoryDecisions.vue",
       "permission_code": "sales_management.operating_orders.manage"
+    },
+    {
+      "file": "src/components/inventory/InventoryAbcStatus.vue",
+      "permission_code": "masterdata.settings.manage"
     },
     {
       "file": "src/components/supply-chain/BatchPaymentsV2.vue",
@@ -1351,6 +1355,10 @@
       "permission_code": "sales_management.skus.view"
     },
     {
+      "file": "src/views/inventory/ReplenishmentSuggestionList.vue",
+      "permission_code": "sales_management.operating_orders.manage"
+    },
+    {
       "file": "src/views/lifecycle/ClearanceRequestList.vue",
       "permission_code": "workflow.approvals.submit"
     },
@@ -1851,5 +1859,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "561cff21fd7b2161db2950c9dea838b6508443ec68c8813d764e66a55f3549a6"
+  "surface_hash": "7513c3a849a74ddfd04242c09dc80249adc23ce4b829507e9c292af4c239766e"
 }

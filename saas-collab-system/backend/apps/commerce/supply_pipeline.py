@@ -61,7 +61,20 @@ def open_demand(actor, country, sku_ids, *, exclude_order_id=None, horizon_start
 
 def valid_wms_allocations(rows):
     """A later upstream correction invalidates an over-allocation instead of hiding it."""
-    values = list(rows.select_related('wms_line__source_run__sync_job__integration_config', 'receipt_line__receipt__inbound__batch'))
+    values = list(rows.select_related('wms_line__source_run__sync_job__integration_config', 'receipt_line__receipt__inbound__batch').only(
+        'pk', 'quantity', 'wms_line_id', 'receipt_line_id',
+        'wms_line__id', 'wms_line__source_run_id', 'wms_line__internal_sku_id', 'wms_line__warehouse_id',
+        'wms_line__site_code', 'wms_line__received_quantity',
+        'wms_line__source_run__id', 'wms_line__source_run__status', 'wms_line__source_run__failed_count',
+        'wms_line__source_run__sync_job_id', 'wms_line__source_run__sync_job__id',
+        'wms_line__source_run__sync_job__resource_type', 'wms_line__source_run__sync_job__integration_config_id',
+        'wms_line__source_run__sync_job__integration_config__id',
+        'wms_line__source_run__sync_job__integration_config__platform',
+        'receipt_line__id', 'receipt_line__sku_id', 'receipt_line__receipt_id',
+        'receipt_line__receipt__id', 'receipt_line__receipt__warehouse_id',
+        'receipt_line__receipt__inbound_id', 'receipt_line__receipt__inbound__id',
+        'receipt_line__receipt__inbound__batch_id', 'receipt_line__receipt__inbound__batch__id',
+        'receipt_line__receipt__inbound__batch__country_code_snapshot'))
     wms_ids = [a.wms_line_id for a in values]
     totals = dict(WmsReceiptAllocation.objects.filter(is_active=True, wms_line_id__in=wms_ids)
         .values('wms_line_id').annotate(total=Sum('quantity')).values_list('wms_line_id', 'total'))
@@ -124,7 +137,14 @@ def pipeline_for(actor, country, sku_ids, *, today, target_days, warehouse_ids=N
             value['draft_reserved_demand'] = None
     allocations = list(DispatchAllocation.objects.filter(tenant_id=actor.tenant_id,
         shipment_line__in=shipments, membership__active_guard=True,
-        membership__batch__status='active').select_related('membership__batch', 'shipment_line'))
+        membership__batch__status='active').select_related('membership__batch', 'shipment_line').only(
+            'pk', 'version', 'quantity', 'shipment_line_id', 'membership_id',
+            'shipment_line__id', 'shipment_line__sku_id',
+            'membership__id', 'membership__batch_id', 'membership__batch__id',
+            'membership__batch__version', 'membership__batch__status', 'membership__batch__stage',
+            'membership__batch__expected_warehouse_date', 'membership__batch__updated_at',
+            'membership__batch__planned_warehouse_id', 'membership__batch__number',
+            'membership__batch__departed_at', 'membership__batch__created_at'))
     allocations_by_line = defaultdict(list)
     for allocation in allocations:
         allocations_by_line[allocation.shipment_line_id].append(allocation)
@@ -136,7 +156,13 @@ def pipeline_for(actor, country, sku_ids, *, today, target_days, warehouse_ids=N
             'expected_warehouse_date': batch.expected_warehouse_date, 'updated_at': batch.updated_at})
     receipts = list(InternalStockReceiptLine.objects.filter(tenant_id=actor.tenant_id,
         inbound_line__shipment_line__in=shipments, receipt__inbound__status='confirmed')
-        .select_related('inbound_line', 'receipt__inbound__batch'))
+        .select_related('inbound_line', 'receipt__inbound__batch').only(
+            'pk', 'received_quantity', 'sku_id', 'inbound_line_id', 'receipt_id',
+            'inbound_line__id', 'inbound_line__shipment_line_id',
+            'receipt__id', 'receipt__warehouse_id', 'receipt__inbound_id',
+            'receipt__inbound__id', 'receipt__inbound__batch_id',
+            'receipt__inbound__version', 'receipt__inbound__status',
+            'receipt__inbound__batch__id'))
     receipts_by_line, receipts_by_batch_line = defaultdict(list), defaultdict(int)
     for receipt in receipts:
         line_id = receipt.inbound_line.shipment_line_id
@@ -158,7 +184,12 @@ def pipeline_for(actor, country, sku_ids, *, today, target_days, warehouse_ids=N
         upstream = upstream.filter(warehouse_id__in=warehouse_ids)
     linked = defaultdict(int)
     for allocation in WmsReceiptAllocation.objects.filter(tenant_id=actor.tenant_id, is_active=True,
-            wms_line__in=upstream).select_related('wms_line', 'receipt_line__receipt'):
+            wms_line__in=upstream).select_related('wms_line__source_run', 'receipt_line__receipt').only(
+                'pk', 'quantity', 'wms_line_id', 'receipt_line_id',
+                'wms_line__id', 'wms_line__source_run_id', 'wms_line__internal_sku_id',
+                'wms_line__warehouse_id', 'wms_line__source_run__id', 'wms_line__source_run__status',
+                'wms_line__source_run__failed_count', 'receipt_line__id', 'receipt_line__sku_id',
+                'receipt_line__receipt_id', 'receipt_line__receipt__id', 'receipt_line__receipt__warehouse_id'):
         if (allocation.receipt_line.sku_id == allocation.wms_line.internal_sku_id and
             allocation.receipt_line.receipt.warehouse_id == allocation.wms_line.warehouse_id):
             linked[allocation.wms_line_id] += allocation.quantity
@@ -247,6 +278,8 @@ def pipeline_for(actor, country, sku_ids, *, today, target_days, warehouse_ids=N
                 continue
             if batch.stage == 'arrived_warehouse':
                 item['arrived_unchecked'] += remaining
+                item['eta_rows'].append({'expected_date': today.isoformat(), 'quantity': remaining,
+                    'batch_id': batch.pk, 'batch_number': batch.number, 'stage': batch.stage})
                 continue
             stage = 'transporting' if batch.stage in ['departed', 'arrived_port'] else 'awaiting_dispatch'
             item[stage] += remaining
@@ -284,6 +317,10 @@ def pipeline_for(actor, country, sku_ids, *, today, target_days, warehouse_ids=N
                 item['eta_rows'].append({'expected_date': None, 'quantity': unallocated,
                     'batch_id': None, 'batch_number': '', 'stage': 'awaiting_dispatch'})
     for value in result.values():
+        value['shipment_outstanding'] = [
+            dict(row) for row in value['eta_rows'] if row['quantity'] > 0
+        ]
+        value['shipment_incoming'] = sum(row['quantity'] for row in value['shipment_outstanding'])
         if value['unknown_eta']:
             value['issues'].append('unknown_eta')
         value['issues'] = sorted(set(value['issues']))

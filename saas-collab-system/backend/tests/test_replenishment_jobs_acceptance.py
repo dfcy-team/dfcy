@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from django.utils import timezone
 
-from apps.products.models import ProductSKU
+from apps.products.models import ProductCategory, ProductSKU
 from apps.permissions.models import OrgMembership
 from apps.tenants.models import Department
 from apps.supply_chain import replenishment_jobs as jobs
@@ -106,6 +106,18 @@ def test_full_country_filters_later_chunks_and_reads_never_recalculate(world, co
         assert page['rows'][0]['sku_code'] == 'J020'
         last = api.get(BASE + result['id'] + '/rows/', {'offset': 20}).data['data']
         assert len(last['rows']) == 5 and last['has_more'] is False
+        parent = ProductCategory.objects.create(tenant=actor.tenant, level=1, code='1', name='Parent')
+        child = ProductCategory.objects.create(tenant=actor.tenant, parent=parent, level=2, code='01', name='Child')
+        leaf = ProductCategory.objects.create(tenant=actor.tenant, parent=child, level=3, code='01', name='Leaf')
+        world['spu'].category_node = leaf
+        world['spu'].save(update_fields=['category_node'])
+        ranked = api.get(BASE + result['id'] + '/rows/', {
+            'category_ids': f'{parent.pk},{leaf.pk}', 'sort': 'sku_code', 'direction': 'desc', 'limit': 2,
+        })
+        assert ranked.status_code == 200, ranked.data
+        matching = ProductSKU.objects.filter(tenant=actor.tenant, spu=world['spu'], sku_code__gte='J020')
+        assert ranked.data['data']['count'] == matching.count()
+        assert [row['sku_code'] for row in ranked.data['data']['rows']] == ['J044', 'J043']
         search = api.get(BASE + result['id'] + '/rows/', {'search': 'J044'}).data['data']
         assert search['count'] == 1
         zero = api.get(BASE + result['id'] + '/rows/', {'quantity_filter': 'zero'}).data['data']

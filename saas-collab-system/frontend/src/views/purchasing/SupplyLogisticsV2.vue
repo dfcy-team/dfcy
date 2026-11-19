@@ -224,7 +224,10 @@ async function saveTransportAndFee() {
   const panel = batchFeePanel.value;
   if (panel?.loading) return;
   const saveFees = panel?.editable && panel.dirty;
-  if (saveFees && !panel.validateForm('fee')) return;
+  if (saveFees && !panel.validateForm('fee')) {
+    formError.value = '费用未保存。请查看费用校验提示后重试。';
+    return;
+  }
   savingCombined.value = true;
   formError.value = '';
   try {

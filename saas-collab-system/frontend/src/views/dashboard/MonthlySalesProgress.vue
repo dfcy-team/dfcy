@@ -19,15 +19,12 @@
         </option>
       </select>
       <label for="monthly-sales-store">店铺</label>
-      <select id="monthly-sales-store" :value="selectedStoreId ?? ''" :disabled="!stores.length"
-        @change="changeStore">
-        <option value="">全部可管理店铺</option>
-        <option v-for="store in stores" :key="store.id" :value="String(store.id)">
-          {{ store.name || store.platform_store_name || store.code }}
-          <template v-if="store.name && store.platform_store_name">（{{ store.platform_store_name }}）</template>
-          <template v-if="!store.name && store.code && store.platform_store_name">（{{ store.code }}）</template>
-        </option>
-      </select>
+      <el-select id="monthly-sales-store" class="store-multiselect" aria-label="店铺"
+        :model-value="selectedStoreIds" :disabled="!stores.length" multiple collapse-tags clearable filterable
+        placeholder="全部可管理店铺" @change="changeStore">
+        <el-option v-for="store in stores" :key="store.id" :value="store.id"
+          :label="storeLabel(store)" />
+      </el-select>
       <label for="monthly-sales-month">月份</label>
       <input id="monthly-sales-month" type="month" v-model="selectedMonth" :max="todayMonth" @change="changeMonth">
       <span v-if="!loading && storesLoaded && !stores.length" class="empty-stores">权限范围内暂无可管理店铺</span>
@@ -127,7 +124,7 @@ const data = ref(null);
 const loading = ref(true);
 const error = ref('');
 const selectedCurrency = ref('');
-const selectedStoreId = ref(null);
+const selectedStoreIds = ref([]);
 const selectedPlatformId = ref(null);
 const platforms = ref([]);
 const stores = ref([]);
@@ -153,7 +150,7 @@ async function load() {
   error.value = '';
   data.value = null;
   try {
-    const response = await fetchMonthlySalesProgress(selectedStoreId.value, selectedPlatformId.value, selectedMonth.value);
+    const response = await fetchMonthlySalesProgress(selectedStoreIds.value, selectedPlatformId.value, selectedMonth.value);
     if (sequence !== requestSequence) return;
     if (!response?.success) {
       error.value = response?.http_status === 403
@@ -165,7 +162,7 @@ async function load() {
     stores.value = Array.isArray(response.data?.stores) ? response.data.stores : [];
     platforms.value = Array.isArray(response.data?.platforms) ? response.data.platforms : [];
     storesLoaded.value = true;
-    selectedStoreId.value = response.data?.selected_store_id ?? null;
+    selectedStoreIds.value = response.data?.selected_store_ids ?? (response.data?.selected_store_id == null ? [] : [response.data.selected_store_id]);
     selectedPlatformId.value = response.data?.selected_platform_id ?? null;
     if (!displayCurrencies.value.some((item) => item.currency === selectedCurrency.value)) {
       selectedCurrency.value = displayCurrencies.value[0]?.currency || '';
@@ -177,9 +174,14 @@ async function load() {
   }
 }
 
-function changeStore(event) {
-  const value = event.target.value;
-  selectedStoreId.value = value === '' ? null : Number(value);
+function storeLabel(store) {
+  const name = store.name || store.platform_store_name || store.code;
+  const detail = store.name ? store.platform_store_name : store.platform_store_name && store.code;
+  return detail ? `${name}（${detail}）` : name;
+}
+
+function changeStore(values) {
+  selectedStoreIds.value = values;
   data.value = null;
   selectedCurrency.value = '';
   load();
@@ -195,7 +197,7 @@ function changeMonth() {
 function changePlatform(event) {
   const value = event.target.value;
   selectedPlatformId.value = value === '' ? null : Number(value);
-  selectedStoreId.value = null;
+  selectedStoreIds.value = [];
   stores.value = [];
   storesLoaded.value = false;
   data.value = null;
@@ -207,7 +209,7 @@ onMounted(load);
 watch(() => auth.currentUser, () => {
   data.value = null;
   selectedCurrency.value = '';
-  selectedStoreId.value = null;
+  selectedStoreIds.value = [];
   selectedPlatformId.value = null;
   platforms.value = [];
   stores.value = [];
@@ -285,7 +287,21 @@ const hasComparisonForLatest = computed(() => days.value.at(-1)?.hasComparison |
 .refresh-button, .retry-button { flex-shrink: 0; white-space: nowrap; padding: 6px 12px; color: #1f63b5; border: 1px solid #bfd1e8; border-radius: 6px; background: #fff; cursor: pointer; }
 .store-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 16px; color: #42526a; font-size: 13px; }
 .store-picker select, .store-picker input { max-width: min(420px, 70vw); padding: 6px 30px 6px 9px; color: #26364b; border: 1px solid #cbd7e5; border-radius: 6px; background: #fff; }
-.store-picker select:disabled { color: #65758c; background: #f5f7fa; }
+.store-picker select, .store-picker input {
+  box-sizing: border-box;
+  height: 34px;
+  min-height: 34px;
+  font: inherit;
+}
+.store-picker select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='m1 1 5 5 5-5' fill='none' stroke='%2342526a' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 10px center / 10px;
+}
+.store-picker input[type="month"] { appearance: none; -webkit-appearance: none; padding-right: 9px; }
+.store-multiselect { width: 320px; max-width: min(420px, 70vw); }
+.store-multiselect :deep(.el-select__wrapper) { box-sizing: border-box; height: 34px; min-height: 34px; }
+.store-picker select:disabled { color: #65758c; background-color: #f5f7fa; }
 .empty-stores { color: #77859a; }
 .chart-state { display: flex; align-items: center; justify-content: center; gap: 16px; min-height: 244px; color: #65758c; }
 .chart-toolbar { align-items: center; margin: 24px 0 14px; }

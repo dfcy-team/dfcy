@@ -90,7 +90,12 @@ class SalesNineSnapshotView(APIView):
                 stores = stores.filter(full_store_access)
         sid = request.query_params.get("store_id")
         if sid:
-            stores = stores.filter(pk=_number(sid, 9223372036854775807, "store_id"))
+            selected = sid.split(",")
+            if len(selected) > 100:
+                raise ValidationError({"store_id": "请选择最多 100 个有效店铺。"})
+            stores = stores.filter(pk__in={
+                _number(value, 9223372036854775807, "store_id") for value in selected
+            })
         if request.query_params.get("platform"):
             stores = stores.filter(platform__platform_type=request.query_params["platform"])
         if request.query_params.get("region"):

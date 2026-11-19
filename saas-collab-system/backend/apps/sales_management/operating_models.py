@@ -9,7 +9,7 @@ class OperatingOrder(Record):
     country = models.ForeignKey('masterdata.CountrySiteMaster', on_delete=models.PROTECT)
     country_code_snapshot = models.CharField(max_length=8)
     source_kind = models.CharField(max_length=16, choices=[('new_goods', '新货'), ('cycle', '周期订货'), ('season', '季节订货')])
-    status = models.CharField(max_length=16, choices=[('draft', '草稿'), ('submitted', '已提交'), ('cancelled', '已取消')], default='draft')
+    status = models.CharField(max_length=16, choices=[('draft', '草稿'), ('submitted', '已提交'), ('cancelled', '已取消'), ('deleted', '已删除')], default='draft')
     order_date = models.DateField()
     notes = models.TextField(blank=True)
     campaign = models.CharField(max_length=120, blank=True)

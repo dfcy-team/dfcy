@@ -39,7 +39,7 @@ export const menuItems = [
     children: [
       { menuPermissions: ["menu.sales_management.inventory_workbench.view"], path: '/inventory/workbench', label: '库存工作台', permissions: ['sales_management.view'] },
       { menuPermissions: ['menu.sales_management.warehouse_details.view'], path: '/inventory/warehouse-details', label: '仓库库存明细查询', permissions: ['sales_management.view'] },
-      { menuPermissions: ['menu.sales_management.category_inventory.view'], path: '/inventory/category-query', label: '分类库存查询', permissions: ['sales_management.view'], allPermissions: ['sales_management.skus.view'] },
+      { menuPermissions: ['menu.sales_management.category_inventory.view'], path: '/inventory/category-query', label: '分类库存查询', sidebarHidden: true, secondaryTo: '/inventory/warehouse-details', permissions: ['sales_management.view'], allPermissions: ['sales_management.skus.view'] },
       { menuPermissions: ["menu.alerts.decision_inventory_alerts.view"], path: '/decision/inventory/alerts', label: '库存预警', permissions: ['alerts.view'] },
       { menuPermissions: ["menu.replenishment.decision_inventory_replenishment.view"], path: '/decision/inventory/replenishment', label: '补货建议', permissions: ['replenishment.view'] }
     ]
@@ -725,6 +725,10 @@ function isModuleVisible(user, code) {
 }
 
 export function canAccessMenuItem(user, item) {
+  if (item.path === '/inventory/warehouse-details' && canAccessPath(user, '/inventory/category-query')) {
+    const categoryEntry = findMenuEntry('/inventory/category-query');
+    if (canAccessCapability(user, categoryEntry, { menuEntry: true })) return true;
+  }
   return canAccessCapability(user, item, { menuEntry: true });
 }
 
@@ -783,8 +787,15 @@ export function flattenMenuItems(items) {
   return items.flatMap((item) => (item.children ? flattenMenuItems(item.children) : [item]));
 }
 
+export function canAccessWarehouseExceptions(user) {
+  return canAccessCapability(user, findRouteCapability('/inventory/warehouse-details'));
+}
+
 export function canAccessPath(user, path) {
   const moduleCode = moduleCodeForPath(path);
   if (moduleCode && !isModuleVisible(user, moduleCode)) return false;
+  if (path === '/inventory/warehouse-details') {
+    return canAccessWarehouseExceptions(user) || canAccessPath(user, '/inventory/category-query');
+  }
   return canAccessCapability(user, findRouteCapability(path));
 }

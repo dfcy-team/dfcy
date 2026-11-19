@@ -1,8 +1,10 @@
 from collections import defaultdict
+from hashlib import sha256
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from django.core.cache import cache
 from django.db.models import Count, Max, Q, Sum
 from django.utils import timezone
 
@@ -30,6 +32,28 @@ def sales_windows(actor, country, sku_ids, windows, *, end_date=None,
     if platform_type:
         stores = stores.filter(platform__platform_type__iexact=platform_type, platform__status='active')
     stores = list(stores)
+    cache_key = None
+    if inventory_only and tuple(windows) == (30,):
+        now = timezone.now()
+        store_scope = []
+        for store in stores:
+            try:
+                local_date = now.astimezone(ZoneInfo(store.timezone)).date().isoformat()
+            except (ZoneInfoNotFoundError, ValueError, TypeError):
+                local_date = None
+            store_scope.append((store.pk, store.timezone, local_date))
+        identity = (
+            actor.tenant_id, actor.pk, country.country_code.upper(), platform_type,
+            end_date, sorted(store_scope), sorted(requested_skus.items()),
+        )
+        digest = sha256(repr(identity).encode("utf-8")).hexdigest()
+        cache_key = f"warehouse-inventory-sales:v1:{digest}"
+        try:
+            cached = cache.get(cache_key)
+        except Exception:
+            cached = None
+        if cached is not None:
+            return {30: cached}
     aggregate = {days: {
         'days': days, 'start_date': None, 'end_date': None,
         'units_by_sku': defaultdict(int), 'direct_sales_by_sku': defaultdict(int),
@@ -190,4 +214,12 @@ def sales_windows(actor, country, sku_ids, windows, *, end_date=None,
         if not stores:
             value['coverage_complete'] = False
             value['issues'].append('no_authorized_sales_store')
+    if cache_key:
+        value = aggregate[30]
+        result = {key: dict(item) if isinstance(item, defaultdict) else item
+                  for key, item in value.items()}
+        try:
+            cache.set(cache_key, result, timeout=60)
+        except Exception:
+            pass
     return aggregate

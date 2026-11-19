@@ -22,3 +22,4 @@ export function createIdempotencyKey() {
 }
 
 export const fetchOperatingReferences = (data) => requestApi({ method: 'post', url: `${BASE}operating-orders/references/`, data });
+export const deleteOperatingOrder = (id, data, key) => write('post', url(`${encodeURIComponent(id)}/delete/`), data, key);

@@ -53,7 +53,7 @@ CAPABILITY_REGISTRY = {
     "jifeng_wms": PlatformCapability(
         api_types=("inventory",),
         authorization="warehouse_token",
-        resources={"inventory_snapshot": ("live_readonly",), "warehouse_order_lookup": ("live_readonly",)},
+        resources={"inventory_snapshot": ("live_readonly",), "warehouse_order_lookup": ("live_readonly",), "inbound": ("live_readonly",)},
     ),
     "mock": PlatformCapability(
         api_types=("marketplace",),

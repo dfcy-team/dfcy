@@ -3,7 +3,11 @@ from django.urls import path
 from . import views
 
 
+from . import warning_api
+
 urlpatterns = [
+    path("inventory/warnings/", warning_api.warning_list, name="inventory-warning-snapshot"),
+    path("inventory/warnings/rebuild/", warning_api.warning_rebuild, name="inventory-warning-rebuild"),
     path("inventory/", views.inventory_alert_list, name="inventory-alert-list"),
     path("inventory/assignees/", views.inventory_alert_assignees, name="inventory-alert-assignees"),
     path("inventory/evaluate-mock/", views.inventory_alert_evaluate_mock, name="inventory-alert-evaluate-mock"),

@@ -62,6 +62,60 @@ describe('operating suggestion component',()=>{
     mocks.user.active_membership_id=2;await flushPromises();finish(ok(validPreview()));await flushPromises();
     expect(w.vm.preview).toBeNull();expect(w.vm.form.lines).toHaveLength(0);expect(w.vm.drawer).toBe(false);w.unmount();
   });
+  it('confirms a draft deletion and sends the displayed version with an idempotency key', async () => {
+    const draft = { id: 8, number: 'OP-8', status: 'draft', version: 3, country_id: 3, source_kind: 'new_goods', lines: [] };
+    mocks.confirm.mockResolvedValueOnce();
+    mocks.requestApi.mockImplementation(async request => {
+      if (request.url.endsWith('/operating-orders/8/')) return ok(draft);
+      if (request.url.endsWith('/8/delete/')) return ok({ deleted: true });
+      return ok([], { count: 0 });
+    });
+    const page = createOperatingPage();
+    await flushPromises();
+    await page.vm.openDetail(draft);
+    await page.vm.removeDraft(page.vm.selected);
+    const post = mocks.requestApi.mock.calls.map(([request]) => request).find(request => request.method === 'post');
+    expect(post).toMatchObject({ url: '/api/internal/commerce/operating-orders/8/delete/', data: { expected_version: 3 } });
+    expect(post.headers['Idempotency-Key']).toBeTruthy();
+    expect(page.vm.drawer).toBe(false);
+    page.unmount();
+  });
+  it('saves daily reference selections by snapshot ID without requesting a preview', async () => {
+    const jobId = '605875f5-0e2a-4ed1-ae6c-c9d46bcac76f';
+    const page = createOperatingPage();
+    await flushPromises();
+    page.vm.openNew();
+    page.vm.form.country_id = 3;
+    await page.vm.applyReference({
+      parameters: { country_id: 3, source_kind: 'cycle', job_id: 'daily:' + jobId },
+      rows: [{ sku_id: 4, sku: 'SKU-A', suggested_quantity: 7 }],
+    });
+    await page.vm.save();
+    const requests = mocks.requestApi.mock.calls.map(([request]) => request);
+    expect(requests.some(request => request.url.endsWith('/preview/'))).toBe(false);
+    expect(requests.find(request => request.method === 'post')).toMatchObject({
+      url: '/api/internal/commerce/operating-orders/',
+      data: { snapshot_job_id: jobId, lines: [{ sku_id: 4, quantity: 7 }] },
+    });
+    page.unmount();
+  });
+  it('submits the imported preview token without making a new preview request', async () => {
+    stageCockpitDraft(1, {
+      preview_token: 'test-placeholder-preview',
+      parameters: { country_id: 3, source_kind: 'cycle', strategy_id: 9 },
+      rows: [{ sku_id: 4, sku: 'SKU-A', suggested_quantity: 7 }],
+    });
+    const page = createOperatingPage();
+    await flushPromises();
+    await page.vm.save();
+    const requests = mocks.requestApi.mock.calls.map(([request]) => request);
+    expect(requests.some(request => request.url.endsWith('/preview/'))).toBe(false);
+    expect(requests.find(request => request.method === 'post')).toMatchObject({
+      url: '/api/internal/commerce/operating-orders/',
+      data: { preview_token: 'test-placeholder-preview', lines: [{ sku_id: 4, quantity: 7 }] },
+    });
+    page.unmount();
+  });
   it('receives cockpit choices and recalculates without saving an order',async()=>{
     stageCockpitDraft(1,{parameters:{country_id:3,source_kind:'cycle',strategy_id:9,algorithm_version:'weighted_days_v1',sales_end:'2026-10-10',activity_factor:1},rows:[{sku_id:4,sku:'SKU-A',legacy_sku_code:'OLD-A',suggested_quantity:7}]});
     const w=createOperatingPage();await flushPromises();

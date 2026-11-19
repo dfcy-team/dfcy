@@ -102,7 +102,7 @@ def daily_key(actor, country_id, strategy_id, strategy_version, *, analysis_mode
     policy, private = _effective_read_policy(actor, descriptor, country_id)
     full_data = all_scopes or (all(policy['metrics'].get(code)=='ALL' for code in
         (country_decisions.INVENTORY,country_decisions.SALES)) and policy['pipeline_allowed'] and policy['cost_link'])
-    identity = {"tenant": actor.tenant_id, "country": country_id, "strategy": strategy_id,
+    identity = {"business_algorithm": "country-supply-v2","tenant": actor.tenant_id, "country": country_id, "strategy": strategy_id,
                 "strategy_version": strategy_version,
                 "permissions": 'full-country-metrics-v1' if full_data else {'read_policy_v2':policy}}
     if analysis_mode == "platform":
@@ -278,8 +278,7 @@ def generate_daily_replenishments(*, now=None, limit=MAX_JOBS_PER_RUN, business_
                         if not strategy:
                             skipped += 1
                             continue
-                        platform_options = country_decisions.sales_platform_options(user, country)
-                        dimensions = [("country", "")] + [("platform", row["platform_type"]) for row in platform_options]
+                        dimensions = [("country", "")]
                         for analysis_mode, platform_type in dimensions:
                             key = daily_key(user, country.pk, strategy.pk, strategy.version,
                                             analysis_mode=analysis_mode, platform_type=platform_type, _scope_state=scope_state)
@@ -343,8 +342,8 @@ def _authorized_daily_target(actor, country_id, strategy_id=None, *, analysis_mo
     strategy = strategies.filter(pk=strategy_id).first() if strategy_id else strategies.order_by("-version", "pk").first()
     if not strategy:
         raise NotFound("国家没有可用的补货策略。")
-    if analysis_mode not in {"country", "platform"}:
-        raise ValidationError({"analysis_mode": "每日建议仅支持国家或平台维度。"})
+    if analysis_mode != "country":
+        raise ValidationError({"analysis_mode": "补货建议仅支持国家汇总。"})
     normalized_platform = ""
     if analysis_mode == "platform":
         selected = str(platform_type or "").strip()
@@ -446,7 +445,7 @@ class DailyRows(jobs.ReplenishmentJobRows):
     def get_job(self, request, pk):
         return daily_job_for_actor(request.user, pk)
 
-    default_quantity_filter = "observed"
+    default_quantity_filter = "action"
 
     def row_queryset(self, request, job):
         # Intersect the original candidates with the requesting user's current permissions.

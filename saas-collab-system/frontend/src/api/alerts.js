@@ -22,3 +22,5 @@ export const evaluateInventoryAlertsMock = (payload) => requestApi({ method: 'po
 export const assignInventoryAlert = (id, payload) => requestApi({ method: 'post', url: `/api/internal/alerts/inventory/${id}/assign/`, data: payload });
 export const silenceInventoryAlert = (id, payload) => requestApi({ method: 'post', url: `/api/internal/alerts/inventory/${id}/silence/`, data: payload });
 export const closeInventoryAlert = (id, payload) => requestApi({ method: 'post', url: `/api/internal/alerts/inventory/${id}/close/`, data: payload });
+
+export const fetchInventoryWarnings = (params = {}, signal) => requestApi({ method: 'get', url: '/api/internal/alerts/inventory/warnings/', params, signal });

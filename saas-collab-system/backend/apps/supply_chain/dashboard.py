@@ -322,20 +322,56 @@ def _with_fee_activity(query, kind):
     )
 
 
+def _rollup_parties(kind, queryset):
+    # Only fetch base amounts once per document. In MySQL, aggregating the
+    # derived ORM annotations in SQL inlines the same correlated subqueries.
+    values = queryset.order_by().values_list(
+        '_party_type', '_party_id', '_party_name', 'due', 'opening_amount',
+        'paid_amount', 'converted_amount', 'applied_amount',
+    )
+    groups = {}
+    with localcontext() as ctx:
+        ctx.prec = 40
+        for party_type, party_id, name, due, opening, paid, converted, applied in values.iterator(chunk_size=500):
+            key = (party_type, party_id, name)
+            row = groups.get(key)
+            if row is None:
+                row = dict.fromkeys((
+                    'amount', 'opening', 'paid', 'converted', 'applied', 'recorded',
+                    'over_recorded', 'available_prepayment', 'known_direct_paid', 'known_opening',
+                ), Decimal(0))
+                row.update(_party_type=party_type, _party_id=party_id, _party_name=name,
+                           documents=0, unknown_documents=0, unsettled=None)
+                groups[key] = row
+            recorded = paid if kind == 'deposit' else paid + applied
+            row['documents'] += 1
+            row['opening'] += opening
+            row['paid'] += paid
+            row['converted'] += converted
+            row['applied'] += applied
+            row['recorded'] += recorded
+            if kind == 'deposit':
+                row['available_prepayment'] += max(paid - opening - applied, Decimal(0))
+            if due is None:
+                row['unknown_documents'] += 1
+                continue
+            row['amount'] += due
+            row['unsettled'] = (row['unsettled'] or Decimal(0)) + max(due - recorded, Decimal(0))
+            row['over_recorded'] += max(recorded - due, Decimal(0))
+            if kind == 'supplier':
+                row['known_direct_paid'] += paid - opening
+                row['known_opening'] += opening
+    return sorted(groups.values(), key=lambda row: (
+        row['unsettled'] is None, (row['unsettled'] or Decimal(0)).copy_negate(),
+        row['_party_id'] is not None, row['_party_id'] or 0, row['_party_type'], row['_party_name'] or '',
+    ))
+
+
 def costs_data(actor, scoped):
     groups = {}
     grouped_rows = {}
     for kind in ('supplier', 'carrier', 'domestic', 'deposit', 'clearance'):
-        query = _with_fee_activity(_money_targets(kind, scoped), kind)
-        rows = list(query.order_by().values('_party_type', '_party_id', '_party_name').annotate(
-            documents=Count('pk'), amount=Sum('due'), opening=Sum('opening_amount'), paid=Sum('paid_amount'),
-            converted=Sum('converted_amount'),
-            applied=Sum('applied_amount'), recorded=Sum('recorded'), unsettled=Sum('unsettled'),
-            over_recorded=Sum('over_recorded'), available_prepayment=Sum('available_prepayment'),
-            unknown_documents=Count('pk', filter=Q(due__isnull=True)),
-            **({'known_direct_paid': Sum(F('paid_amount')-F('opening_amount'), filter=Q(due__isnull=False), output_field=MONEY),
-                'known_opening': Sum('opening_amount', filter=Q(due__isnull=False))} if kind == 'supplier' else {})
-        ).order_by('-unsettled', '_party_id'))
+        rows = _rollup_parties(kind, _with_fee_activity(_money_targets(kind, scoped), kind))
         grouped_rows[kind] = rows
         data = {'documents': sum(r['documents'] for r in rows),
             'unknown_documents': sum(r['unknown_documents'] for r in rows)}

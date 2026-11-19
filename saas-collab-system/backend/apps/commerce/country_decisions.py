@@ -258,6 +258,15 @@ def sales_windows(actor, country, sku_ids, windows, *, end_date=None, platform_t
 
 
 def _country_inventory_source(actor, country, now):
+    from django.conf import settings
+
+    if settings.INVENTORY_COMPLETE_BATCH_READS_ENABLED:
+        from apps.sales_management.inventory_batches import published_inventory_filter
+
+        return InventorySnapshot.objects.filter(
+            published_inventory_filter(actor.tenant_id, country_code=country.country_code, as_of=now),
+            tenant_id=actor.tenant_id, snapshot_at_utc__lte=now,
+        )
     # Resolve stable dimension membership without joining each historical fact.
     # Preserve the original cross-table predicates exactly; no status filter.
     run_ids = list(SyncRun.objects.filter(
@@ -288,9 +297,25 @@ def sales_platform_options(actor, country):
             for platform_type, platform_names in sorted(names.items())]
 
 
+def inventory_context_for(actor, country):
+    """One scoped immutable inventory read per background country calculation."""
+    from apps.sales_management.inventory_queries import latest_country_inventory
+    require_metrics(actor)
+    raw=latest_country_inventory(_country_inventory_source(actor,country,timezone.now()))
+    scoped=filter_inventory_queryset(actor,INVENTORY,raw)
+    by_sku=defaultdict(list)
+    for record in scoped.select_related('source_run').only('id','tenant_id','internal_sku_id','warehouse_id','source_sku','seller_sku','available_qty','on_hand_qty','in_transit_qty','provided_quantity_fields','snapshot_at_utc','source_run_id','source_run__id','source_run__status','source_run__failed_count').iterator(chunk_size=1000):
+        by_sku[record.internal_sku_id].append(record)
+    warehouses=WarehouseMaster.objects.filter(tenant_id=actor.tenant_id,country_code__iexact=country.country_code,status='active')
+    connected=set(SyncJob.objects.filter(tenant_id=actor.tenant_id,resource_type='inventory_snapshot',integration_config__platform='jifeng_wms',warehouse_authorization__warehouse__in=warehouses).values_list('warehouse_authorization__warehouse_id',flat=True))
+    facts=list(raw.order_by().values('warehouse_id').annotate(unmapped_count=Count('pk',filter=Q(internal_sku__isnull=True))))
+    connected.update(row['warehouse_id'] for row in facts)
+    return {'identity':(actor.tenant_id,actor.pk,country.pk),'by_sku':by_sku,'warehouses':list(warehouses.filter(pk__in=connected)),'unmapped_warehouses':{row['warehouse_id'] for row in facts if row['unmapped_count']}}
+
+
 def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mapped_only=False,
                   end_date=None, ratio=None, include_in_transit=True, windows=(7, 15, 30), exclude_order_id=None,
-                  demand_horizon_start=None, demand_horizon_end=None, platform_type=None):
+                  demand_horizon_start=None, demand_horizon_end=None, platform_type=None, sales_observations=None, pipeline_observations=None, inventory_context=None, compact_product_details=False):
     # A fresh cache per calculation, never stored on the user or reused by a
     # later request/batch. Revocations remain visible on the very next call.
     permission_cache = {}
@@ -303,27 +328,34 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mappe
     from .inventory_listing import linked_sku_ids, apply_listing_observation
     linked_ids = linked_sku_ids(actor.tenant_id, country.country_code, ids)
     window_sizes = tuple(sorted(set(windows) | {window_days}))
-    sales = sales_windows(actor, country, ids, window_sizes, end_date=end_date, permission_cache=permission_cache, platform_type=platform_type)
-    # Rank source identities before filtering mappings/status. A failed or unmapped newest row must not expose an older valid one.
-    raw = latest_country_inventory(_country_inventory_source(actor, country, now))
-    scoped = filter_inventory_queryset(actor, INVENTORY, raw, permission_cache=permission_cache)
-    stock = list(scoped.filter(internal_sku_id__in=ids).select_related('source_run', 'warehouse'))
+    sales = sales_observations if sales_observations is not None else sales_windows(actor, country, ids, window_sizes, end_date=end_date, permission_cache=permission_cache, platform_type=platform_type)
+    if inventory_context is not None:
+        if inventory_context['identity'] != (actor.tenant_id, actor.pk, country.pk):
+            raise PermissionDenied('库存上下文不匹配。')
+        stock=[record for sku_id in ids for record in inventory_context['by_sku'].get(sku_id,())]
+        warehouses=inventory_context['warehouses']
+        unmapped_warehouses=inventory_context['unmapped_warehouses']
+    else:
+        # Rank source identities before filtering mappings/status. A failed or unmapped newest row must not expose an older valid one.
+        raw = latest_country_inventory(_country_inventory_source(actor, country, now))
+        scoped = filter_inventory_queryset(actor, INVENTORY, raw, permission_cache=permission_cache)
+        stock = list(scoped.filter(internal_sku_id__in=ids).select_related('source_run', 'warehouse'))
+        country_warehouses = WarehouseMaster.objects.filter(tenant_id=actor.tenant_id,
+            country_code__iexact=country.country_code, status='active')
+        # Only connected or observed warehouses belong to this API stock total. Planned archives without an API connection do not invent stock.
+        connected = set(SyncJob.objects.filter(tenant_id=actor.tenant_id, resource_type='inventory_snapshot',
+            integration_config__platform='jifeng_wms', warehouse_authorization__warehouse__in=country_warehouses)
+            .values_list('warehouse_authorization__warehouse_id', flat=True))
+        # Both facts describe the same latest identity set; rank once, without
+        # pushing the unmapped predicate into source selection.
+        warehouse_facts = list(raw.order_by().values('warehouse_id').annotate(
+            unmapped_count=Count('pk', filter=Q(internal_sku__isnull=True))))
+        connected.update(row['warehouse_id'] for row in warehouse_facts)
+        warehouses = list(country_warehouses.filter(pk__in=connected))
+        unmapped_warehouses = {row['warehouse_id'] for row in warehouse_facts if row['unmapped_count']}
     observations = defaultdict(list)
     for record in stock:
         observations[(record.internal_sku_id, record.warehouse_id)].append(record)
-    country_warehouses = WarehouseMaster.objects.filter(tenant_id=actor.tenant_id,
-        country_code__iexact=country.country_code, status='active')
-    # Only connected or observed warehouses belong to this API stock total. Planned archives without an API connection do not invent stock.
-    connected = set(SyncJob.objects.filter(tenant_id=actor.tenant_id, resource_type='inventory_snapshot',
-        integration_config__platform='jifeng_wms', warehouse_authorization__warehouse__in=country_warehouses)
-        .values_list('warehouse_authorization__warehouse_id', flat=True))
-    # Both facts describe the same latest identity set; rank once, without
-    # pushing the unmapped predicate into source selection.
-    warehouse_facts = list(raw.order_by().values('warehouse_id').annotate(
-        unmapped_count=Count('pk', filter=Q(internal_sku__isnull=True))))
-    connected.update(row['warehouse_id'] for row in warehouse_facts)
-    warehouses = list(country_warehouses.filter(pk__in=connected))
-    unmapped_warehouses = {row['warehouse_id'] for row in warehouse_facts if row['unmapped_count']}
     # Authorization is resolved per request, never cached across actors/requests.
     configs = _custom_scope_configs(actor, INVENTORY, permission_cache, resource_code='commerce.inventory')
     branches = None if configs is None else [(config, _config_countries(actor, config)) for config in configs]
@@ -334,6 +366,12 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mappe
         groups[None if scope is None else tuple(sorted(scope))].append(sku.pk)
     pipelines = {}
     for scope, group_ids in groups.items():
+        if scope is None and pipeline_observations is not None:
+            pipelines.update({sku_id: pipeline_observations[sku_id] for sku_id in group_ids
+                              if sku_id in pipeline_observations})
+            group_ids = [sku_id for sku_id in group_ids if sku_id not in pipelines]
+            if not group_ids:
+                continue
         pipelines.update(pipeline_for(actor, country, group_ids, today=business_date(), target_days=target_days,
                                       warehouse_ids=None if scope is None else set(scope), exclude_order_id=exclude_order_id,
                                       horizon_start=demand_horizon_start, horizon_end=demand_horizon_end,
@@ -436,7 +474,11 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mappe
             quantity = suggestion_quantity(units, ratio, available,
                 pipe['effective_incoming'] if include_in_transit else 0, pipe['open_operating_demand'],
                 target_days=target_days if ratio is None else None, window_days=window_days)
-        details = product_details(sku)
+        if compact_product_details:
+            from apps.supply_chain.supplier_products import safe_image_url
+            details={'image_url':safe_image_url(sku.image_url,sku.tenant_id)}
+        else:
+            details = product_details(sku)
         blocking = []
         if not complete:
             blocking.extend(code for code in issues if code in {

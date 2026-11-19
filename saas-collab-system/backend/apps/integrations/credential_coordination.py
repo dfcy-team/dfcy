@@ -68,3 +68,35 @@ def defer_queued_for_refresh(job, *, existing, key, dispatch=None, history_segme
         if dispatch:
             SyncScheduleDispatch.objects.filter(pk=dispatch.pk).update(status="queued", sync_run=run, reason=WAIT_MESSAGE)
         return run
+
+def request_rejected_inventory_refresh(job, run, error, expected_token):
+    """Fence one reactive warehouse refresh per run and preserve its cursor."""
+    from hashlib import sha256
+    from .models import WarehouseAuthorization
+
+    if (job.resource_type != "inventory_snapshot" or not job.warehouse_authorization_id
+            or "OAUTH_AUTH_REJECTED" not in str(error) or not expected_token
+            or (run.masked_log or {}).get("rejected_inventory_refresh")):
+        return False
+    with transaction.atomic():
+        record = WarehouseAuthorization.objects.select_for_update().get(
+            pk=job.warehouse_authorization_id, tenant_id=job.tenant_id)
+        if record.token_id != expected_token:
+            run.masked_log = {**(run.masked_log or {}), "rejected_inventory_refresh": {
+                "requested_at": timezone.now().isoformat(), "rotated_elsewhere": True,
+            }}
+            run.save(update_fields=["masked_log"])
+            return True
+        original_expiry = record.oauth_expires_at
+        record.oauth_expires_at = timezone.now()
+        if not automatic_refresh_allowed(record, ignore_running=True):
+            return False
+        WarehouseAuthorization.objects.filter(pk=record.pk, token_id=expected_token).update(
+            oauth_expires_at=record.oauth_expires_at)
+        run.masked_log = {**(run.masked_log or {}), "rejected_inventory_refresh": {
+            "requested_at": timezone.now().isoformat(),
+            "generation": sha256(expected_token.encode()).hexdigest(),
+            "previous_expiry": original_expiry.isoformat() if original_expiry else None,
+        }}
+        run.save(update_fields=["masked_log"])
+    return True

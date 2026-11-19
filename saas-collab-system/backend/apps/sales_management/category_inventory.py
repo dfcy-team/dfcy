@@ -19,14 +19,24 @@ from .scopes import filter_inventory_queryset, filter_sales_queryset
 
 
 class CategoryQuery(serializers.Serializer):
+    abc_grade = serializers.ChoiceField(choices=['', 'A', 'B', 'C', 'new', 'no_sales', 'unavailable'], default='')
+    stocked_only = serializers.BooleanField(default=False)
     country_id = serializers.IntegerField(min_value=1, required=False)
     category_id = serializers.IntegerField(min_value=0, required=False)
+    category_ids = serializers.CharField(required=False, max_length=2000)
+    warehouse_id = serializers.IntegerField(min_value=1, required=False)
     spu_id = serializers.IntegerField(min_value=1, required=False)
     sku_id = serializers.IntegerField(min_value=1, required=False)
     level = serializers.ChoiceField(choices=['category', 'spu', 'sku', 'stores', 'warehouses'], default='category')
     days = serializers.ChoiceField(choices=[7, 15, 30], default=30)
     search = serializers.CharField(max_length=160, required=False, allow_blank=True, default='')
     offset = serializers.IntegerField(min_value=0, default=0)
+
+    def validate_category_ids(self, raw):
+        parts = raw.split(',')
+        if len(parts) > 100 or any(not part.isascii() or not part.isdecimal() or len(part) > 19 for part in parts):
+            raise serializers.ValidationError('请选择最多 100 个有效类目。')
+        return {int(part) for part in parts}
 
 
 def _load_stock_facts(actor, country, permissions):
@@ -105,6 +115,15 @@ class CategoryInventory(CountryDecisionAPI):
         country = domain.country_for(actor, q['country_id'], permissions)
         prefix = f'category-stock:v2:{actor.tenant_id}:{actor.pk}:{country.pk}:{domain.permission_signature(actor, permissions)}'
         snapshots = cache.get_or_set(prefix, lambda: stock_facts(actor, country, permissions), 60)
+        warehouses = sorted(
+            {row['warehouse_id']: row['warehouse__name'] for row in snapshots}.items(),
+            key=lambda item: (item[1], item[0]),
+        )
+        warehouse_id = q.get('warehouse_id')
+        if warehouse_id is not None:
+            if not any(pk == warehouse_id for pk, _ in warehouses):
+                raise NotFound('仓库不存在。')
+            snapshots = [row for row in snapshots if row['warehouse_id'] == warehouse_id]
         stock = defaultdict(int)
         for row in snapshots:
             if row['available_qty'] is not None:
@@ -116,26 +135,32 @@ class CategoryInventory(CountryDecisionAPI):
             term = q['search']
             catalog = catalog.filter(Q(sku_code__icontains=term) | Q(legacy_sku_code__icontains=term)
                 | Q(product_name__icontains=term) | Q(spu__product_name__icontains=term)
+                | Q(spu__spu_code__icontains=term) | Q(spu__legacy_spu_code__icontains=term)
                 | Q(specification__icontains=term))
         categories = {row['id']: row for row in ProductCategory.objects.filter(
             tenant_id=actor.tenant_id).values('id', 'parent_id', 'name')}
         category_id = q.get('category_id')
-        if category_id and category_id not in categories:
+        selected = set(q.get('category_ids', []))
+        if (category_id and category_id not in categories) or not selected <= categories.keys():
             raise NotFound('类目不存在。')
-        descendants = {category_id}
+        descendants = {category_id} if category_id is not None else selected
         for _ in range(3):
             descendants.update(pk for pk, node in categories.items() if node['parent_id'] in descendants and node['parent_id'])
         if category_id == 0:
             catalog = catalog.filter(spu__category_node__isnull=True)
-        elif category_id:
+        elif descendants:
             catalog = catalog.filter(spu__category_node_id__in=descendants)
         if 'spu_id' in q:
             catalog = catalog.filter(spu_id=q['spu_id'])
         if 'sku_id' in q:
             catalog = catalog.filter(pk=q['sku_id'])
+        from .abc_access import decorate_rows, filter_skus
+        if q['stocked_only']:
+            catalog = catalog.filter(pk__in=[sku_id for sku_id, quantity in stock.items() if quantity > 0])
+        catalog = filter_skus(actor, country, catalog, q['abc_grade'], grouped=q['level'] == 'spu')
         products = list(catalog.order_by('sku_code', 'pk').values(
-            'id', 'sku_code', 'legacy_sku_code', 'specification', 'product_name',
-            'spu_id', 'spu__spu_code', 'spu__product_name', 'spu__category_node_id'))
+            'id', 'sku_code', 'legacy_sku_code', 'specification', 'product_name', 'image_url',
+            'spu_id', 'spu__spu_code', 'spu__legacy_spu_code', 'spu__product_name', 'spu__category_node_id'))
         ids = {row['id'] for row in products}
         level = q['level']
         summary = {}
@@ -196,16 +221,30 @@ class CategoryInventory(CountryDecisionAPI):
                     values.update(has_children=has_children)
                 elif level == 'spu':
                     name = first['spu__product_name']
-                    values.update(code=first['spu__spu_code'])
+                    values.update(code=first['spu__spu_code'], legacy=first['spu__legacy_spu_code'])
                 else:
                     name = first['product_name'] or first['spu__product_name']
                     values.update(code=first['sku_code'], legacy=first['legacy_sku_code'], specification=first['specification'])
+                if level in {'spu', 'sku'}:
+                    pictured = next((item for item in items if item['image_url']), None)
+                    if pictured:
+                        values['image_preview_url'] = (
+                            f'/api/internal/commerce/inventory/country-decisions/{country.pk}/skus/{pictured["id"]}/image/'
+                        )
                 results.append({'id': key, 'name': name, 'sku_count': len(items),
                                 'spu_count': len({row['spu_id'] for row in items}), **values})
             results.sort(key=lambda row: (row['id'] == 0, row['name'], row['id']))
         offset = q['offset']
+        page = results[offset:offset + 20]
+        abc_meta = {}
+        if level in {'sku', 'spu'}:
+            if level == 'spu':
+                for row in page:
+                    row['spu_id'] = row['id']
+            abc_meta = decorate_rows(actor, country, page)
         return Response({'data': {'countries': countries, 'summary': summary, 'count': len(results),
-                                  'results': results[offset:offset + 20]}})
+                                  'abc_meta': abc_meta, 'results': page, 'categories': list(categories.values()),
+                                  'warehouses': [{'id': pk, 'name': name} for pk, name in warehouses]}})
 
 
 def operations_summary(actor, country, skus, days, permissions):

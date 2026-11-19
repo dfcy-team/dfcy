@@ -108,6 +108,14 @@
           <el-table-column label="快照时间" min-width="175"><template #default="{ row }">{{ formatTime(row.snapshot_at_utc) }}</template></el-table-column>
           <el-table-column label="操作" min-width="100"><template #default="{ row }"><el-button link type="primary" @click="openDetail(row)">查看明细</el-button></template></el-table-column>
         </el-table>
+        <el-pagination
+          v-if="warehouseDetails && showFocus && data.focus_total > focusPageSize"
+          layout="prev, pager, next"
+          :current-page="focusPage"
+          :page-size="focusPageSize"
+          :total="data.focus_total"
+          @current-change="loadFocusPage"
+        />
       </section>
     </template>
     <el-drawer v-model="detailOpen" title="库存快照明细" size="min(440px, 100%)">
@@ -153,6 +161,8 @@ const appliedIncludeVirtual = ref(false);
 const selectedWarehouse = ref('');
 const selectedRisk = ref('');
 const focusRequested = ref(false);
+const focusPageSize = 50;
+const focusPage = ref(1);
 const showFocus = computed(() => !props.warehouseDetails || focusRequested.value);
 const hasQueryCondition = computed(() => Boolean(selectedWarehouse.value || skuSearch.value.trim()));
 const skuSearch = ref('');
@@ -210,14 +220,18 @@ function workbenchError(response) {
 function warehouseRisk(row) { return Number(perspective.value === 'product' ? row.unmapped : row.at_risk) || 0; }
 function selectWarehouse(id) { selectedWarehouse.value = selectedWarehouse.value === id ? '' : id; applyFocusFilters(); }
 function selectRisk(risk) { if (!risk || loading.value) return; selectedRisk.value = props.warehouseDetails ? risk : selectedRisk.value === risk ? '' : risk; applyFocusFilters(); }
-function applyFocusFilters() { if (props.warehouseDetails && !hasQueryCondition.value && !selectedRisk.value) return; focusRequested.value = true; appliedFocusFilters.value = { warehouse: selectedWarehouse.value, sku: skuSearch.value, skuMode: skuMode.value, mappingAsOf: mappingAsOf.value, risk: selectedRisk.value }; load(); }
-function clearFocusFilters({ reload = true } = {}) { focusRequested.value = false; selectedWarehouse.value = ''; skuSearch.value = ''; skuMode.value = ''; mappingAsOf.value = ''; selectedRisk.value = ''; showAdvancedFilters.value = false; appliedFocusFilters.value = { warehouse: '', sku: '', skuMode: '', mappingAsOf: '', risk: '' }; if (reload) load(); }
+function applyFocusFilters() { if (props.warehouseDetails && !hasQueryCondition.value && !selectedRisk.value) return; focusPage.value = 1; focusRequested.value = true; appliedFocusFilters.value = { warehouse: selectedWarehouse.value, sku: skuSearch.value, skuMode: skuMode.value, mappingAsOf: mappingAsOf.value, risk: selectedRisk.value }; load(); }
+function clearFocusFilters({ reload = true } = {}) { focusPage.value = 1; focusRequested.value = false; selectedWarehouse.value = ''; skuSearch.value = ''; skuMode.value = ''; mappingAsOf.value = ''; selectedRisk.value = ''; showAdvancedFilters.value = false; appliedFocusFilters.value = { warehouse: '', sku: '', skuMode: '', mappingAsOf: '', risk: '' }; if (reload) load(); }
 function changePerspective() { clearFocusFilters({ reload: false }); load(); }
 function openDetail(row) { selectedRow.value = row; detailOpen.value = true; }
 function linePoints(field) {
   const values = trend.value.map((item) => Number(item[field]) || 0);
   const max = Math.max(1, ...trend.value.flatMap((item) => [Number(item.total) || 0, Number(item.available) || 0]));
   return values.map((value, index) => `${12 + index * 576 / Math.max(1, values.length - 1)},${154 - value * 130 / max}`).join(' ');
+}
+function loadFocusPage(page) {
+  focusPage.value = page;
+  load();
 }
 async function load() {
   requestController?.abort();
@@ -229,7 +243,7 @@ async function load() {
   detailOpen.value = false;
   const includeVirtualSnapshot = includeVirtual.value;
   try {
-    const response = await fetchInventoryWorkbench({ include_virtual: includeVirtualSnapshot, ...(props.warehouseDetails ? { sales_report: true, summary_only: !focusRequested.value } : {}), perspective: perspective.value, ...(appliedFocusFilters.value.risk ? { risk: appliedFocusFilters.value.risk } : {}), ...(appliedFocusFilters.value.warehouse ? { warehouse_id: appliedFocusFilters.value.warehouse } : {}), ...(appliedFocusFilters.value.sku ? { sku: appliedFocusFilters.value.sku } : {}), ...(appliedFocusFilters.value.skuMode ? { sku_mode: appliedFocusFilters.value.skuMode } : {}), ...(appliedFocusFilters.value.mappingAsOf ? { mapping_as_of: appliedFocusFilters.value.mappingAsOf } : {}) }, { signal: controller.signal });
+    const response = await fetchInventoryWorkbench({ include_virtual: includeVirtualSnapshot, ...(props.warehouseDetails ? { sales_report: true, summary_only: !focusRequested.value, limit: focusPageSize, offset: (focusPage.value - 1) * focusPageSize } : {}), perspective: perspective.value, ...(appliedFocusFilters.value.risk ? { risk: appliedFocusFilters.value.risk } : {}), ...(appliedFocusFilters.value.warehouse ? { warehouse_id: appliedFocusFilters.value.warehouse } : {}), ...(appliedFocusFilters.value.sku ? { sku: appliedFocusFilters.value.sku } : {}), ...(appliedFocusFilters.value.skuMode ? { sku_mode: appliedFocusFilters.value.skuMode } : {}), ...(appliedFocusFilters.value.mappingAsOf ? { mapping_as_of: appliedFocusFilters.value.mappingAsOf } : {}) }, { signal: controller.signal });
     if (controller.signal.aborted) return;
     if (response?.success) { data.value = response.data; appliedIncludeVirtual.value = includeVirtualSnapshot; }
     else error.value = workbenchError(response);

@@ -424,3 +424,39 @@ class BusinessAlertActionLog(models.Model):
             super().save(*args, **kwargs)
         finally:
             self._action_service_write = False
+
+
+class InventoryWarningRun(models.Model):
+    STATUS_CHOICES = [('queued', 'Queued'), ('building', 'Building'), ('ready', 'Ready'),
+                      ('partial', 'Partial'), ('failed', 'Failed')]
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    country = models.ForeignKey('masterdata.CountrySiteMaster', on_delete=models.CASCADE)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='queued')
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    issues = models.JSONField(default=list, blank=True)
+    config = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['tenant', 'country', 'status', '-created_at'], name='idx_inv_warn_run')]
+
+
+class InventoryWarningRow(models.Model):
+    run = models.ForeignKey(InventoryWarningRun, on_delete=models.CASCADE, related_name='rows')
+    sku = models.ForeignKey(ProductSKU, on_delete=models.CASCADE)
+    spu = models.ForeignKey(ProductSPU, null=True, blank=True, on_delete=models.SET_NULL)
+    payload = models.JSONField(default=dict, blank=True)
+    forecast_stockout = models.BooleanField(default=False)
+    key_variant_shortage = models.BooleanField(default=False)
+    supply_risk = models.BooleanField(default=False)
+    excess_stock = models.BooleanField(default=False)
+    new_product = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['run', 'sku'], name='uniq_inv_warn_row')]
+        indexes = [models.Index(fields=['run', 'spu', 'sku'], name='idx_inv_warn_spu'),
+                   models.Index(fields=['run', 'forecast_stockout', 'sku'], name='idx_inv_warn_stockout'),
+                   models.Index(fields=['run', 'key_variant_shortage', 'sku'], name='idx_inv_warn_keysku'),
+                   models.Index(fields=['run', 'supply_risk', 'sku'], name='idx_inv_warn_supply'),
+                   models.Index(fields=['run', 'excess_stock', 'sku'], name='idx_inv_warn_excess'),
+                   models.Index(fields=['run', 'new_product', 'sku'], name='idx_inv_warn_new')]

@@ -233,9 +233,31 @@ describe('销售日常经营', () => {
     first(response([{ ...row, store_name: '旧范围' }])); await flushPromises(); expect(wrapper.text()).not.toContain('旧范围');
     const lastSignal = fetchSalesOperations.mock.calls.at(-1)[1]; wrapper.unmount(); wrapper = null; expect(lastSignal.aborted).toBe(true);
   });
+  it('applies multiple selected stores in a single scoped sales request', async () => {
+    wrapper = mount(SalesOperations);
+    await flushPromises();
+    const select = wrapper.findComponent({ name: 'ElSelect' });
+    expect(select.exists()).toBe(true);
+    select.vm.$emit('update:modelValue', ['42', '63']);
+    await wrapper.vm.$nextTick();
+    expect(fetchSalesOperations.mock.calls.at(-1)[0].store_id).not.toBe('42,63');
+    await wrapper.get('form.filters').trigger('submit');
+    await flushPromises();
+    expect(fetchSalesOperations.mock.calls.at(-1)[0].store_id).toBe('42,63');
+    await wrapper.get('.currency-filter select').setValue('PHP');
+    await flushPromises();
+    const details = wrapper.get('.declines');
+    details.element.setAttribute('open', '');
+    await details.trigger('toggle');
+    await flushPromises();
+    expect(fetchBoardDeclines).toHaveBeenLastCalledWith(
+      expect.objectContaining({ store_id: '', store_ids: '42,63', currency: 'PHP' }),
+      expect.any(AbortSignal),
+    );
+  });
   it('clears previous rows on a failed new request and preserves draft-only state', async () => {
     wrapper = mount(SalesOperations); await flushPromises();
-    await wrapper.findAll('input')[0].setValue('2026-09-01'); expect(fetchSalesOperations).toHaveBeenCalledTimes(1);
+    await wrapper.get('input[type=date]').setValue('2026-09-01'); expect(fetchSalesOperations).toHaveBeenCalledTimes(1);
     expect(wrapper.text()).toContain('筛选已修改');
     fetchSalesOperations.mockRejectedValue(new Error('读取失败')); await wrapper.find('.quick button').trigger('click'); await flushPromises();
     expect(wrapper.text()).toContain('读取失败'); expect(wrapper.find('.table-scroll').exists()).toBe(false);

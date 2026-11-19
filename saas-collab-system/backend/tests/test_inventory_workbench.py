@@ -328,3 +328,52 @@ def test_business_workbench_hides_only_confirmed_zero_stock_and_zero_sales(monke
     assert linked["sales_category_counts"] == {"stock_no_sales": 0, "sales_no_stock": 1, "sales_unknown": 2}
     result = api.get(URL, params).json()["data"]
     assert result["risk_counts"]["out"] == 3
+
+
+def test_warehouse_details_paginates_filtered_exceptions_without_overlap():
+    tenant, _, _, warehouse = create_scope("warehouse-details-pages")
+    run = create_run(tenant, "inventory_snapshot", "warehouse-details-pages", platform="jifeng_wms")
+    user = user_for(tenant, "warehouse-details-pages")
+    grant(user, "sales_management.view")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="PAGES")
+    for index in range(61):
+        code = f"{'PAGE' if index < 60 else 'OTHER'}-{index:03}"
+        sku = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code=code, inventory_type="physical")
+        _snapshot(tenant, warehouse, run, code, NOW, 3, internal_sku=sku)
+
+    api = client_for(user)
+    filters = {"sales_report": "true", "risk": "stock_no_sales", "sku": "PAGE", "warehouse_id": warehouse.pk}
+    pages = [api.get(URL, {**filters, "offset": offset}).json()["data"] for offset in (0, 50)]
+    assert [page["focus_offset"] for page in pages] == [0, 50]
+    assert [len(page["focus"]) for page in pages] == [50, 10]
+    assert {page["focus_total"] for page in pages} == {60}
+    assert len({row["source_sku"] for page in pages for row in page["focus"]}) == 60
+    assert api.get(URL, {**filters, "offset": -1}).status_code == 400
+
+
+def test_latest_complete_warehouse_batch_excludes_older_and_partial_skus(settings):
+    from apps.integrations.models import WarehouseAuthorization
+
+    settings.INVENTORY_COMPLETE_BATCH_READS_ENABLED = True
+    tenant, _, _, warehouse = create_scope("complete-inventory-batch")
+    user = user_for(tenant, "complete-inventory-reader")
+    grant(user, "sales_management.view")
+    evidence = dict(started_from_initial_cursor=True, ended_without_cursor=True, all_records_valid=True)
+    for index, sku in enumerate(("OLD", "CURRENT", "PARTIAL")):
+        run = create_run(tenant, "inventory_snapshot", sku, platform="jifeng_wms")
+        authorization = WarehouseAuthorization.objects.create(
+            tenant=tenant, integration_config=run.sync_job.integration_config, warehouse=warehouse,
+            provider="jifeng_wms", status="active", external_warehouse_code=sku,
+            external_warehouse_region=warehouse.country_code, created_by=user, updated_by=user,
+        )
+        run.sync_job.warehouse_authorization = authorization
+        run.sync_job.save(update_fields=["warehouse_authorization"])
+        run.status = "success"
+        run.finished_at = NOW + timedelta(minutes=index)
+        run.masked_log = {"decision_source": {**evidence, "started_from_initial_cursor": sku != "PARTIAL"}}
+        run.save(update_fields=["status", "finished_at", "masked_log"])
+        _snapshot(tenant, warehouse, run, sku, run.finished_at, 0)
+
+    response = client_for(user).get(URL, {"risk": "out"})
+    assert response.status_code == 200
+    assert [row["source_sku"] for row in response.json()["data"]["focus"]] == ["CURRENT"]
