@@ -283,11 +283,14 @@ def _calculation(actor, payload, current=None):
     if edited_id and (current is None or current.pk != edited_id):
         raise ValidationError('这份建议仅用于修改原草稿，不能用于另建或修改其他单据。')
     if current is None or current.calculation_snapshot.get('preview_token') != preview.token:
-        # Consume a server-generated source once, without recalculating its evidence.
+        # A live preview must still match the current inventory and demand basis.
         if OperatingOrder.objects.filter(tenant_id=actor.tenant_id).exclude(status__in=['cancelled', 'deleted']).exclude(
                 pk=current.pk if current else None).filter(calculation_snapshot__preview_token=preview.token).exists():
             raise ValidationError('此建议已生成有效运营订货单，请查看原单，避免重复订货。')
-        if preview.snapshot.get('demand_basis') != 'weighted_replenishment_v1':
+        if preview.snapshot.get('demand_basis') == 'weighted_replenishment_v1':
+            from apps.supply_chain.replenishment import validate_strategy_snapshot
+            validate_strategy_snapshot(actor, preview.snapshot)
+        else:
             from apps.commerce.supply_pipeline import open_demand
             _, signature = open_demand(actor, preview.country, [r['sku_id'] for r in preview.snapshot['lines']],
                                        exclude_order_id=edited_id)

@@ -87,7 +87,10 @@ class CountryDecisions(CountryDecisionAPI):
         result, count, can_write, summary, page_data = [], 0, False, None, {}
         category_options = []
         if 'country_id' in values:
-            country = domain.country_for(request.user, values['country_id'], permission_cache)
+            country = next((item for item in countries if item.pk == values['country_id']), None)
+            if country is None:
+                from rest_framework.exceptions import NotFound
+                raise NotFound('国家不存在或不在库存数据授权范围内。')
             rows = domain.skus_for(request.user, country, permission_cache).select_related('spu__category_node').order_by('sku_code', 'pk')
             if values['mapped_only']:
                 from .category_inventory import stock_facts
@@ -141,10 +144,9 @@ class CountryDecisions(CountryDecisionAPI):
             for item in result:
                 apply_listing_observation(item, item['sku_id'] in listing_ids,
                                           window_days=values['window_days'], target_days=values['target_days'])
-            if check_user_permission(request.user, operating.MANAGE, cache=permission_cache):
-                scopes = get_permission_data_scopes(request.user, operating.MANAGE, cache=permission_cache)
-                can_write = any(s['scope_type'] in ['all', 'own'] or (
-                    s['scope_type'] == 'custom' and country.pk in operating.country_ids(s)) for s in scopes)
+            scopes = get_permission_data_scopes(request.user, operating.MANAGE, cache=permission_cache)
+            can_write = any(s['scope_type'] in ['all', 'own'] or (
+                s['scope_type'] == 'custom' and country.pk in operating.country_ids(s)) for s in scopes)
         abc_meta = {}
         if 'country_id' in values:
             from .abc_access import decorate_rows

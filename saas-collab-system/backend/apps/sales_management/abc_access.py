@@ -1,6 +1,7 @@
 """Read published ABC snapshots without recalculating sales on page requests."""
 from datetime import timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from django.db.models import Case, Q, Value, When
 from django.utils import timezone
 from apps.masterdata.models import InventoryABCRun, InventoryABCEntry, InventoryObservationSettings
 from apps.products.models import ProductSKU
@@ -8,12 +9,15 @@ from apps.products.models import ProductSKU
 
 def published_run(actor, country):
     runs = InventoryABCRun.objects.filter(tenant_id=actor.tenant_id, country_id=country.pk)
-    ready = runs.filter(status="ready").order_by("-cutoff_date", "-completed_at", "-pk").first()
-    reference = None if ready else runs.filter(status="partial").order_by("-cutoff_date", "-completed_at", "-pk").first()
     latest = runs.order_by("-created_at", "-pk").first()
     settings = InventoryObservationSettings.objects.filter(tenant_id=actor.tenant_id).first()
     enabled = settings.abc_enabled if settings else True
-    run = (ready or reference) if enabled else None
+    run = None
+    if enabled and latest:
+        preferred_status = Case(When(status="ready", then=Value(0)), default=Value(1))
+        run = runs.filter(status__in=("ready", "partial")).order_by(
+            preferred_status, "-cutoff_date", "-completed_at", "-pk"
+        ).first()
     expected = {
         "window_days": settings.abc_window_days,
         "a_percent": f"{settings.abc_a_percent:.2f}",
@@ -49,13 +53,18 @@ def decorate_rows(actor, country, rows):
         all_rows.append(row)
         all_rows.extend(row.get("variants") or [])
     sku_ids = set()
+    unmapped_ids = set()
     for row in all_rows:
         value = row.get("sku_id") or row.get("internal_sku_id") or row.get("internal_sku")
+        if not isinstance(value, int) or isinstance(value, bool):
+            value = row.get("id") if row.get("code") and not row.get("variants") else None
         if isinstance(value, int) and not isinstance(value, bool):
             sku_ids.add(value)
-        elif row.get("code") and isinstance(row.get("id"), int) and not row.get("variants"):
-            sku_ids.add(row["id"])
-    sku_spus = dict(ProductSKU.objects.filter(tenant_id=actor.tenant_id, pk__in=sku_ids).values_list("pk", "spu_id"))
+            if not row.get("spu_id"):
+                unmapped_ids.add(value)
+    sku_spus = dict(ProductSKU.objects.filter(tenant_id=actor.tenant_id, pk__in=unmapped_ids).values_list(
+        "pk", "spu_id"
+    )) if run else {}
     spu_ids = {row.get("spu_id") for row in all_rows if isinstance(row.get("spu_id"), int)} | set(sku_spus.values())
     for row in rows:
         if row.get("variants") and isinstance(row.get("id"), int):
@@ -63,7 +72,6 @@ def decorate_rows(actor, country, rows):
     entries = {}
     if run:
         query = InventoryABCEntry.objects.filter(run=run)
-        from django.db.models import Q
         query = query.filter(Q(entity_type="sku", entity_id__in=sku_ids) | Q(entity_type="spu", entity_id__in=spu_ids))
         entries = {(entry.entity_type, entry.entity_id): entry for entry in query}
     for row in all_rows:

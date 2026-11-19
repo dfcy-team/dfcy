@@ -12,7 +12,7 @@ class InventoryAlertEventSerializer(serializers.ModelSerializer):
 
 
 class InventoryAlertSerializer(serializers.ModelSerializer):
-    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    tenant_id = serializers.IntegerField(read_only=True)
     rule_code = serializers.CharField(source="rule.rule_code", read_only=True)
     rule_version = serializers.IntegerField(source="rule.version", read_only=True)
     assigned_to_id = serializers.IntegerField(source="assigned_to.id", read_only=True)
