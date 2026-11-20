@@ -11,6 +11,9 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 
 COPY backend/apps/permissions/menu_registry.json /backend/apps/permissions/menu_registry.json
+COPY backend/apps/influencers/requirement_feedback.py /backend/apps/influencers/requirement_feedback.py
+COPY backend/apps/influencers/views.py /backend/apps/influencers/views.py
+COPY backend/apps/influencers/migrations/0051_requirement_images.py /backend/apps/influencers/migrations/0051_requirement_images.py
 COPY frontend/ ./
 RUN VITE_USE_MOCK=true npm run test
 RUN VITE_USE_MOCK=false npm run build
