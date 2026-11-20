@@ -71,7 +71,8 @@ describe('current deployment menu baseline', () => {
     // archive entry into the two foundation pages.
     // Four aggregate governance/pilot centers replace eight legacy menu
     // entries; supply-chain navigation now exposes only the V2 workspaces.
-    expect(flattenMenuItems(menuItems)).toHaveLength(129);
+    expect(flattenMenuItems(menuItems)).toHaveLength(130);
+    expect(menuItems.find(item => item.label === '达人管理').children.filter(item => item.path === '/influencers/requirements')).toHaveLength(1);
   });
 
   it('keeps migrated and global-listing routes in one menu with the API entries routable', () => {
@@ -135,7 +136,7 @@ describe('current deployment menu baseline', () => {
       expect(flatItems.filter((item) => item.path === route), route).toHaveLength(1);
     }
     expect(menuItems.some((item) => item.label === '系统治理')).toBe(false);
-    expect(flatItems).toHaveLength(129);
+    expect(flatItems).toHaveLength(130);
   });
 
   it('keeps the current dark desktop and mobile navigation palette', () => {

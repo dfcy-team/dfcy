@@ -1298,6 +1298,26 @@
       }
     },
     {
+      "code": "menu.influencers.influencers_requirements.view",
+      "name": "达人模块需求反馈",
+      "module": "influencers",
+      "action": "influencers_requirements.view",
+      "description": "显示达人模块需求反馈入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/influencers/requirements",
+        "route": "/influencers/requirements",
+        "resource": "influencers_requirements",
+        "parent": "达人管理",
+        "action_codes": [
+          "influencers.requirements.submit",
+          "influencers.requirements.review"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.finance.finance_imports.view",
       "name": "财务导入",
       "module": "finance",
@@ -4075,6 +4095,19 @@
       ],
       "menuPermissions": [
         "menu.config.influencers_bd_config.view"
+      ]
+    },
+    {
+      "path": "/influencers/requirements",
+      "permissions": [
+        "influencers.requirements.submit",
+        "influencers.requirements.review"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.influencers.influencers_requirements.view"
       ]
     },
     {

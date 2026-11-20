@@ -368,6 +368,7 @@ const routes = [
       { path: 'influencers/outreach-tasks', component: OutreachTaskList },
       { path: 'influencers/sample-fulfillments', component: SampleFulfillmentList },
       { path: 'influencers/bd-performance', component: BdPerformance },
+      { path: 'influencers/requirements', component: () => import('../views/influencers/InfluencerRequirements.vue') },
       {
         path: 'influencers/bd-config',
         component: BdPerformanceConfig,

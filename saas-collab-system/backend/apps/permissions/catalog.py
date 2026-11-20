@@ -753,6 +753,20 @@ PERMISSION_DEFINITIONS = (
         "description": "维护当前租户的基础档案选项设置。",
     },
     {
+        "code": "influencers.requirements.submit",
+        "name": "提交达人模块需求反馈",
+        "module": "influencers",
+        "action": "requirements.submit",
+        "description": "Submit feedback and view your own requests.",
+    },
+    {
+        "code": "influencers.requirements.review",
+        "name": "汇总查看达人模块需求反馈",
+        "module": "influencers",
+        "action": "requirements.review",
+        "description": "Review requests within the current tenant.",
+    },
+    {
         "code": "influencers.view",
         "name": "View influencers",
         "module": "influencers",

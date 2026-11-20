@@ -851,6 +851,16 @@ class OutreachTaskCollectionView(ScopedInfluencerView):
 
     def get(self, request):
         require_scope(request.user, self.read_permission_code)
+        if _query_bool(request.query_params.get("priority_only", "false"), field="priority_only"):
+            tasks = filter_queryset(request.user, OutreachTask.objects.filter(
+                tenant=request.user.tenant, is_deleted=False,
+                priority__in=["urgent", "high"],
+            ).exclude(status__in=["completed", "cancelled"]), self.read_permission_code)
+            fields = ("id", "task_no", "task_name", "priority", "status")
+            return success_response({"priority_tasks": {
+                priority: list(tasks.filter(priority=priority).order_by("-created_at", "-id").values(*fields)[:100])
+                for priority in ("urgent", "high")
+            }})
         active_samples = Prefetch(
             "sample_fulfillments",
             queryset=filter_queryset(request.user, SampleFulfillment.objects.filter(
