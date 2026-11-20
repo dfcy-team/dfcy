@@ -14,11 +14,11 @@ from rest_framework import serializers
 from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 
-from apps.commerce.country_decisions import INVENTORY as INVENTORY_PERMISSION, _config_countries
+from apps.commerce.country_decisions import (INVENTORY as INVENTORY_PERMISSION,
+    _config_countries, _inventory_branches)
 from apps.masterdata.models import CountrySiteMaster
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 from apps.sales_management import operating
-from apps.sales_management.scopes import _custom_scope_configs
 from apps.sales_management.operating_models import OperatingOrderLine
 from .cost_models import (FeeRevisionItem, FeeRecord, SettlementRecord, PaymentRecord,
     PaymentApplication, ShipmentDiscountAdjustment)
@@ -62,21 +62,18 @@ def scope(actor, country_id=None):
             and get_permission_data_scopes(actor, INVENTORY_PERMISSION,
                 resource_code='commerce.inventory', cache=permission_cache)):
         inventory_countries = CountrySiteMaster.objects.filter(tenant_id=actor.tenant_id, status='active')
-        configs = _custom_scope_configs(actor, INVENTORY_PERMISSION, permission_cache,
-            resource_code='commerce.inventory')
-        if configs is not None:
-            country_codes = set()
-            include_all_countries = False
-            for config in configs:
-                allowed_codes = _config_countries(actor, config)
-                if allowed_codes is None:
-                    # SKU/SPU-only restrictions authorize the same country set
-                    # as the shared inventory country resolver.
-                    include_all_countries = True
-                    break
-                country_codes.update(allowed_codes)
-            if not include_all_countries:
-                inventory_countries = inventory_countries.filter(country_code__in=country_codes)
+        country_codes = set()
+        include_all_countries = False
+        for branch in _inventory_branches(actor, permission_cache, include_best=False):
+            allowed_codes = _config_countries(actor, branch)
+            if allowed_codes is None and (branch.product_restricted or not branch.provider_restricted):
+                # SKU/SPU-only restrictions authorize the same country set
+                # as the shared inventory country resolver.
+                include_all_countries = True
+                break
+            country_codes.update(allowed_codes or ())
+        if not include_all_countries:
+            inventory_countries = inventory_countries.filter(country_code__in=country_codes)
     countries = CountrySiteMaster.objects.filter(tenant_id=actor.tenant_id).filter(
         supply_countries | Q(pk__in=inventory_countries.values('pk'))).order_by('country_code', 'pk')
     if country_id:
