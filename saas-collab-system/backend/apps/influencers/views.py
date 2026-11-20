@@ -1429,9 +1429,10 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
             queryset = queryset.filter(is_deleted=False)
         status = request.query_params.get("status", "").strip()
         if status:
-            if status not in SampleFulfillment.Status.values:
+            statuses = {value.strip() for value in status.split(",")}
+            if not statuses.issubset(SampleFulfillment.Status.values):
                 raise ValidationError({"status": "Unsupported fulfillment status."})
-            queryset = queryset.filter(status=status)
+            queryset = queryset.filter(status__in=statuses)
         outreach_task_id = request.query_params.get("outreach_task", "").strip()
         if outreach_task_id:
             if not outreach_task_id.isdigit() or int(outreach_task_id) < 1:
@@ -1442,7 +1443,11 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
             )
         store_id = request.query_params.get("store", "").strip()
         if store_id:
-            queryset = queryset.filter(store_id=store_id)
+            stores = {value.strip() for value in store_id.split(",")}
+            if any(not value.isascii() or not value.isdecimal() or len(value) > 19
+                   or not 0 < int(value) < 2**63 for value in stores):
+                raise ValidationError({"store": "Expected positive store IDs."})
+            queryset = queryset.filter(store_id__in=stores)
         owner_id = request.query_params.get("owner", "").strip()
         if owner_id:
             if not owner_id.isdigit() or int(owner_id) < 1:

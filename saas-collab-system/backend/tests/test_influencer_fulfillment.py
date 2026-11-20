@@ -725,6 +725,18 @@ def test_sample_fulfillment_list_filters_by_owner_and_options_are_tenant_scoped(
         )
         assert response.status_code == 201
 
+    url = "/api/internal/influencers/sample-fulfillments/"
+    statuses = "pending,completed"
+    stores = f"{store.pk},{other_store.pk}"
+    for page in (1, 2):
+        result = client.get(url, {"store": stores, "status": statuses, "page_size": 1, "page": page})
+        assert result.status_code == 200
+        assert result.data["data"]["count"] == 2
+        assert len(result.data["data"]["results"]) == 1
+    assert client.get(url, {"store": str(store.pk), "status": statuses}).data["data"]["count"] == 1
+    assert client.get(url, {"store": stores, "status": "cancelled,completed"}).data["data"]["count"] == 0
+    assert client.get(url, {"store": "1,x"}).status_code == 400
+    assert client.get(url, {"status": "pending,unknown"}).status_code == 400
     filtered = client.get(
         "/api/internal/influencers/sample-fulfillments/",
         {"owner": other_owner.pk},

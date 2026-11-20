@@ -18,10 +18,10 @@
     <el-card class="workspace-card" shadow="never">
       <div class="toolbar">
         <el-input v-model="filters.search" clearable placeholder="搜索达人/送样编号/建联编号/产品/订单" @keyup.enter="applyFilters" />
-        <el-select v-model="filters.store" clearable filterable placeholder="全部店铺" :loading="filterOptionsLoading" @visible-change="retryFilterOptions">
+        <el-select v-model="filters.store" multiple collapse-tags collapse-tags-tooltip clearable filterable placeholder="全部店铺" :loading="filterOptionsLoading" @visible-change="retryFilterOptions" @change="applyFilters">
           <el-option v-for="store in filterStoreOptions" :key="store.id" :label="store.name" :value="store.id" />
         </el-select>
-        <el-select v-model="filters.status" clearable placeholder="全部状态" @change="applyFilters">
+        <el-select v-model="filters.status" multiple collapse-tags collapse-tags-tooltip clearable placeholder="全部状态" @change="applyFilters">
           <el-option v-for="(label, value) in FULFILLMENT_FILTER_STATUS_LABELS" :key="value" :label="label" :value="value" />
         </el-select>
         <el-select v-model="filters.owner" clearable filterable placeholder="全部送样负责人" @change="applyFilters">
@@ -331,7 +331,7 @@ const detailSample = ref(null);
 const editingSample = ref(null);
 const inheritedTask = ref(null);
 const draftKey = ref('');
-const filters = reactive({ search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at' });
+const filters = reactive({ search: '', status: [], store: [], owner: null, includeDeleted: false, ordering: '-created_at' });
 const form = reactive({ fulfillment_no: '', type_no: '', outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', sample_sent_at: '', notes: '', link_type: 'YYJL', quick_tags: [] });
 const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '已完成']);
 const LEGACY_FULFILLMENT_STATUSES = new Set(['processing', 'creating', 'blank', '']);
@@ -542,11 +542,16 @@ function sampleTimeInput(value) {
   return formatTaskDateTime(value).replace(' ', 'T');
 }
 
+let listRequest = 0;
 async function load() {
+  const request = ++listRequest;
   loading.value = true;
-  const params = { page: page.value, page_size: pageSize.value, search: filters.search, status: filters.status, store: filters.store, owner: filters.owner, ordering: filters.ordering };
+  const params = { page: page.value, page_size: pageSize.value, search: filters.search, owner: filters.owner, ordering: filters.ordering };
+  if (filters.status.length) params.status = filters.status.join(',');
+  if (filters.store.length) params.store = filters.store.join(',');
   if (filters.includeDeleted) params.include_deleted = 'true';
   const r = await fetchSampleFulfillments(params);
+  if (request !== listRequest) return;
   loading.value = false;
   if (r.success) {
     rows.value = collectionRows(r.data);
@@ -562,7 +567,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at' });
+  Object.assign(filters, { search: '', status: [], store: [], owner: null, includeDeleted: false, ordering: '-created_at' });
   applyFilters();
 }
 
