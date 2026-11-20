@@ -17,12 +17,38 @@ from .summary_service import dataset_for, metadata, save_state, engine, document
 @api_view(['GET'])
 @permission_classes([IsFinanceViewer])
 def summary_bootstrap(request):
+    from .summary_models import FinanceSummaryDataset
+    if not FinanceSummaryDataset.objects.filter(tenant=request.user.tenant, active=True).exists():
+        from .summary_initialization import initialization_status
+        return success_response(initialization_status(request.user))
     dataset = dataset_for(request.user)
     data = metadata(dataset, request.user, include_values=request.query_params.get('native') != '1')
     data['document_version'] = hashlib.sha256(repr(presentation_stamp()).encode()).hexdigest()[:16]
     response = success_response(data)
     response['Cache-Control'] = 'no-store'
     return response
+
+
+@api_view(['POST'])
+@permission_classes([IsFinanceViewer])
+def summary_initialize(request):
+    from .summary_initialization import request_initialization
+    from .summary_jobs import job_data
+    if set(request.data) != {'scope'}:
+        raise ValidationError('请仅提供本次候选试算的店铺和日期范围。')
+    row = request_initialization(request.user, request.data['scope'])
+    data = job_data(row, request.user)
+    return success_response(data, status=202 if data['pending'] else 200)
+
+
+@api_view(['POST'])
+@permission_classes([IsFinanceViewer])
+def summary_publish(request, pk):
+    from .summary_initialization import publish_candidate
+    if request.data.get('confirm') is not True:
+        raise ValidationError('请核对候选试算后明确确认发布。')
+    dataset = publish_candidate(request.user, pk)
+    return success_response(metadata(dataset, request.user, include_values=False, checkpoint=False))
 
 
 @api_view(['POST'])

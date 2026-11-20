@@ -177,7 +177,9 @@ def test_other_tenant_cannot_read_or_change_batch(context):
     for code in (*READ_PERMISSIONS, 'finance.import'):
         grant(user, code)
     client = client_for(user)
-    assert client.get(URL).status_code == 404
+    response = client.get(URL)
+    assert response.status_code == 200 and response.data['data']['initialized'] is False
+    assert 'dataset' not in response.data['data']
     assert client.get(URL+f'{dataset.pk}/document/').status_code == 404
     assert client.post(URL+f'{dataset.pk}/settings/', payload(), format='json').status_code == 404
 

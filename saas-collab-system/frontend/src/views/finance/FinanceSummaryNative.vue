@@ -1,5 +1,7 @@
 <template>
   <section class="finance-native" aria-label="平台账单财务汇总">
+    <FinanceSummaryInitialization v-if="initialization" :state="initialization" @published="refresh" />
+    <template v-else>
     <header class="page-heading">
       <h1>平台账单</h1>
       <details v-if="batch" class="batch-caption"><summary>{{ batch.source?.data_origin === 'saas_database' ? 'SaaS数据库批次' : '已验收批次' }} · 设置版本 {{ batch.revision }}</summary><p>{{ batch.label }} · {{ batch.can_edit ? '调整保存到本地 SaaS，保留操作记录' : '当前为只读权限' }}</p><p>各级汇总共用订单核算明细；费用先归属订单，再聚合店铺／国家、分配SKU／原成交商品链接。原始金额、成本和汇率依据不变。</p></details>
@@ -12,7 +14,7 @@
       <p>{{ sourceBlocked ? '财务批次文件目录未配置或文件缺失。请管理员恢复原批次文件；自动汇总已暂停，账务数据未被清空。' : error || autoError }}</p>
       <button :disabled="loading || rebuilding" @click="refresh">重新检查</button>
     </section>
-    <p v-else-if="batch?.source?.database_scope" class="auto-summary" role="status">{{ rebuilding ? rebuildStatus + '；当前保留上次汇总结果。' : '后台每5分钟检查，仅自动更新本月和上月；历史账期保留原结果，需手动重新汇总。' }}<span v-if="batch.automation?.scope"> 自动范围：{{ batch.automation.scope.from }} 至 {{ batch.automation.scope.to }}，适用于全部汇总维度及流水明细。</span></p>
+    <p v-else-if="batch?.source?.database_scope" class="auto-summary" role="status">{{ rebuilding ? rebuildStatus + '；当前保留上次汇总结果。' : batch.automation?.enabled === false ? '自动更新已关闭；当前展示已生成批次，需手动重新汇总。' : '后台每5分钟检查，仅自动更新本月和上月；历史账期保留原结果，需手动重新汇总。' }}<span v-if="batch.automation?.enabled !== false && batch.automation?.scope"> 自动范围：{{ batch.automation.scope.from }} 至 {{ batch.automation.scope.to }}，适用于全部汇总维度及流水明细。</span></p>
     <el-alert v-else-if="batch?.source_changed" title="来源数据已更新；当前展示已验收批次，请核对并接入新批次。" type="warning" :closable="false" />
     <el-alert v-if="dateWarning" :title="dateWarning" type="warning" :closable="false" />
     <div v-if="batch?.source?.database_scope" class="view-options"><span>已纳入：{{ batch.source.database_scope.from }} 至 {{ batch.source.database_scope.to }} · {{ batch.source.database_scope.stores.length }} 家店铺</span><span>生成时间：{{ formatTime(batch.imported_at) }}</span><button @click="rebuildHistoryOpen = true">汇总记录</button><button v-if="dateWarning" :disabled="loading" @click="showUnresolvedDates">查看待补日期费用</button></div>
@@ -25,12 +27,12 @@
       </div>
     </section>
     <section v-if="batch" class="attribution-context" aria-label="费用归属">
-      <div class="view-options"><button data-attribution="assigned" :aria-pressed="attributionArea === 'assigned'" :disabled="loading || saving" @click="changeAttribution('assigned')">已归属订单汇总</button><button data-attribution="pending" :aria-pressed="attributionArea === 'pending'" :disabled="loading || saving" @click="changeAttribution('pending')">待归属订单明细（{{ loading ? '核对中' : (attribution.pending_rows || 0) + '条非零金额' }}）</button><span>{{ attributionArea === 'pending' ? '仅核对原额，不计入正式利润；参考项另行标记。' : '利润仅包含已归属订单的收支；不代表商品、成本和日期已全部核对。' }}</span></div>
+      <div class="view-options"><button data-attribution="assigned" :aria-pressed="attributionArea === 'assigned'" :disabled="loading || saving" @click="changeAttribution('assigned')">已归属订单汇总</button><button data-attribution="pending" :aria-pressed="attributionArea === 'pending'" :disabled="loading || saving" @click="changeAttribution('pending')">待归属订单明细（{{ loading ? '核对中' : error ? '未获取' : (attribution.pending_rows || 0) + '条非零金额' }}）</button><span>{{ attributionArea === 'pending' ? '仅核对原额，不计入正式利润；参考项另行标记。' : '利润仅包含已归属订单的收支；不代表商品、成本和日期已全部核对。' }}</span></div>
       <details><summary>归属对账：参与汇总原额＝已归属订单＋待归属订单（{{ mode === 'operations' ? '运营' : '财务' }}口径）</summary><p class="detail-note">按当前账期、统计区间、国家、平台、店铺和币种核对，不随商品关键词及明细字段筛选缩小；不同币种不合计。未关联／未分摊的仓库处理费及仓库其他费不参与本次汇总，也不进入待核对，原登记保留不动。</p><div class="attribution-scroll"><table class="parts"><thead><tr><th>国家</th><th>科目</th><th>币种</th><th>参与汇总原额</th><th>已归属订单</th><th>待归属订单</th></tr></thead><tbody><tr v-for="item in attributionTotals" :key="item.country + item.currency + item.kind"><td>{{ item.country }}</td><td>{{ item.label }}</td><td>{{ item.currency }}</td><td>{{ money(item.total) }}</td><td>{{ money(item.assigned) }}</td><td>{{ money(item.pending) }}<small v-if="item.unknown_rows">另有{{ item.unknown_rows }}条金额未确认</small></td></tr></tbody></table></div><p v-for="item in attribution.item_gaps || []" :key="item.store" class="detail-note">{{ item.store }}：{{ item.orders }}个订单仍有商品归属待核，其中内部SKU待关联{{ item.sku_orders }}单、商品链接待关联{{ item.link_orders }}单；两项可能重叠，不认定分摊完成。</p></details>
     </section>
     <div class="view-bar">
       <nav aria-label="汇总级别"><button v-for="tab in views" :key="tab[0]" :data-view="tab[0]" :aria-current="view === tab[0] ? 'page' : undefined" :disabled="saving" @click="changeView(tab[0])">{{ tab[1] }}</button></nav>
-      <span class="count">{{ loading ? '正在核对结果数量…' : total.toLocaleString() + (view === 'detail' ? (attributionArea === 'pending' ? ' 条待归属明细' : ' 条原始流水（不分摊）') : ' 组') }}</span>
+      <span class="count">{{ loading ? '正在核对结果数量…' : error || !batch ? '未获取结果数量' : total.toLocaleString() + (view === 'detail' ? (attributionArea === 'pending' ? ' 条待归属明细' : ' 条原始流水（不分摊）') : ' 组') }}</span>
       <button v-if="view === 'detail' && batch?.can_edit && !options.raw_flows" :disabled="loading || saving" @click="editFee()">新增费用</button>
       <button v-if="view === 'detail'" @click="showHistory(1)">操作记录</button>
     </div>
@@ -77,7 +79,7 @@
       </table>
       <p v-if="!loading && !rows.length" class="empty">{{ error ? '汇总结果加载失败，请重新检查；此处不代表金额为零。' : '当前筛选条件下没有记录，可调整账期或重置筛选。' }}</p>
     </div>
-    <footer class="pagination"><span>统一订单核算明细 · {{ loading ? '正在加载当前页…' : '当前页 ' + rows.length + ' 条' }}</span><button :disabled="page <= 1 || loading || saving" @click="loadTable(page - 1)">上一页</button><span>{{ loading ? '— / —' : page + ' / ' + Math.max(1, Math.ceil(total / 20)) }}</span><button :disabled="page * 20 >= total || loading || saving" @click="loadTable(page + 1)">下一页</button></footer>
+    <footer class="pagination"><span>统一订单核算明细 · {{ loading ? '正在加载当前页…' : error || !batch ? '未获取' : '当前页 ' + rows.length + ' 条' }}</span><button :disabled="page <= 1 || loading || saving" @click="loadTable(page - 1)">上一页</button><span>{{ loading || error || !batch ? '— / —' : page + ' / ' + Math.max(1, Math.ceil(total / 20)) }}</span><button :disabled="page * 20 >= total || loading || saving" @click="loadTable(page + 1)">下一页</button></footer>
 
     </template>
     <el-drawer v-model="detailOpen" :title="detail?.title || '金额构成'" size="min(850px, 95vw)" destroy-on-close>
@@ -99,6 +101,7 @@
       <form class="fee-form" @submit.prevent="confirmCoverage"><label>开始日期<input v-model="coverage.from" type="date" required /></label><label>结束日期<input v-model="coverage.to" type="date" required /></label><fieldset class="full coverage-stores"><legend>店铺（已选 {{ coverage.stores.length }} 家）</legend><label v-for="shop in batch?.scope_stores || []" :key="shop.id"><input v-model="coverage.stores" type="checkbox" :value="shop.id" />{{ shop.code }}</label></fieldset><p class="full">新结果通过校验后才替换当前批次；原批次保留用于追溯。</p><div class="full actions"><button type="button" @click="coverageOpen = false">取消</button><button type="submit" :disabled="rebuilding || !coverage.stores.length">按此范围重新汇总</button></div></form>
     </el-dialog>
     <el-dialog v-model="rebuildHistoryOpen" title="汇总记录" width="min(850px,95vw)"><p>仅展示本租户最近 10 次任务，失败任务不会替换已通过校验的批次。</p><table class="parts"><thead><tr><th>提交时间</th><th>来源 → 结果批次</th><th>状态</th><th>完成时间</th></tr></thead><tbody><tr v-for="job in batch?.rebuild_history || []" :key="job.id"><td>{{ formatTime(job.created_at) }}</td><td>{{ job.dataset_id }} → {{ job.result_dataset_id || '—' }}</td><td>{{ jobLabel(job.status) }}</td><td>{{ formatTime(job.finished_at) }}</td></tr></tbody></table><p v-if="!batch?.rebuild_history?.length">暂无汇总任务记录。</p></el-dialog>
+    </template>
   </section>
 </template>
 
@@ -106,6 +109,8 @@
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { fetchFinanceSummary, fetchFinanceSummaryJob, rebuildFinanceSummary, fetchFinanceSummaryTable, fetchFinanceSummaryDetail, saveFinanceSummaryFee, fetchFinanceSummaryHistory } from '../../api/financeReconciliation';
 import FinanceCostDetail from './FinanceCostDetail.vue';
+import FinanceSummaryInitialization from './FinanceSummaryInitialization.vue';
+const initialization=ref(null);
 const FinanceSummary = defineAsyncComponent(() => import('./FinanceSummary.vue'));
 const views = [['country','国家汇总'],['store','店铺汇总'],['order','订单汇总'],['sku','SKU汇总'],['product_link','商品链接汇总'],['detail','流水明细']];
 const periodTypes = [['month','月度'],['week','周度'],['half_month','半月']];
@@ -183,7 +188,7 @@ const sign=value=>value==null?'unknown':Number(value)<0?'negative':Number(value)
 const safeUrl=value=>typeof value==='string'&&/^https:\/\/(?:www\.)?(?:lazada\.(?:com\.ph|co\.th|com\.my|sg|co\.id|vn)|shopee\.(?:ph|co\.th|com\.my|sg|co\.id|vn))\//i.test(value);
 function params(number=page.value){return{view:view.value,mode:mode.value,scope:scope.value,page:number,page_size:20,filter_attribution:attributionArea.value,...Object.fromEntries(Object.entries(applied).map(([k,v])=>['filter_'+k,v]))};}
 function result(response){if(!response?.success){const failure=Error(response?.message||'请求未完成，请重试');failure.http_status=response?.http_status;if(failure.http_status===403||failure.http_status===401){rows.value=[];attribution.value={totals:[],pending_rows:0,item_gaps:[]};batch.value=null;dateWarning.value='';periodNote.value='';}throw failure;}return response.data;}
-async function refresh(){const version=++requestVersion;loading.value=true;error.value='';try{const data=result(await fetchFinanceSummary({native:1}));if(!alive||version!==requestVersion)return;if(data.dataset!==batch.value?.dataset||data.revision!==batch.value?.revision)rows.value=[];batch.value=data;autoError.value='';if(sourceBlocked.value){rows.value=[];total.value=0;loading.value=false;return;}await loadTable(page.value);await rebuildIfChanged();}catch(e){if(alive&&version===requestVersion){batch.value=null;rows.value=[];error.value=e.message;loading.value=false;}}}
+async function refresh(){const version=++requestVersion;loading.value=true;error.value='';try{const data=result(await fetchFinanceSummary({native:1}));if(!alive||version!==requestVersion)return;if(data.initialized===false){initialization.value=data;batch.value=null;rows.value=[];loading.value=false;return;}initialization.value=null;if(!batch.value && data.source?.bootstrap_candidate){draft.month=data.source.database_scope.to.slice(0,7);applied={...draft};}if(data.dataset!==batch.value?.dataset||data.revision!==batch.value?.revision)rows.value=[];batch.value=data;autoError.value='';if(sourceBlocked.value){rows.value=[];total.value=0;loading.value=false;return;}await loadTable(page.value);await rebuildIfChanged();}catch(e){if(alive&&version===requestVersion){batch.value=null;rows.value=[];error.value=e.message;loading.value=false;}}}
 async function rebuild(automatic=false,scopeOverride=null){if(loading.value||saving.value||rebuilding.value||!batch.value||sourceBlocked.value)return;rebuilding.value=true;rebuildStatus.value='正在读取SaaS数据并提交后台汇总…';error.value='';autoError.value='';try{const data=await calculation(await (scopeOverride ? rebuildFinanceSummary(batch.value.dataset,batch.value.revision,scopeOverride) : rebuildFinanceSummary(batch.value.dataset,batch.value.revision)),()=>alive,rebuildStatus);if(!alive)return;rows.value=[];batch.value=data;await loadTable(automatic?page.value:1,!automatic);}catch(e){if(alive){if(e.code==='superseded'){await refresh();return;}if(automatic)autoError.value='自动汇总未完成，保留原结果，稍后重试：'+e.message;else error.value=e.message;}}finally{if(alive)rebuilding.value=false;}}
 function autoIdle(){return alive&&!document.hidden&&!loading.value&&!saving.value&&!rebuilding.value&&!advanced.value&&!editorOpen.value&&!detailOpen.value&&!historyOpen.value&&!coverageOpen.value&&!rebuildHistoryOpen.value;}
 async function rebuildIfChanged(){if(batch.value?.automation?.mode!=='server'&&autoIdle()&&!sourceBlocked.value&&batch.value?.can_edit&&batch.value?.source?.database_scope&&batch.value.source_changed)await rebuild(true);}
