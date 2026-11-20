@@ -475,7 +475,7 @@ const AppMenu = defineComponent({
       if (item.children) {
         return h(
           ElSubMenu,
-          { index: item.label },
+          { key: item.navigationIndex || item.path || item.label, index: item.label },
           {
             title: () => item.label,
             default: () => item.children.map(renderItem)
@@ -483,6 +483,7 @@ const AppMenu = defineComponent({
         );
       }
       return h(ElMenuItem, {
+          key: item.navigationIndex || item.path,
           index: item.navigationIndex || item.path,
         onClick: async () => {
           const navigationFailure = await router.push(item.path);
