@@ -374,6 +374,16 @@ const orderOrdering = ref('');
 const salesTable = ref(null);
 const query = reactive({});
 const filterData = reactive({ platforms: [], stores: [], currencies: [], order_statuses: [], refund_statuses: [] });
+const tkOrderScope = computed(() => {
+  if (props.mode !== 'orders') return false;
+  const platforms = [].concat(query.platform || []).filter(Boolean);
+  const stores = [].concat(query.store_id || []).filter(Boolean);
+  if (platforms.some(p => p !== 'tiktok')) return false;
+  return stores.length ? stores.every(id => filterData.stores.some(s => String(s.id) === String(id) && s.platform === 'tiktok')) : platforms.includes('tiktok');
+});
+watch(tkOrderScope, enabled => {
+  if (!enabled) delete query.tk_order_type;
+});
 const resolvedFilters = computed(() => {
   const filters = (isReport.value
     ? [...contract.value.filters].sort((a, b) => ['platform', 'store_id', 'currency', 'date_range', 'sku'].indexOf(a.key) - ['platform', 'store_id', 'currency', 'date_range', 'sku'].indexOf(b.key))
@@ -385,6 +395,12 @@ const resolvedFilters = computed(() => {
     { key: 'sku_mode', label: 'SKU 查询口径', type: 'select', options: [{ label: '同商品新旧编码', value: 'related' }, { label: '来源原始编码', value: 'source' }] },
     { key: 'mapping_as_of', label: '别名核对日期', type: 'date' }
   );
+  if (tkOrderScope.value) {
+    const options = pairs => pairs.map(([value, label]) => ({ value, label }));
+    filters.push(
+      { key: 'tk_order_type', label: '订单类型', type: 'select', options: options([['sample','送样订单'],['affiliate','联盟订单']]) },
+    );
+  }
   return filters;
 });
 const loading = ref(false);
@@ -598,6 +614,7 @@ function requestParams() {
   if (props.mode === 'stores' && storeOrdering.value) params.ordering = storeOrdering.value;
   if (props.mode === 'orders' && orderOrdering.value) params.ordering = orderOrdering.value;
   Object.entries(query).forEach(([key, value]) => {
+    if (key === 'tk_order_type' && !tkOrderScope.value) return;
     if (key === 'date_range' && value?.length === 2) {
       params.date_from = value[0];
       params.date_to = value[1];
