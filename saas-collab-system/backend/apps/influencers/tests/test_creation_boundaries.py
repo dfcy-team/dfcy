@@ -1751,6 +1751,18 @@ def test_task_sample_uses_task_product_snapshot_instead_of_client_product_name()
     assert fulfillment.product_name_snapshot == "Task product snapshot"
 
 
+def test_task_sample_rejects_item_for_a_different_product():
+    _, user, store, influencer = _records("task-product-boundary")
+    task = _task(user, store, external_product_id="PRIMARY")
+    with pytest.raises(ValidationError, match="Item product must match"):
+        create_sample_fulfillment(
+            user=user, request_key="task-wrong-product",
+            validated_data={"outreach_task": task, "influencer": influencer},
+            item_payloads=[{"external_product_id": "SECONDARY", "site_code": "PH", "quantity": 1}],
+        )
+    assert not SampleFulfillment.objects.filter(tenant=user.tenant, request_key="task-wrong-product").exists()
+
+
 def test_standalone_sample_uses_type_number_and_does_not_require_outreach_task():
     _, user, store, influencer = _records("standalone-sample")
     missing_product = SampleFulfillmentSerializer(
