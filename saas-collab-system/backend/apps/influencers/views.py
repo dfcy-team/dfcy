@@ -136,13 +136,13 @@ def _require_blacklist_scope(user):
         require_all_scope(user, permission_code)
 
 
-def _pagination(request):
+def _pagination(request, *, max_page_size=100):
     try:
         page = int(request.query_params.get("page", 1))
         page_size = int(request.query_params.get("page_size", 20))
     except ValueError as exc:
         raise ValidationError("Pagination values must be integers.") from exc
-    if page < 1 or page_size < 1 or page_size > 100:
+    if page < 1 or page_size < 1 or page_size > max_page_size:
         raise ValidationError("Invalid pagination range.")
     return page, page_size
 
@@ -387,7 +387,7 @@ class InfluencerCollectionView(ScopedInfluencerView):
             raise ValidationError({"ordering": "Unsupported ordering field."})
         queryset = queryset.order_by(ordering, "-id")
         queryset = filter_queryset(request.user, queryset, self.read_permission_code)
-        page, page_size = _pagination(request)
+        page, page_size = _pagination(request, max_page_size=200)
         return success_response(paginated_data(
             request,
             queryset,
@@ -893,10 +893,16 @@ class OutreachTaskCollectionView(ScopedInfluencerView):
             queryset = queryset.filter(is_deleted=False)
         status = request.query_params.get("status", "").strip()
         if status:
-            queryset = queryset.filter(status=status)
+            statuses = [value.strip() for value in status.split(",")]
+            if not set(statuses) <= {*OutreachTask.Status.values, "paused"}:
+                raise ValidationError({"status": "无效的建联任务状态"})
+            queryset = queryset.filter(status__in=statuses)
         store_id = request.query_params.get("store", "").strip()
         if store_id:
-            queryset = queryset.filter(store_id=store_id)
+            stores = [value.strip() for value in store_id.split(",")]
+            if any(not s.isascii() or not s.isdecimal() or len(s) > 19 or not 0 < int(s) < 2**63 for s in stores):
+                raise ValidationError({"store": "无效的店铺 ID"})
+            queryset = queryset.filter(store_id__in=stores)
         search = request.query_params.get("search", "").strip()
         if search:
             queryset = queryset.filter(
@@ -930,7 +936,7 @@ class OutreachTaskCollectionView(ScopedInfluencerView):
             ordering = "-_priority_rank" if ordering.startswith("-") else "_priority_rank"
         queryset = queryset.order_by(ordering, "-id")
         queryset = filter_queryset(request.user, queryset, self.read_permission_code)
-        page, page_size = _pagination(request)
+        page, page_size = _pagination(request, max_page_size=200)
         return success_response(paginated_data(request, queryset, OutreachTaskSerializer, page=page, page_size=page_size, serializer_context={"request": request}))
 
     def post(self, request):
@@ -1429,9 +1435,10 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
             queryset = queryset.filter(is_deleted=False)
         status = request.query_params.get("status", "").strip()
         if status:
-            if status not in SampleFulfillment.Status.values:
+            statuses = {value.strip() for value in status.split(",")}
+            if not statuses.issubset(SampleFulfillment.Status.values):
                 raise ValidationError({"status": "Unsupported fulfillment status."})
-            queryset = queryset.filter(status=status)
+            queryset = queryset.filter(status__in=statuses)
         outreach_task_id = request.query_params.get("outreach_task", "").strip()
         if outreach_task_id:
             if not outreach_task_id.isdigit() or int(outreach_task_id) < 1:
@@ -1442,7 +1449,11 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
             )
         store_id = request.query_params.get("store", "").strip()
         if store_id:
-            queryset = queryset.filter(store_id=store_id)
+            stores = {value.strip() for value in store_id.split(",")}
+            if any(not value.isascii() or not value.isdecimal() or len(value) > 19
+                   or not 0 < int(value) < 2**63 for value in stores):
+                raise ValidationError({"store": "Expected positive store IDs."})
+            queryset = queryset.filter(store_id__in=stores)
         owner_id = request.query_params.get("owner", "").strip()
         if owner_id:
             if not owner_id.isdigit() or int(owner_id) < 1:
@@ -1503,7 +1514,7 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
                 fields = ("_without_task", *fields)
             queryset = queryset.order_by(*fields)
         queryset = filter_queryset(request.user, queryset, self.read_permission_code)
-        page, page_size = _pagination(request)
+        page, page_size = _pagination(request, max_page_size=200)
         return success_response(paginated_data(request, queryset, SampleFulfillmentSerializer, page=page, page_size=page_size))
 
     def post(self, request):

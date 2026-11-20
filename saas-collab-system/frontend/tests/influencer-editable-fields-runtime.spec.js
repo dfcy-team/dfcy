@@ -27,8 +27,13 @@ const stubs = {
     template: '<input :value="modelValue" :readonly="readonly" :disabled="disabled" @input="$emit(\'update:modelValue\', $event.target.value)" />'
   },
   ElSelect: {
-    props: ['modelValue', 'disabled'], emits: ['update:modelValue'],
-    template: '<select :disabled="disabled" :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value)"><slot /></select>'
+    props: { modelValue: {}, disabled: Boolean, multiple: Boolean }, emits: ['update:modelValue', 'change'],
+    methods: { select(event) {
+      const value = this.multiple ? Array.from(event.target.selectedOptions, option => option.value) : event.target.value;
+      this.$emit('update:modelValue', value);
+      this.$emit('change', value);
+    } },
+    template: '<select :disabled="disabled" :multiple="multiple" @change="select"><slot /></select>'
   },
   ElOption: { props: ['value', 'label'], template: '<option :value="value">{{ label }}</option>' },
   ElInputNumber: { props: ['modelValue', 'disabled'], template: '<input type="number" :value="modelValue" :disabled="disabled" />' },
@@ -87,10 +92,11 @@ describe('editable task number and sample type', () => {
       await flushPromises();
       const storeFilter = wrapper.get('.toolbar select[placeholder="全部店铺"]');
       expect(storeFilter.findAll('option').map((option) => option.text())).toEqual(['Page one shop', 'Other shop']);
-      await storeFilter.setValue('9');
+      await storeFilter.setValue(['3', '9']);
+      await wrapper.get('.toolbar select[placeholder="全部状态"]').setValue(['shipped', 'completed']);
       await wrapper.findAll('.toolbar button').find((button) => button.text() === '查询').trigger('click');
       await flushPromises();
-      expect(request.mock.calls.at(-1)[0].params).toMatchObject({ page: 1, store: '9' });
+      expect(request.mock.calls.at(-1)[0].params).toMatchObject({ page: 1, store: '3,9', status: 'shipped,completed' });
       expect(storeFilter.findAll('option').map((option) => option.text())).toEqual(['Page one shop', 'Other shop']);
       expect(request.mock.calls.filter(([config]) => config.params?.filters_only === 'true')).toHaveLength(1);
     } finally {
