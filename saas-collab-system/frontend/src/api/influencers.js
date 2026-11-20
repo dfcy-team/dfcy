@@ -4,6 +4,7 @@ import { influencerMocks } from '../mock/influencers';
 const API_ROOT = '/api/internal/influencers';
 
 export const OUTREACH_STATUS_LABELS = Object.freeze({
+  paused: '已暂停',
   pending: '待开始',
   in_progress: '进行中',
   completed: '已完成',

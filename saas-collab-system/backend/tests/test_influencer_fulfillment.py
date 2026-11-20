@@ -476,6 +476,30 @@ def test_outreach_task_list_returns_existing_rows():
     assert [row["id"] for row in payload["results"]] == [task.id]
 
 
+def test_outreach_multiselect_intersection_before_pagination():
+    tenant = Tenant.objects.create(name="Multi", code="task-multi")
+    user, client = user_with_permissions(tenant, "multi-viewer", "influencers.outreach.view")
+    a, _, first = base_records(tenant, user, "multi-a")
+    b, creator, second = base_records(tenant, user, "multi-b")
+    base_records(tenant, user, "multi-c")
+    extra = create_outreach_task(user=user, validated_data={
+        "task_no": "TASK-multi-extra", "influencer": creator, "store": b, "owner": user,
+    })
+    # Exercise existing persisted states independently of transition permissions.
+    from django.db import connection
+    with connection.cursor() as cursor:
+        for task, status in [(first, "pending"), (second, "completed"), (extra, "cancelled")]:
+            cursor.execute(f"UPDATE {connection.ops.quote_name(OutreachTask._meta.db_table)} SET status=%s WHERE id=%s", [status, task.pk])
+    url = "/api/internal/influencers/outreach-tasks/"
+    params = {"status": "pending,completed", "store": f"{a.pk},{b.pk}", "page_size": 1}
+    pages = [client.get(url, {**params, "page": page}).data["data"] for page in (1, 2)]
+    assert all(page["count"] == 2 for page in pages)
+    assert {page["results"][0]["id"] for page in pages} == {first.pk, second.pk}
+    assert client.get(url, {"store": str(b.pk), "status": "completed"}).data["data"]["count"] == 1
+    assert client.get(url).data["data"]["count"] == 4
+    assert client.get(url, {"store": "1,abc"}).status_code == 400
+
+
 def test_sample_pricing_data_migration_backfills_historical_values():
     tenant = Tenant.objects.create(name="Backfill Tenant", code="backfill-tenant")
     user = CustomUser.objects.create_user(username="backfill-user", tenant=tenant)

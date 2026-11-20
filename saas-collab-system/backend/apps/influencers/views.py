@@ -893,10 +893,16 @@ class OutreachTaskCollectionView(ScopedInfluencerView):
             queryset = queryset.filter(is_deleted=False)
         status = request.query_params.get("status", "").strip()
         if status:
-            queryset = queryset.filter(status=status)
+            statuses = [value.strip() for value in status.split(",")]
+            if not set(statuses) <= {*OutreachTask.Status.values, "paused"}:
+                raise ValidationError({"status": "无效的建联任务状态"})
+            queryset = queryset.filter(status__in=statuses)
         store_id = request.query_params.get("store", "").strip()
         if store_id:
-            queryset = queryset.filter(store_id=store_id)
+            stores = [value.strip() for value in store_id.split(",")]
+            if any(not s.isascii() or not s.isdecimal() or len(s) > 19 or not 0 < int(s) < 2**63 for s in stores):
+                raise ValidationError({"store": "无效的店铺 ID"})
+            queryset = queryset.filter(store_id__in=stores)
         search = request.query_params.get("search", "").strip()
         if search:
             queryset = queryset.filter(
