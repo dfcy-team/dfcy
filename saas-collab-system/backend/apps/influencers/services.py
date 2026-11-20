@@ -17,7 +17,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Exists, Model, OuterRef, Q, QuerySet
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.audit.services import write_operation_log
 from apps.audit.models import NotificationMessage
@@ -171,6 +171,8 @@ def _generate_sample_fulfillment_no(tenant, link_type):
 
 
 def _assert_task_accepts_target(task, *, allow_completed=False):
+    if task.status == OutreachTask.Status.PAUSED:
+        raise ValidationError({"outreach_task": "任务已暂停，请恢复任务后再新增送样或修改建联目标。"}, code="conflict")
     blocked_statuses = {OutreachTask.Status.CANCELLED}
     if not allow_completed:
         blocked_statuses.add(OutreachTask.Status.COMPLETED)
@@ -1555,7 +1557,7 @@ def create_outreach_task(*, user, validated_data):
 
 @transaction.atomic
 def update_outreach_task(*, user, task, validated_data, expected_version):
-    """Safely edit mutable task facts without touching workflow state timestamps."""
+    """Edit task facts atomically; delegate requested status to the workflow."""
     _lock_tenant(user)
     task = _locked_task(user, _pk(task))
     if task.is_deleted:
@@ -1567,6 +1569,11 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         )
 
     data = dict(validated_data)
+    requested_status = data.pop("status", None)
+    if not data and requested_status is not None:
+        if requested_status == task.status:
+            return task
+        return transition_outreach_task(user=user, task=task, status=requested_status, expected_version=expected_version)
     if any(
         field in data
         for field in ("source_owner_name_snapshot", "source_dispatcher_name_snapshot")
@@ -1610,6 +1617,8 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         changes["task_no"] = task_no
     if "task_name" in data:
         changes["task_name"] = str(data["task_name"] or "").strip()
+    if "dispatch_requirements" in data:
+        changes["dispatch_requirements"] = data["dispatch_requirements"].strip()
     if "priority" in data:
         changes["priority"] = data["priority"]
     if "sku_prefix" in data:
@@ -1656,6 +1665,7 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
     before = {
         "task_no": task.task_no,
         "task_name": task.task_name,
+        "dispatch_requirements": task.dispatch_requirements,
         "priority": task.priority,
         "store": task.store_id,
         "external_product_id": task.external_product_id,
@@ -1667,6 +1677,7 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
     after = {
         "task_no": changes.get("task_no", task.task_no),
         "task_name": changes.get("task_name", task.task_name),
+        "dispatch_requirements": changes.get("dispatch_requirements", task.dispatch_requirements),
         "priority": changes.get("priority", task.priority),
         "store": _pk(changes.get("store", task.store_id)),
         "external_product_id": changes.get("external_product_id", task.external_product_id),
@@ -1710,6 +1721,8 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         before=before,
         after=after,
     )
+    if requested_status is not None and requested_status != task.status:
+        task = transition_outreach_task(user=user, task=task, status=requested_status, expected_version=task.version)
     if "target_count" in changes:
         task = recompute_outreach_task_completion(user=user, task=task)
     return task
@@ -2093,10 +2106,35 @@ def soft_delete_outreach_target(*, user, task, target, expected_version):
 
 
 @transaction.atomic
-def soft_delete_outreach_task(*, user, task, expected_version):
+def soft_delete_outreach_task(*, user, task, expected_version, cascade_samples=True):
     if expected_version is None:
         raise ValidationError({"version": "Expected task version is required."})
+    _lock_tenant(user)
     task = _locked_task(user, _pk(task))
+    if task.is_deleted or task.version != expected_version:
+        raise ValidationError({"version": "Outreach task was changed by another request."}, code="conflict")
+    samples = []
+    if cascade_samples:
+        from .scopes import filter_queryset, require_object, require_scope
+
+        require_scope(user, "influencers.outreach.manage")
+        require_object(user, task, "influencers.outreach.manage")
+
+        children = SampleFulfillment.objects.filter(tenant=user.tenant, outreach_task=task, is_deleted=False)
+        samples = list(children.select_for_update().order_by("pk"))
+        if samples:
+            message = "无权删除该任务的全部关联送样，任务及送样均未删除。"
+            try:
+                require_scope(user, "influencers.fulfillment.manage")
+                visible_ids = set(filter_queryset(user, children, "influencers.fulfillment.manage").values_list("pk", flat=True))
+            except PermissionDenied as exc:
+                raise PermissionDenied(message) from exc
+            if visible_ids != {sample.pk for sample in samples}:
+                raise PermissionDenied(message)
+        # Reuse audited deletion without recomputing a task being removed.
+        for sample in samples:
+            soft_delete_sample_fulfillment(user=user, fulfillment=sample,
+                                          expected_version=sample.version, recompute_related=False)
     now = timezone.now()
     updated = QuerySet.update(
         OutreachTask.objects.filter(
@@ -2116,7 +2154,11 @@ def soft_delete_outreach_task(*, user, task, expected_version):
             code="conflict",
         )
     task.refresh_from_db()
-    _audit(user, "outreach_delete", "outreach_task", task, after={"is_deleted": True})
+    task._cascade_deleted_sample_count = len(samples)
+    _audit(user, "outreach_delete", "outreach_task", task, after={
+        "is_deleted": True, "deleted_sample_count": len(samples),
+        "deleted_sample_ids": [sample.pk for sample in samples],
+    })
     return task
 
 
@@ -2224,8 +2266,9 @@ def transition_outreach_task(*, user, task, status, expected_version):
         raise ValidationError({"status": "Unsupported task status."})
     allowed = {
         OutreachTask.Status.PENDING: {OutreachTask.Status.IN_PROGRESS, OutreachTask.Status.CANCELLED},
-        OutreachTask.Status.IN_PROGRESS: {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED},
-        OutreachTask.Status.COMPLETED: set(),
+        OutreachTask.Status.IN_PROGRESS: {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED, OutreachTask.Status.PAUSED},
+        OutreachTask.Status.PAUSED: {OutreachTask.Status.IN_PROGRESS, OutreachTask.Status.CANCELLED},
+        OutreachTask.Status.COMPLETED: {OutreachTask.Status.IN_PROGRESS},
         OutreachTask.Status.CANCELLED: set(),
     }
     if status not in allowed[task.status]:
@@ -2234,6 +2277,7 @@ def transition_outreach_task(*, user, task, status, expected_version):
     now = timezone.now()
     changes = {"status": status, "version": task.version + 1, "updated_at": now}
     if status == OutreachTask.Status.IN_PROGRESS:
+        changes["finalized_at"] = None
         changes["started_at"] = task.started_at or now
         changes["outreach_at"] = task.outreach_at or now
     if status in {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED}:
@@ -5236,7 +5280,7 @@ def update_sample_fulfillment(
         items_mode = "append"
         item_payloads = append_item_payloads
     has_item_change = item_payloads is not None
-    identity_only = bool(data) and set(data) <= {"fulfillment_no", "type_no", "external_product_id"} and not has_item_change
+    identity_only = bool(data) and set(data) <= {"fulfillment_no", "type_no", "external_product_id", "sample_sent_at"} and not has_item_change
     if not data and not has_item_change:
         raise ValidationError({"detail": "At least one editable fulfillment field is required."})
 
@@ -5263,6 +5307,13 @@ def update_sample_fulfillment(
     for field_name in ("sample_order_no", "notes"):
         if field_name in data:
             changes[field_name] = str(data[field_name] or "").strip()
+    if "sample_sent_at" in data:
+        sent_at = data["sample_sent_at"]
+        if sent_at > timezone.now():
+            raise ValidationError({"sample_sent_at": "送样时间不能晚于当前时间。"})
+        if fulfillment.shipped_at and sent_at > fulfillment.shipped_at:
+            raise ValidationError({"sample_sent_at": "送样时间不能晚于已记录的发货时间。"})
+        changes["sample_sent_at"] = sent_at
     if "link_type" in data:
         if data["link_type"] not in dict(SampleFulfillment.LINK_TYPE_CHOICES):
             raise ValidationError({"link_type": "Unsupported link type."})
@@ -5284,6 +5335,7 @@ def update_sample_fulfillment(
         "type_no": fulfillment.type_no,
         "external_product_id": fulfillment.external_product_id,
         "sample_order_no": fulfillment.sample_order_no,
+        "sample_sent_at": fulfillment.sample_sent_at.isoformat() if fulfillment.sample_sent_at else None,
         "notes": fulfillment.notes,
         "link_type": fulfillment.link_type,
         "quick_tags": fulfillment.quick_tags,
@@ -5367,6 +5419,7 @@ def update_sample_fulfillment(
             "type_no": fulfillment.type_no,
             "external_product_id": fulfillment.external_product_id,
             "sample_order_no": fulfillment.sample_order_no,
+            "sample_sent_at": fulfillment.sample_sent_at.isoformat() if fulfillment.sample_sent_at else None,
             "notes": fulfillment.notes,
             "link_type": fulfillment.link_type,
             "quick_tags": fulfillment.quick_tags,
@@ -5646,6 +5699,8 @@ def soft_delete_import_source(
             user=user,
             task=task,
             expected_version=task.version,
+            # Import reconciliation must not cascade beyond its source manifest.
+            cascade_samples=False,
         )
         deleted_tasks += 1
 

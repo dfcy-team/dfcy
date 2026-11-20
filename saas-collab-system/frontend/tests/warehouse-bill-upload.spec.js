@@ -52,7 +52,7 @@ describe('original warehouse bill uploads', () => {
   it('shows the file chooser before a file is selected without empty review columns or writes', async () => {
     await mount();
     expect(wrapper.find('[aria-label="等待选择账单"]').exists()).toBe(true);
-    expect(wrapper.text()).toContain('选择原始仓库账单');
+    expect(wrapper.text()).toContain('原始仓库账单');
     expect(wrapper.find('.review-queue').exists()).toBe(false);
     expect(wrapper.find('.row-evidence').exists()).toBe(false);
     expect(wrapper.text()).toContain('上传和解析只生成预览，不会自动登记费用');
@@ -81,8 +81,8 @@ describe('original warehouse bill uploads', () => {
     await wrapper.get('[aria-label="核对第2条"]').trigger('click');
     expect(wrapper.vm.focusedRow.number).toBe(1);
     await wrapper.findAll('button').find(b => b.text() === '取消').trigger('click');
-    await wrapper.findAll('button').find(b => b.text() === '配置／选择原文件格式').trigger('click');
-    expect(wrapper.find('[aria-label="账单格式配置"]').exists()).toBe(true);
+    await wrapper.findAll('button').find(b => b.text() === '新增取数逻辑 / 修改已保存逻辑').trigger('click');
+    expect(wrapper.find('[aria-label="账单取数逻辑配置"]').exists()).toBe(true);
     expect(wrapper.find('[aria-label="原账单业务明细"]').exists()).toBe(false);
     await wrapper.findAll('button').find(b => b.text() === '返回批量核对').trigger('click');
     expect(wrapper.find('[aria-label="原账单业务明细"]').exists()).toBe(true);
@@ -135,13 +135,20 @@ describe('original warehouse bill uploads', () => {
     await mount(); expect(wrapper.vm.history).toHaveLength(1);
     expect(request.mock.calls.every(([c]) => !c.method && c.noMockFallback)).toBe(true);
   });
-  it('automatically parses the selected original file but never automatically confirms import', async () => {
+  it('uploads from the format entry and opens configuration without parsing', async () => {
     await mount(); request.mockClear();
+    const uploaded = { ...structuredClone(ready), overrides:{registration_mode:'file_settlement_v2'}, summary:{awaiting_parse:true} };
+    request.mockImplementation(async c => ({success:true, data:c.url === BASE && !c.method ? {results:[uploaded]} : uploaded}));
+    wrapper.vm.chooseFile('format');
     const event = { target: { files: [new File(['xlsx'], '原账单.xlsx')], value: 'selected' } };
     await wrapper.vm.upload(event);
     expect(request).toHaveBeenCalledWith(expect.objectContaining({ method: 'post', url: BASE, timeout: 300000, data: expect.any(FormData) }));
     const write = request.mock.calls.filter(([c]) => c.method);
-    expect(write).toHaveLength(1); expect(JSON.parse(write[0][0].data.get('options'))).toEqual({ registration_mode: 'file_settlement_v2' });
+    expect(write).toHaveLength(1); expect(JSON.parse(write[0][0].data.get('options'))).toEqual({ registration_mode: 'file_settlement_v2', saved_rules_only:true, order_warehouse:true });
+    expect(write[0][0].data.get('defer_parse')).toBe('true');
+    expect(wrapper.get('[aria-label="账单取数逻辑配置"]').exists()).toBe(true);
+    expect(wrapper.find('[aria-label="选择解析方式"]').exists()).toBe(false);
+    expect(wrapper.find('.review-queue').exists()).toBe(false);
     expect(event.target.value).toBe('');
   });
   it('requires explicit valid-only selection and confirmation before importing drafts', async () => {
@@ -287,4 +294,83 @@ describe('original warehouse bill uploads', () => {
     wrapper.vm.batchField = 'store_id'; wrapper.vm.batchValue = 1; wrapper.vm.batchReason = '不应设置'; request.mockClear();
     await wrapper.vm.saveBatch(); expect(request).not.toHaveBeenCalled(); expect(wrapper.vm.error).toContain('国家级');
   });
+});
+
+it('offers direct parsing and a separate format file selection entry', async () => {
+ await mount();
+ expect(wrapper.text()).not.toContain('上传原始 Excel 账单');
+ expect(wrapper.text()).toContain('直接解析');
+ await wrapper.findAll('button').find(b=>b.text()==='新增取数逻辑 / 修改已保存逻辑').trigger('click');
+ expect(wrapper.get('[aria-label="账单取数逻辑配置"]').text()).toContain('选择 Excel 文件');
+ expect(request.mock.calls.every(([c])=>!c.method)).toBe(true);
+ await wrapper.findAll('button').find(b=>b.text()==='返回批量核对').trigger('click');
+ expect(wrapper.text()).toContain('直接解析');
+});
+it('uploads first and keeps country and month in the current bill page', async () => {
+ await mount(); request.mockClear();
+ const queued={...structuredClone(ready),status:'ready',summary:{awaiting_parse:true},overrides:{registration_mode:'file_settlement_v2'}};
+ request.mockImplementation(async c=>({success:true,data:c.url===BASE&&!c.method?{results:[queued]}:queued}));
+ wrapper.vm.settings.country='PH';wrapper.vm.settings.bill_month='2026-09';
+ await wrapper.vm.upload({target:{files:[new File(['xlsx'],'直接解析.xlsx')],value:'selected'}});
+ const writes=request.mock.calls.filter(([c])=>c.method);
+ expect(writes).toHaveLength(1);expect(writes[0][0].data.get('defer_parse')).toBe('true');
+ expect(wrapper.vm.formatVisible).toBe(false);expect(wrapper.vm.job.status).toBe('ready');
+ expect(wrapper.get('[aria-label="账单解析信息"]').exists()).toBe(true);
+ expect(wrapper.vm.settings.country).toBe('');expect(wrapper.vm.settings.bill_month).toBe('');
+});
+it('starts parsing an existing deferred upload when chosen through direct parsing', async () => {
+ await mount();request.mockClear();
+ const uploaded={...structuredClone(ready),summary:{awaiting_parse:true},overrides:{registration_mode:'file_settlement_v2'}};
+ request.mockImplementation(async c=>({success:true,data:c.url===BASE&&!c.method?{results:[uploaded]}:uploaded}));
+ wrapper.vm.settings.country='PH';wrapper.vm.settings.bill_month='2026-09';
+ await wrapper.vm.upload({target:{files:[new File(['xlsx'],'原账单.xlsx')],value:'selected'}});
+ wrapper.vm.settings.country='PH';wrapper.vm.settings.bill_month='2026-09';
+ await wrapper.vm.reparse();
+ const writes=request.mock.calls.filter(([c])=>c.method);
+ expect(writes).toHaveLength(2);expect(writes[1][0].data.operation).toBe('parse');
+});
+
+it('lets users replace the file inside format configuration and respects unsaved edits', async () => {
+ await mount();
+ wrapper.vm.job={...structuredClone(ready),overrides:{registration_mode:'file_settlement_v2'}};
+ wrapper.vm.formatVisible=true;await flushPromises();
+ expect(wrapper.get('[aria-label="账单取数逻辑配置"]').text()).toContain('更换 Excel 文件');
+ const click=vi.spyOn(wrapper.get('input[type="file"]').element,'click');
+ wrapper.vm.formatEditor={canLeave:vi.fn().mockResolvedValue(false)};
+ await wrapper.vm.chooseFormatFile();expect(click).not.toHaveBeenCalled();
+ wrapper.vm.formatEditor.canLeave.mockResolvedValue(true);
+ await wrapper.vm.chooseFormatFile();expect(click).toHaveBeenCalledOnce();
+ expect(wrapper.vm.uploadIntent).toBe('format');
+});
+
+it('requires manual country and month before direct parsing',async()=>{
+ await mount();request.mockClear();
+ await wrapper.vm.upload({target:{files:[new File(['xlsx'],'2026年9月菲律宾.xlsx')],value:'selected'}});
+ expect(request.mock.calls.filter(([c])=>c.method)).toHaveLength(1);
+ request.mockClear();await wrapper.vm.reparse();
+ expect(request).not.toHaveBeenCalled();expect(wrapper.vm.error).toContain('请先填写国家和账单月份');
+});
+
+it('asks for country and month inline only after clicking preview',async()=>{
+ await mount();
+ wrapper.vm.job={...structuredClone(ready),summary:{awaiting_parse:true},overrides:{registration_mode:'file_settlement_v2',order_warehouse:true}};
+ wrapper.vm.settings.order_warehouse=true;await flushPromises();request.mockClear();
+ expect(wrapper.findComponent({name:'ElForm'}).exists()).toBe(false);
+ await wrapper.vm.beginPreview();await flushPromises();
+ expect(wrapper.findComponent({name:'ElForm'}).exists()).toBe(true);
+ expect(request).not.toHaveBeenCalled();
+ wrapper.vm.settings.country='PH';wrapper.vm.settings.bill_month='2026-09';
+ await wrapper.vm.beginPreview();
+ expect(request).toHaveBeenCalledWith(expect.objectContaining({method:'post',data:expect.objectContaining({operation:'parse',options:expect.objectContaining({country:'PH',bill_month:'2026-09'})})}));
+});
+
+it('requires explicit mixed difference allocation confirmation and sends exact amounts', async () => {
+  await mount();
+  wrapper.vm.job = { ...structuredClone(ready), overrides:{registration_mode:'file_settlement_v2'}, summary:{country:'PH',mixed_warehouses:true,warehouse_ids:[1,2],difference_state:'confirmation_required',processing_difference:'2'} };
+  await flushPromises(); request.mockClear();
+  await wrapper.vm.confirmAllocation(); expect(request).not.toHaveBeenCalled();
+  wrapper.vm.allocationAmounts[1] = '1.25'; wrapper.vm.allocationAmounts[2] = '0.75';
+  wrapper.vm.allocationReason = '核对仓库明细'; wrapper.vm.allocationConfirmed = true;
+  await wrapper.vm.confirmAllocation();
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({method:'post',data:expect.objectContaining({operation:'allocate_difference',version:2,allocations:[{warehouse_id:1,amount:'1.25'},{warehouse_id:2,amount:'0.75'}],coverage_confirmed:true,difference_confirmed:true})}));
 });

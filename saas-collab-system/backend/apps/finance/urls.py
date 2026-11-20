@@ -30,10 +30,13 @@ from .platform_wallet_api import WalletOverview, WalletWithdrawals, WalletSchedu
 
 from .summary_views import summary_bootstrap, summary_document, summary_save, summary_report
 from .summary_views import summary_table, summary_table_detail, summary_fee, summary_history, summary_rebuild, summary_job
+from .summary_views import summary_initialize, summary_publish
 
 
 urlpatterns = [
     path('summary/', summary_bootstrap, name='finance-summary-bootstrap'),
+    path('summary/initialize/', summary_initialize, name='finance-summary-initialize'),
+    path('summary/<int:pk>/publish/', summary_publish, name='finance-summary-publish'),
     path('summary/jobs/<int:pk>/', summary_job, name='finance-summary-job'),
     path('summary/<int:pk>/rebuild/', summary_rebuild, name='finance-summary-rebuild'),
     path('summary/<int:pk>/table/', summary_table, name='finance-summary-table'),

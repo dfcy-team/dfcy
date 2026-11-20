@@ -11,7 +11,7 @@ def _tenant_distinct_values(queryset, field, *, fact_tenants=None):
     return [value for _, value in rows]
 
 
-def sales_filter_catalog(orders, refunds, sync_jobs):
+def sales_filter_catalog(orders, refunds, sync_jobs, *, dimensions_only=False):
     """Build filter options without widening caller-provided tenant/data scopes."""
     # Keep fact platform IDs: validated writes normally align them to the store,
     # but legacy/bulk-loaded facts may not. Resolve both dimensions separately.
@@ -24,11 +24,19 @@ def sales_filter_catalog(orders, refunds, sync_jobs):
         store__tenant_id=F("tenant_id"),
         platform__tenant_id=F("tenant_id"),
     )
-    store_platforms = list(
-        valid_orders.order_by().values_list(
-            "tenant_id", "store_id", "platform__platform_type",
-        ).distinct()
-    )
+    if dimensions_only:
+        # Keep the fact platform independent of the store's current platform.
+        pairs = list(valid_orders.order_by().values_list("tenant_id", "store_id", "platform_id").distinct())
+        platform_model = orders.model._meta.get_field("platform").related_model
+        scoped_platforms = platform_model.objects.filter(pk__in={pid for _, _, pid in pairs})
+        platform_by_id = dict(scoped_platforms.values_list("pk", "platform_type"))
+        store_platforms = [(tenant, store, platform_by_id[pid]) for tenant, store, pid in pairs]
+    else:
+        store_platforms = list(
+            valid_orders.order_by().values_list(
+                "tenant_id", "store_id", "platform__platform_type",
+            ).distinct()
+        )
     store_ids = {store_id for _, store_id, _ in store_platforms}
     fact_tenants = {tenant_id for tenant_id, _, _ in store_platforms}
     # Preserve the legacy database ordering.
@@ -52,6 +60,10 @@ def sales_filter_catalog(orders, refunds, sync_jobs):
                 "id": store["id"], "code": store["code"], "name": store["name"],
                 "region": store["country_code"], "platform": platform_type,
             })
+    if dimensions_only:
+        platforms = list(scoped_platforms.order_by("platform_type").values_list("platform_type", flat=True).distinct())
+        return {"stores": stores, "platforms": platforms}
+
     # This is a small master-data lookup; DISTINCT and ordering stay in SQL.
     platform_types = list(
         valid_orders.order_by().values_list("platform__platform_type", flat=True)

@@ -8,7 +8,7 @@ from apps.commerce import country_decisions as domain
 from apps.masterdata.models import InventoryABCRun, InventoryObservationSettings, CountrySiteMaster, StoreMaster
 from apps.permissions.ui_p2_scopes import require_all_scope
 from .decision_api import CountryDecisionAPI
-from .abc_access import published_run
+from .abc_access import ABC_POLICY_VERSION, published_run
 
 
 class InventoryABCView(CountryDecisionAPI):
@@ -34,5 +34,5 @@ class InventoryABCView(CountryDecisionAPI):
         pending = InventoryABCRun.objects.filter(tenant=request.user.tenant, country=country, status__in=["queued", "building"]).order_by("-pk").first()
         if not pending:
             cutoff = timezone.now().astimezone(ZoneInfo(country.timezone)).date() - timedelta(days=1)
-            pending = InventoryABCRun.objects.create(tenant=request.user.tenant, country=country, cutoff_date=cutoff, config={"source": "manual", "requested_by": request.user.pk})
+            pending = InventoryABCRun.objects.create(tenant=request.user.tenant, country=country, cutoff_date=cutoff, config={"source": "manual", "requested_by": request.user.pk, "classification_basis": "composite", "policy_version": ABC_POLICY_VERSION})
         return Response({"data": {"id": pending.pk, "status": pending.status}})

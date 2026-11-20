@@ -82,7 +82,7 @@ class CountryDecisions(CountryDecisionAPI):
         query.is_valid(raise_exception=True)
         values = query.validated_data
         permission_cache = getattr(request, '_permission_resolution_cache', {})
-        countries = list(domain.countries_for(request.user, permission_cache))
+        countries = list(domain.countries_for(request.user, permission_cache, include_best=True))
         country_options = [{'id': c.pk, 'name': c.name, 'country_code': c.country_code} for c in countries]
         result, count, can_write, summary, page_data = [], 0, False, None, {}
         category_options = []
@@ -91,12 +91,11 @@ class CountryDecisions(CountryDecisionAPI):
             if country is None:
                 from rest_framework.exceptions import NotFound
                 raise NotFound('国家不存在或不在库存数据授权范围内。')
-            rows = domain.skus_for(request.user, country, permission_cache).select_related('spu__category_node').order_by('sku_code', 'pk')
+            rows = domain.skus_for(request.user, country, permission_cache, include_best=True).select_related('spu__category_node').order_by('sku_code', 'pk')
             if values['mapped_only']:
-                from .category_inventory import stock_facts
-                snapshots = stock_facts(request.user, country, permission_cache)
-                rows = rows.filter(pk__in={item['internal_sku_id'] for item in snapshots})
-            if values['mapped_only']:
+                inventory_context = domain.inventory_context_for(request.user, country, include_best=True,
+                                                                 permission_cache=permission_cache)
+                rows = rows.filter(pk__in=inventory_context['by_sku'])
                 category_options, catalog, visible = mapped_category_options(request.user, rows)
                 if 'category_id' in values:
                     if values['category_id'] not in visible:
@@ -112,22 +111,16 @@ class CountryDecisions(CountryDecisionAPI):
             if values['mapped_only'] or (values['decision_state'] == 'all' and 'decision_state' not in request.query_params):
                 from apps.alerts.inventory_decisions import decision_page
                 if values['mapped_only']:
-                    from django.core.cache import cache
-                    from apps.supply_chain.services import request_hash
-                    ids = list(rows.values_list('pk', flat=True)[values['offset']:values['offset'] + values['limit']])
-                    key = 'inventory-page:listing-v2:' + request_hash({
-                        'tenant': request.user.tenant_id, 'actor': request.user.pk, 'country': country.pk,
-                        'permission': domain.permission_signature(request.user, permission_cache),
-                        'ids': ids, 'days': values['window_days'], 'target': values['target_days']})
-                    result = cache.get_or_set(key, lambda: decision_page(
-                        request.user, country, rows.filter(pk__in=ids), decision_state='all',
+                    result, count, _ = decision_page(
+                        request.user, country, rows, decision_state='all',
                         window_days=values['window_days'], target_days=values['target_days'],
-                        offset=0, limit=values['limit'], mapped_only=True)[0], 60)
-                    count = rows.count()
+                        offset=values['offset'], limit=values['limit'], mapped_only=True,
+                        inventory_context=inventory_context, include_best=True)
                 else:
                     result, count, summary = decision_page(request.user, country, rows,
                         decision_state='all', window_days=values['window_days'],
-                        target_days=values['target_days'], offset=values['offset'], limit=values['limit'], mapped_only=False)
+                        target_days=values['target_days'], offset=values['offset'], limit=values['limit'],
+                        include_best=True)
 
             else:
                 from apps.alerts.inventory_views import menu_page
@@ -137,7 +130,10 @@ class CountryDecisions(CountryDecisionAPI):
                 result, count, summary = page_data['results'], page_data['count'], page_data['summary']
             if values['mapped_only']:
                 from .category_inventory import operations_summary
-                summary = operations_summary(request.user, country, rows, values['window_days'], permission_cache)
+                snapshots = domain.mapped_inventory_facts(inventory_context,
+                    rows.order_by().select_related(None).only('id', 'spu_id'))
+                summary = operations_summary(request.user, country, rows, values['window_days'], permission_cache,
+                                             snapshots=snapshots)
             from apps.commerce.inventory_listing import linked_sku_ids, apply_listing_observation
             listing_ids = linked_sku_ids(request.user.tenant_id, country.country_code,
                                         [item['sku_id'] for item in result])
@@ -183,8 +179,8 @@ class CountryDecisionAlerts(CountryDecisionAPI):
 
 class CountryDecisionImage(CountryDecisionAPI):
     def get(self, request, country_id, sku_id):
-        country = domain.country_for(request.user, country_id)
-        sku = domain.skus_for(request.user, country).filter(pk=sku_id).select_related('spu__category_node').first()
+        country = domain.country_for(request.user, country_id, include_best=True)
+        sku = domain.skus_for(request.user, country, include_best=True).filter(pk=sku_id).select_related('spu__category_node').first()
         if not sku:
             raise NotFound('商品不在经营数据授权范围内。')
         value = load_product_images({'lines': [{'sku_id': sku.pk, 'product_details': product_details(sku)}]},

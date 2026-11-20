@@ -48,8 +48,8 @@
           </div>
         </template></el-table-column>
         <el-table-column label="SKU / 商品" min-width="280"><template #default="{row}"><div class="product"><DocumentProductImageV2 :image-path="safeImage(row.image_preview_url)" :alt="`${row.sku} 商品图片`"/><div><DocumentSkuV2 :sku="row.sku" :legacy-sku-code="row.legacy_sku_code"/><small>{{ row.product_name || '商品名称待核对' }}<span v-if="row.platform_mapping_status === 'unlinked'"> · 未关联平台商品</span></small></div></div></template></el-table-column>
-        <el-table-column label="ABC 等级" width="120">
-          <template #default="{ row }">{{ abcGrades[row.abc?.sku_grade] || '暂无分级' }}</template>
+        <el-table-column label="ABC 等级" width="240">
+          <template #default="{ row }"><InventoryAbcBadges :row="row" entity-type="sku" /></template>
         </el-table-column>
         <el-table-column v-if="mode === 'operations'" label="最近同步可售库存" min-width="150">
           <template #default="{row}">
@@ -90,6 +90,7 @@
 </template>
 
 <script setup>
+import InventoryAbcBadges from './InventoryAbcBadges';
 import InventoryAbcStatus from './InventoryAbcStatus.vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';

@@ -1,5 +1,6 @@
 from django.urls import path
 from . import dataset_views
+from .sales_abc import sales_abc, sales_abc_options
 from .analysis_jobs import analysis_collection, analysis_detail
 from .async_exports import export_job_collection, export_job_detail
 from .collaboration_views import report_exception_create, report_exception_source
@@ -20,6 +21,8 @@ urlpatterns = [
     path("analysis-jobs/", analysis_collection, name="report-analysis-jobs"),
     path("analysis-jobs/<int:pk>/", analysis_detail, name="report-analysis-detail"),
     path("datasets/", dataset_views.report_datasets, name="report-datasets"),
+    path("sales-abc-options/", sales_abc_options, name="report-sales-abc-options"),
+    path("sales-abc/", sales_abc, name="report-sales-abc"),
     path("query/", dataset_views.report_query, name="report-query"),
     path("filter-options/", dataset_views.report_filter_options, name="report-filter-options"),
     path("exceptions/", report_exception_create, name="report-exception-create"),

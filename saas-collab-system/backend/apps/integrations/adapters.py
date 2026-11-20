@@ -2,6 +2,7 @@ import hashlib
 import json
 import re
 import urllib.parse
+from .tiktok_refund_quantity import confirm_missing_unit_quantities
 from datetime import UTC, datetime
 from decimal import Decimal
 from functools import wraps
@@ -170,7 +171,9 @@ def _boolean(value):
 
 def _normalized_order_status(raw_status):
     status = str(raw_status or "").upper()
-    if "CANCEL" in status:
+    if status == "IN_CANCEL":
+        return "cancellation_pending"
+    if status in {"CANCELLED", "CANCELED"}:
         return "cancelled"
     if status == "COMPLETED":
         return "completed"
@@ -410,7 +413,7 @@ class ProductionReadonlyAdapter(PlatformAdapter):
         elif self.config.platform == PlatformChoices.JIFENG_WMS:
             self.client = JifengWmsReadonlyClient(self.config, self.warehouse_authorization)
         elif self.config.platform == PlatformChoices.BEST_ECAPI:
-            from .best_ecapi import BestEcapiClient
+            from .best_glink import BestGlinkClient as BestEcapiClient
             self.client = BestEcapiClient(self.config, self.warehouse_authorization)
         else:
             raise ValidationError("Unsupported production readonly platform.")
@@ -1094,6 +1097,14 @@ class MarketplaceRefundAdapter(ProductionReadonlyAdapter):
             return_id = _text(record.get("return_id"), record.get("reverse_order_id"), record.get("aftersales_id"))
             refund = record.get("refund_amount") if isinstance(record.get("refund_amount"), dict) else {}
             items = next((record.get(name) for name in ("return_line_items", "return_items", "line_items", "order_line_list") if isinstance(record.get(name), list)), [])
+            quantity_proofs = []
+            if self.config.platform == PlatformChoices.TIKTOK:
+                items, quantity_proofs = confirm_missing_unit_quantities(
+                    items,
+                    tenant_id=getattr(self.config, "tenant_id", getattr(store, "tenant_id", None)),
+                    store_id=store.id,
+                    order_id=record.get("order_id"),
+                )
             case_type = _text(record.get("return_type"), record.get("aftersales_type"), "refund")
             raw_status = _text(record.get("return_status"), record.get("status"), "unknown")
             currency = _text(refund.get("currency"), record.get("currency"), store.currency).upper()
@@ -1128,7 +1139,16 @@ class MarketplaceRefundAdapter(ProductionReadonlyAdapter):
         if isinstance(record.get('_platform_logistics'), dict):
             from .shopee_logistics import safe_snapshot
             payload['platform_logistics'] = safe_snapshot(record['_platform_logistics'])
-        return normalize_refund_return_record(self.config.platform, payload)
+        normalized = normalize_refund_return_record(self.config.platform, payload)
+        if self.config.platform == PlatformChoices.TIKTOK and quantity_proofs:
+            proofs = {(proof["return_line_item_id"], proof["order_line_item_id"]): proof
+                      for proof in quantity_proofs}
+            for normalized_item in normalized["items"]:
+                proof = proofs.get((normalized_item["external_return_item_id"],
+                                    normalized_item["external_order_item_id"]))
+                if proof:
+                    normalized_item["quantity_confirmation"] = proof
+        return normalized
 
     @staticmethod
     def _shopee_refund_items(items, return_id, currency, total):
@@ -1384,11 +1404,18 @@ def get_adapter_for_config(config, resource_type=None):
         return JifengInboundAdapter(config)
     if resource_type == SyncJob.ResourceType.INVENTORY_SNAPSHOT and config.platform == PlatformChoices.BEST_ECAPI:
         return BestInventoryAdapter(config)
+    if resource_type == SyncJob.ResourceType.INBOUND and config.platform == PlatformChoices.BEST_ECAPI:
+        return BestInboundAdapter(config)
     return DisabledProductionAdapter()
 
 
 class BestInventoryAdapter(JifengInventoryAdapter):
     """Reuse inventory persistence only; BEST quantity semantics remain explicit."""
+    def fetch_page(self, sync_job, cursor_value=None):
+        run = self._require_run()
+        self.scope["snapshot_at_utc"] = run.started_at.isoformat()
+        return super().fetch_page(sync_job, cursor_value)
+
     def normalize_record(self, record):
         mapping = {"totalNum": ("decimaltotalQuantity", "totalQuantity"),
             "availableNum": ("decimalNormalQuantity", "normalQuantity"),
@@ -1407,3 +1434,46 @@ class BestInventoryAdapter(JifengInventoryAdapter):
         if "totalNum" not in converted or "availableNum" not in converted:
             raise ValidationError("百世库存数量字段缺失，不能默认为零。")
         return super().normalize_record(converted)
+
+
+class BestInboundAdapter(ProductionReadonlyAdapter):
+    """Persist only normalized, identity-checked BEST putaway facts."""
+
+    def fetch_page(self, sync_job, cursor_value=None):
+        if sync_job.resource_type != SyncJob.ResourceType.INBOUND:
+            raise ValidationError("百世入库适配器仅支持入库查询。")
+        return self._client().fetch_inbound(cursor_value, self.scope)
+
+    def normalize_record(self, record):
+        return dict(record)
+
+    def persist_record(self, sync_job, record):
+        from django.db import transaction
+        from django.utils.dateparse import parse_datetime
+        from apps.commerce.models import InboundRecord
+        from apps.commerce.inventory_sku_mapping import resolve_inventory_sku
+        auth = self.warehouse_authorization
+        run = self._require_run()
+        if (not auth or auth.tenant_id != sync_job.tenant_id or auth.warehouse.tenant_id != sync_job.tenant_id
+                or auth.integration_config_id != sync_job.integration_config_id):
+            raise ValidationError("百世入库事实超出当前仓库范围。")
+        sku_id, _ = resolve_inventory_sku(tenant=sync_job.tenant, warehouse=auth.warehouse,
+            source_sku=record["source_sku"], seller_sku="", snapshot_at_utc=parse_datetime(record["received_at_utc"]))
+        with transaction.atomic():
+            current = InboundRecord.objects.select_for_update().filter(tenant=sync_job.tenant,
+                warehouse=auth.warehouse, site_code=auth.warehouse.country_code,
+                external_inbound_id=record["external_inbound_id"], external_line_id=record["external_line_id"]).first()
+            if current and (current.source_run.sync_job.integration_config_id != self.config.pk
+                            or current.source_sku != record["source_sku"]):
+                raise ValidationError("百世入库行身份与已有事实不一致。")
+            created = current is None
+            values = {**record, "internal_sku_id": sku_id, "source_run": run}
+            if current:
+                for key, value in values.items():
+                    setattr(current, key, value)
+                current.save()
+            else:
+                current = InboundRecord.objects.create(tenant=sync_job.tenant, warehouse=auth.warehouse,
+                    site_code=auth.warehouse.country_code, **values)
+        return {"action": "created" if created else "updated",
+                "idempotency_key": f"{sync_job.pk}:{current.pk}"}

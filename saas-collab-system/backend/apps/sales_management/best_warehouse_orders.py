@@ -33,11 +33,37 @@ def fetch_packages(actor, authorization, order, is_current):
                 config_id=authorization.integration_config_id, warehouse_id=authorization.warehouse_id):
             raise PermissionDenied('百世仓库不在查看范围内。')
         calls += 1
+        payload_builder = request_payload
+        if getattr(authorization.integration_config, 'contract_version', '') == 'glink':
+            from apps.integrations.best_glink_business import request_payload as payload_builder
         value = execute_operation(actor=actor, authorization=authorization, name=name,
-                                  payload=request_payload(authorization, **fields)).get('data')
+                                  payload=payload_builder(authorization, **fields)).get('data')
         if not isinstance(value, dict):
             raise ValidationError('百世响应缺少业务对象。')
         return value
+
+    if getattr(authorization.integration_config, 'contract_version', '') == 'glink':
+        from apps.integrations.best_glink_business import packages as glink_packages, list_value
+        # Keep the existing access and stale-request checks in call().
+        total = None
+        for page in range(1, 101):
+            data = call('GLINK_BATCH_QUERY_ORDER_NOTIFY', extOrderNumbers=[order.external_order_id], page=page, pageSize=100)
+            size = count(data.get('total'))
+            if total is not None and total != size:
+                raise ValidationError('百世分页数量变化，请重新查询。')
+            total = size
+            records = list_value(data, 'orderInfoList')
+            for item in records:
+                number = text(item.get('orderNumber'))
+                if number in matched or item.get('extOrderNumber') != order.external_order_id:
+                    raise ValidationError('百世出库单重复或外部订单号不匹配。')
+                matched.add(number)
+                result.extend(glink_packages(item, authorization))
+            if len(matched) == total:
+                return result
+            if not records or len(matched) > total:
+                raise ValidationError('百世分页记录不完整。')
+        raise ValidationError('百世查询超出分页上限。')
 
     while start <= finish:
         end = min(start + timedelta(days=30), finish)

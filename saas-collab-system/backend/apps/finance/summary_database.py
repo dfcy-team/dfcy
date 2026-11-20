@@ -33,6 +33,21 @@ def text(value):
     return None if value is None else format(Decimal(str(value)).quantize(SIX), 'f')
 
 
+def posted_income(rows, envelope_id):
+    """Recover exact provider fields when the raw body is stored outside the DB."""
+    income, evidence = {}, {}
+    for row in rows:
+        if row.raw_fee_name not in INCOME_FIELDS:
+            continue
+        if (row.raw_envelope_id != envelope_id or row.match_status == 'conflict'
+                or row.raw_fee_name in income):
+            return None
+        income[row.raw_fee_name] = text(row.raw_amount)
+        evidence[row.raw_fee_name] = row.pk
+    return {'income': income, 'envelope_id': envelope_id, 'response_index': None,
+            'platform_finance_fields': evidence, 'basis': 'posted_provider_fields'} if income else None
+
+
 def split_amount(amount, weights):
     """Largest remainder in micro-units; deterministic and exactly conserved."""
     weights = [(str(k), Decimal(str(v))) for k, v in weights if Decimal(str(v)) > 0]
@@ -187,7 +202,7 @@ def product_quotes(envelopes):
     return quotes, metadata
 
 
-def collect(user, scope):
+def collect(user, scope, *, allow_legacy_zero=True):
     from apps.masterdata.models import StoreMaster
     from apps.finance.models import PlatformFinanceTransaction
     from apps.finance.warehouse_fee_models import WarehouseFee, WarehouseBillUpload
@@ -269,7 +284,7 @@ def collect(user, scope):
         net_row = net_rows[0]
         if order and net_row.match_status != 'conflict':
             settled[(store_id, order)] = min(settled.get((store_id, order), day), day)
-        source = escrow.get((store_id, order, net_row.raw_envelope_id))
+        source = escrow.get((store_id, order, net_row.raw_envelope_id)) or posted_income(rows, net_row.raw_envelope_id)
         income = source['income'] if source else {}
         components = []
         if store.code.startswith('SPKJ'):
@@ -296,7 +311,7 @@ def collect(user, scope):
         reconciled = sales is not None and fees is not None and refund is not None and sales+fees+refund == net_row.raw_amount
         prefix = 'html2:sp6th:settlement:'+order if store.code == 'SP6TH' else 'preview:'+'|'.join(['shopee', str(store_id), order, day, currency])
         for kind, amount in [('sales', sales if reconciled else None), ('refund', refund), ('order_fee', fees if reconciled else None)]:
-            add(store, kind, amount, day, order, prefix+':'+kind, source_proof=source and {k: source[k] for k in ['envelope_id', 'response_index']},
+            add(store, kind, amount, day, order, prefix+':'+kind, source_proof=source and {k: source[k] for k in ['envelope_id', 'response_index', 'platform_finance_fields', 'basis'] if k in source},
                 sp6th_components=components if kind == 'order_fee' else None, description='SaaS保存的官方订单结算响应；构成必须与净结算额对平。')
         if source:shopee_income.append({'store_id': store_id, 'order': order, 'date': day, 'currency': currency, **source})
 
@@ -495,7 +510,7 @@ def collect(user, scope):
         for period in periods:
             for kind in ['gcash', 'promotion', 'adjustment']:
                 if not any(f.get('store_id') == store.pk and f['kind'] == kind and f['date'].startswith(period) for f in facts):
-                    add(store, kind, ZERO if kind != 'adjustment' and store.code == 'SP6TH' else None, period, source_id='database:coverage:'+str(store.pk)+':'+period+':'+kind,
+                    add(store, kind, ZERO if allow_legacy_zero and kind != 'adjustment' and store.code == 'SP6TH' else None, period, source_id='database:coverage:'+str(store.pk)+':'+period+':'+kind,
                         source='SaaS来源覆盖检查', description='未获取独立调整来源，保留待核' if kind == 'adjustment' else '当前结算范围无有效登记；保持已确认的缺失科目口径，不推断业务实际费用为0')
     basis = {}
     for r in WarehouseBillUpload.objects.filter(tenant=user.tenant).order_by('created_at'):

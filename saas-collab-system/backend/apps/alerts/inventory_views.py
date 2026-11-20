@@ -17,7 +17,8 @@ def _view_scope_signature(actor, permission_cache=None, membership_id=None):
     """Bind menu materializations to both effective permissions and identity."""
     from .inventory_decisions import ASSESSMENT_POLICY_VERSION
     base_signature = domain.permission_signature(actor, permission_cache)
-    payload = json.dumps([base_signature, membership_id, ASSESSMENT_POLICY_VERSION], separators=(',', ':'), ensure_ascii=False)
+    payload = json.dumps([base_signature, membership_id, ASSESSMENT_POLICY_VERSION, 'inventory-providers-v2'],
+                         separators=(',', ':'), ensure_ascii=False)
     return hashlib.sha256(payload.encode('utf-8')).hexdigest()
 
 
@@ -123,16 +124,16 @@ def build_pending_views(limit=1, batch_size=100):
         try:
             bind_actor_context(view.actor, view.membership_id)
             domain.require_metrics(view.actor)
-            country = domain.country_for(view.actor, view.country_id)
+            country = domain.country_for(view.actor, view.country_id, include_best=True)
             if _view_scope_signature(view.actor, membership_id=view.membership_id) != view.scope_signature:
                 raise APIException('Inventory data scope changed.')
             batch_limit = max(1, min(batch_size, 100))
-            candidates = list(domain.skus_for(view.actor, country).filter(pk__gt=cursor).select_related(
+            candidates = list(domain.skus_for(view.actor, country, include_best=True).filter(pk__gt=cursor).select_related(
                 'spu__category_node').order_by('pk')[:batch_limit + 1])
             has_more = len(candidates) > batch_limit
             skus = candidates[:batch_limit]
             observations = domain.decision_rows(view.actor, country, skus,
-                window_days=view.window_days, target_days=view.target_days)
+                window_days=view.window_days, target_days=view.target_days, include_best=True)
             decorate_rows(view.actor, country, observations, window_days=view.window_days, target_days=view.target_days)
             with transaction.atomic():
                 current = InventoryDecisionView.objects.select_for_update().get(pk=pk)

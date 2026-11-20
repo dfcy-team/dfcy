@@ -31,9 +31,24 @@ class WarehouseBillView(APIView):
             return success_response({'results': [describe(owned_job(request.user, j.pk)) for j in jobs]})
         job = owned_job(request.user, pk)
         if self.operation == 'format-preview':
-            from .warehouse_bill_formats import inspect_file
+            from .warehouse_bill_formats import inspect_file, rules_for, resolution_samples
+            from .warehouse_bill_rule_resolution import editable_config
             try:
-                return success_response(inspect_file(source_path(job)))
+                data = inspect_file(source_path(job))
+                data['rule_resolutions'] = {}
+                for rule in rules_for(request.user):
+                    try:
+                        config = editable_config(rule.config, resolution_samples(source_path(job), rule.config))
+                        data['rule_resolutions'][str(rule.pk)] = {'version': rule.version, 'config': config}
+                    except BillError as exc:
+                        data['rule_resolutions'][str(rule.pk)] = {'version': rule.version, 'error': str(exc)}
+                snapshot = job.overrides.get('format_config') or job.summary.get('applied_rule', {}).get('config')
+                if snapshot:
+                    try:
+                        data['resolved_snapshot'] = editable_config(snapshot, resolution_samples(source_path(job), snapshot))
+                    except BillError:
+                        pass
+                return success_response(data)
             except BillError as exc:
                 raise ValidationError(str(exc)) from exc
         if request.query_params.get('issues_page') is not None:
@@ -103,11 +118,12 @@ class WarehouseBillView(APIView):
                 supplied = json.loads(request.data.get('options', '{}'))
             except (ValueError, TypeError) as exc:
                 raise ValidationError('解析选项不是有效JSON。') from exc
-            job = upload_bill(request.user, request.FILES.get('file'), supplied)
+            job = upload_bill(request.user, request.FILES.get('file'), supplied,
+                defer_parse=request.data.get('defer_parse') == 'true')
         else:
             job = request_operation(request.user, pk, request.data)
         job.refresh_from_db()
-        return success_response(describe(job), status=200 if request.data.get('operation') in {'edit', 'restore', 'settle','register', 'save_drafts'} else 202)
+        return success_response(describe(job), status=200 if request.data.get('operation') in {'edit', 'restore', 'settle','register', 'save_drafts', 'allocate_difference'} else 202)
 
 
 class WarehouseFormatRuleView(APIView):
@@ -116,8 +132,10 @@ class WarehouseFormatRuleView(APIView):
     write_permission_code = PREFIX + 'import'
 
     def get(self, request):
-        from .warehouse_bill_formats import rules_for, describe_rule
-        return success_response({'results':[describe_rule(r) for r in rules_for(request.user)]})
+        from .warehouse_bill_formats import rules_for, describe_rule, successful_rule_files
+        rules = list(rules_for(request.user))
+        files = successful_rule_files(request.user, rules)
+        return success_response({'results':[describe_rule(r, files[str(r.pk)]) for r in rules]})
 
     def post(self, request):
         from .warehouse_bill_formats import save_rule, describe_rule

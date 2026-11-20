@@ -85,6 +85,26 @@ def test_platform_aliases_share_canonical_provider(name):
     assert integration_platform_key(platform_type="warehouse_third_party", code="CUSTOM", name=name) == "jifeng_wms"
 
 
+@pytest.mark.parametrize("state", ["pending", "none", "selected", ""])
+def test_legacy_alias_never_overrides_explicit_connector_decision(state):
+    assert integration_platform_key(platform_type="warehouse_third_party", code="myjf", name="极风",
+        warehouse_connector_state=state, warehouse_connector_key="") == ""
+    assert integration_platform_key(platform_type="warehouse_third_party", code="myjf", name="极风",
+        warehouse_connector_state="selected", warehouse_connector_key="best_ecapi") == "best_ecapi"
+
+
+@pytest.mark.parametrize("state,key", [("", ""), (None, "best_ecapi"), ("pending", ""), ("none", "")])
+def test_actual_warehouse_provider_preserves_connector_decision(state, key):
+    from types import SimpleNamespace
+    from apps.integrations.subject_access_service import _warehouse_provider
+    platform = SimpleNamespace(status='active', platform_type='warehouse_third_party',
+        warehouse_connector_state=state, warehouse_connector_key=key, code='myjf', name='极风')
+    with pytest.raises(ValueError):
+        _warehouse_provider(SimpleNamespace(service_platform=platform, warehouse_type='third_party'))
+    platform.warehouse_connector_state, platform.warehouse_connector_key = None, ''
+    assert _warehouse_provider(SimpleNamespace(service_platform=platform, warehouse_type='third_party')) == 'jifeng_wms'
+
+
 def test_api_base_normalization():
     assert jifeng_api_url("https://example.test/api/", "/api/inventory/queryInventory") == "https://example.test/api/inventory/queryInventory"
     with pytest.raises(ValidationError):

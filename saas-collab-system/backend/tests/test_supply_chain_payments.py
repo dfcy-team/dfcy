@@ -3,6 +3,7 @@ from decimal import Decimal
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 
+from apps.permissions.models import Permission, UserRole
 from apps.supply_chain import services, logistics
 from apps.supply_chain.models import PaymentRecord, CostVersion, PaymentItem, FreightCompany, PayeeAccount, domain_write
 from tests.test_supply_chain_v2_costs import pilot, get, mark, fee, calculate
@@ -10,6 +11,20 @@ from tests.test_supply_chain_v2_logistics import BASE, write
 from tests.test_supply_chain_v2_foundation import world, confirmed_order, po_payload, shipment_payload
 from tests.test_supply_chain_v2_foundation import freight
 from tests.test_supply_chain_v2_costs import received_pilot, fee_body
+
+
+def enable_manual_payment_mode(world, buyer):
+    # Create the normal approver/user fixture first, then opt this test tenant into direct entry.
+    world['tenant'].payment_approval_required = False
+    world['tenant'].save(update_fields=['payment_approval_required'])
+    buyer.tenant.payment_approval_required = False
+    buyer.tenant.save(update_fields=['payment_approval_required'])
+    # Direct payment entry is a finance action; keep the existing permission gate active.
+    role = UserRole.objects.get(tenant=world['tenant'], user=buyer).role
+    finance_permission, _ = Permission.objects.update_or_create(
+        code='finance.reconcile', defaults={'name': 'Reconcile finance data',
+            'module': 'finance', 'action': 'reconcile', 'description': 'Run and review finance reconciliation'})
+    role.permissions.add(finance_permission)
 
 
 def account(api, kind, obj, *, owner_supplier_id=None):
@@ -24,6 +39,7 @@ def account(api, kind, obj, *, owner_supplier_id=None):
 @pytest.mark.django_db(transaction=True)
 def test_payment_replay_partial_prepayment_reversal_and_cost_is_unchanged(world):
     buyer, api, shipment = pilot(world)
+    enable_manual_payment_mode(world, buyer)
     order = shipment.order
     account_id = account(api, 'purchase', order)
     before_costs = (shipment.lines.count(), PaymentRecord.objects.count())
@@ -87,6 +103,7 @@ def test_payment_replay_partial_prepayment_reversal_and_cost_is_unchanged(world)
 @pytest.mark.django_db(transaction=True)
 def test_cross_purchase_and_foreign_tenant_payments_are_rejected(world):
     buyer, api, shipment = pilot(world)
+    enable_manual_payment_mode(world, buyer)
     foreign_id = account(api, 'purchase', shipment.order)
     order2 = confirmed_order(world, buyer, key='payment-other-order',
         payload=po_payload(world, number='PO-OTHER-PAYMENT'))
@@ -130,6 +147,7 @@ def test_supplier_and_freight_company_payee_archive_contexts(world):
 @pytest.mark.django_db(transaction=True)
 def test_legacy_cumulative_settlement_becomes_opening_and_cannot_be_overwritten(world):
     buyer, api, shipment = pilot(world)
+    enable_manual_payment_mode(world, buyer)
     shipment = mark(buyer, shipment)
     context = get(api, 'shipment', shipment)
     legacy = write(api, f'costs/shipment/{shipment.pk}/settlement/', {
@@ -157,6 +175,7 @@ def test_legacy_cumulative_settlement_becomes_opening_and_cannot_be_overwritten(
 @pytest.mark.django_db(transaction=True)
 def test_payment_projection_matches_cost_target_and_cost_ledger_classification(world):
     buyer, api, shipment = pilot(world)
+    enable_manual_payment_mode(world, buyer)
     shipment = mark(buyer, shipment)
     fee(api, 'shipment', shipment, '0')
     calculate(api, 'shipment', shipment)
@@ -230,6 +249,7 @@ def test_batch_fee_items_snapshot_total_cost_and_old_client_preserves_breakdown(
 @pytest.mark.django_db(transaction=True)
 def test_item_payments_partial_balance_nature_reversal_and_cannot_remove_paid_item(world):
     buyer, api, batch, carrier, profiles = itemized_batch(world)
+    enable_manual_payment_mode(world, buyer)
     save_itemized_fee(api, batch, profiles)
     payee_path = f'costs/freight_company/{carrier.pk}/payee-accounts/'
     corporate = write(api, payee_path, {'nature':'corporate','account_name':'公司账户','account_holder':'公司','bank_name':'银行','account_number':'1234567890','active':True}, 'item-corp').data['data']['account']['id']
@@ -273,6 +293,7 @@ def test_legacy_opening_blocks_itemized_mode_and_reversed_legacy_payment_does_no
 @pytest.mark.django_db(transaction=True)
 def test_reversed_unclassified_batch_payment_allows_itemized_mode(world):
     buyer, api, batch, carrier, profiles = itemized_batch(world)
+    enable_manual_payment_mode(world, buyer)
     fee(api, 'batch', batch, '30.0000')
     payee_path=f'costs/freight_company/{carrier.pk}/payee-accounts/'
     account_id=write(api,payee_path,{'nature':'corporate','account_name':'公司账户','account_holder':'公司','bank_name':'银行','account_number':'1234567890','active':True},'legacy-batch-account').data['data']['account']['id']
@@ -289,6 +310,7 @@ def test_reversed_unclassified_batch_payment_allows_itemized_mode(world):
 @pytest.mark.django_db(transaction=True)
 def test_inbound_itemized_payments_accounts_vouchers_reversal_and_fee_projection(world):
     buyer, api, _, batch_id, inbound_id = received_pilot(world)
+    enable_manual_payment_mode(world, buyer)
     inbound_context = get(api, 'inbound', inbound_id)
     with domain_write():
         profiles = [PaymentItem.objects.create(tenant=world['tenant'], created_by=buyer, name='Clearance service',

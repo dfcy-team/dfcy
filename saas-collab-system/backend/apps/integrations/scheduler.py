@@ -1,33 +1,32 @@
 from copy import copy
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
-
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import ValidationError
-
 from .models import SyncJob, SyncRun, SyncScheduleDispatch, SyncSchedulerHeartbeat
 from .sync_alerts import upsert_sync_failure_alert
-
 # The dispatcher ticks every minute. Older slots are missed, not new executions.
 MISFIRE_GRACE_SECONDS = 180
 DISPATCH_START_TIMEOUT = timedelta(minutes=5)
 QUEUED_DISPATCH_RECOVERY_AGE = timedelta(minutes=30)
-
-
 def recover_expired_running_jobs(now, limit):
     """Reconcile lost workers, including manually triggered jobs."""
     from .sync_services import _has_expired_lease, _recover_expired_lease
-
     fallback = now - timedelta(seconds=settings.SYNC_JOB_LEASE_SECONDS)
+    from .sync_task_limits import VIDEO_STALE_AFTER_SECONDS
     runtime_deadline = now - timedelta(seconds=settings.SYNC_JOB_MAX_RUNTIME_SECONDS)
+    video_runtime_deadline = now - timedelta(seconds=VIDEO_STALE_AFTER_SECONDS)
     expired = Q(lock_expires_at__lte=now) | Q(
         lock_expires_at__isnull=True,
         last_run_at__lte=fallback,
-    ) | Q(lock_expires_at__isnull=True, last_run_at__isnull=True) | Q(last_run_at__lte=runtime_deadline)
+    ) | Q(lock_expires_at__isnull=True, last_run_at__isnull=True) | (
+        Q(resource_type="video_metrics", last_run_at__lte=video_runtime_deadline)
+        | (~Q(resource_type="video_metrics") & Q(last_run_at__lte=runtime_deadline))
+    )
     ids = list(SyncJob.objects.filter(status=SyncJob.Status.RUNNING).filter(expired)
                .order_by('id').values_list('id', flat=True)[:limit])
     recovered = 0
@@ -35,7 +34,8 @@ def recover_expired_running_jobs(now, limit):
         with transaction.atomic():
             job = SyncJob.objects.select_for_update().get(pk=pk)
             lease_expired = _has_expired_lease(job, now)
-            runtime_expired = bool(job.last_run_at and job.last_run_at <= runtime_deadline)
+            job_runtime_deadline = video_runtime_deadline if job.resource_type == "video_metrics" else runtime_deadline
+            runtime_expired = bool(job.last_run_at and job.last_run_at <= job_runtime_deadline)
             if not lease_expired and not runtime_expired:
                 continue
             if runtime_expired and not lease_expired:
@@ -50,8 +50,6 @@ def recover_expired_running_jobs(now, limit):
             )
             recovered += 1
     return recovered
-
-
 def recover_unstarted_dispatches(now, limit):
     ids = list(SyncScheduleDispatch.objects.filter(
         status="running", sync_run__isnull=True,
@@ -68,8 +66,6 @@ def recover_unstarted_dispatches(now, limit):
                 status="failed", finished_at=now,
                 reason="派发启动超时：未取得执行锁或创建运行，已终止此计划时点；后续计划可继续。",
             )
-
-
 def recover_orphan_queued_dispatches(now, limit):
     """Fail closed on old automatic outbox rows proven absent from two broker scans."""
     if getattr(settings, "SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED", False) is not True:
@@ -84,7 +80,6 @@ def recover_orphan_queued_dispatches(now, limit):
         .order_by("pk").values_list("pk", "sync_job_id")[:limit])
     if not candidates:
         return 0
-
     from .sync_delivery import read_delivery_snapshot
     try:
         first = read_delivery_snapshot()
@@ -93,7 +88,6 @@ def recover_orphan_queued_dispatches(now, limit):
         return 0
     if not first.complete or not second.complete:
         return 0
-
     recovered = 0
     for pk, job_id in candidates:
         with transaction.atomic():
@@ -120,18 +114,12 @@ def recover_orphan_queued_dispatches(now, limit):
             dispatch.save(update_fields=["status", "finished_at", "reason"])
             recovered += 1
     return recovered
-
-
 def schedule_policy(job):
     scope = job.sync_scope or {}
     return scope.get("schedule") if isinstance(scope.get("schedule"), dict) else scope
-
-
 def paused_until(job):
     value = parse_datetime(str(schedule_policy(job).get("pause_until") or ""))
     return value if value and timezone.is_aware(value) else None
-
-
 def calculate_next_run_at(sync_job, reference=None):
     if not sync_job.is_enabled or sync_job.schedule_type in {"manual", "cron"}:
         return None
@@ -193,8 +181,6 @@ def calculate_next_run_at(sync_job, reference=None):
             if utc_candidate > reference:
                 return utc_candidate
     raise ValidationError("无法计算下一次执行时间，请检查计划。")
-
-
 def preview_schedule(job, reference=None):
     candidate = copy(job)
     candidate.is_enabled = True
@@ -206,8 +192,6 @@ def preview_schedule(job, reference=None):
             break
         result.append(cursor)
     return result
-
-
 def next_after_missed(job, due, now):
     if job.schedule_type in {"interval", "hourly"}:
         if "interval_offset_seconds" in schedule_policy(job):
@@ -215,8 +199,6 @@ def next_after_missed(job, due, now):
         delta = timedelta(minutes=int(schedule_policy(job).get("interval_minutes") or 60))
         return due + (max(0, (now - due) // delta) + 1) * delta
     return calculate_next_run_at(job, now)
-
-
 def dispatch_due_jobs(enqueue, now=None, limit=20, admission=None, resource_type=None, maintenance=True):
     now = now or timezone.now()
     recovered = 0
@@ -323,8 +305,6 @@ def dispatch_due_jobs(enqueue, now=None, limit=20, admission=None, resource_type
             failed += 1
     return {"initialized": initialized, "dispatched": dispatched, "failed": failed, "skipped": skipped,
             "recovered": recovered}
-
-
 def resume_due_sync_runs(enqueue, now=None, limit=20, delivery_snapshot=None, admission=None, resource_type=None):
     """Durable continuation outbox; sequence fencing makes broker retries safe."""
     now = now or timezone.now()
@@ -380,8 +360,6 @@ def resume_due_sync_runs(enqueue, now=None, limit=20, delivery_snapshot=None, ad
             upsert_sync_failure_alert(job, sync_run=run, error_code="SYNC_CONTINUATION_ENQUEUE_FAILED",
                                       message="分页进度已保存，续跑提交暂未确认；巡检将重新提交同一续跑序号。")
     return submitted
-
-
 def scheduler_health():
     heartbeat = SyncSchedulerHeartbeat.objects.filter(key="readonly").first()
     seen = heartbeat.last_seen_at if heartbeat else None

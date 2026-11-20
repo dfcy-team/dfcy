@@ -15,7 +15,7 @@
   <el-table v-loading="loading" :data="state.results || []" empty-text="暂无已发布预警快照" border>
     <el-table-column prop="product_name" label="商品" min-width="180" />
     <el-table-column prop="spu_code" label="SPU" min-width="130" />
-    <el-table-column label="ABC" width="100"><template #default="{ row }">{{ row.abc?.spu_grade || '—' }}</template></el-table-column>
+    <el-table-column label="ABC" width="240"><template #default="{ row }"><InventoryAbcBadges :row="row" entity-type="spu" /></template></el-table-column>
     <el-table-column label="预警" min-width="180">
       <template #default="{ row }">{{ (row.warnings || []).map(code => labels[code] || code).join('、') || '—' }}</template>
     </el-table-column>
@@ -34,6 +34,7 @@
         </template>
       </el-table-column>
       <el-table-column prop="available_stock" label="可售库存" width="105" />
+      <el-table-column label="日均销量" width="110"><template #default="{ row }">{{ formatDailySales(row.daily_sales) }}</template></el-table-column>
       <el-table-column label="预警" min-width="150">
         <template #default="{ row }">{{ (row.warning?.warnings || []).map(code => labels[code] || code).join('、') || '—' }}</template>
       </el-table-column>
@@ -43,8 +44,16 @@
 </template>
 
 <script setup>
-import { onMounted, onBeforeUnmount, reactive, ref } from 'vue';
+import InventoryAbcBadges from '../../components/inventory/InventoryAbcBadges';
+import { onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import { useAuthStore } from '../../stores/auth';
 import { fetchInventoryWarnings } from '../../api/alerts';
+
+function formatDailySales(value) {
+  if (value == null || String(value).trim() === '') return '—';
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(2) : '—';
+}
 
 const labels = {
   forecast_stockout: '预计缺货', key_variant_shortage: '关键规格缺货',
@@ -55,6 +64,8 @@ const countries = ref([]), state = ref({}), page = ref(1), loading = ref(false),
 const detailsOpen = ref(false), detailsLoading = ref(false), details = ref([]), detailsError = ref('');
 let applied = {}, controller, detailController;
 
+const auth = useAuthStore();
+watch(() => [auth.authorizationStale, auth.currentUser], () => { controller?.abort(); closeDetails(); state.value={}; countries.value=[]; filters.country_id=null; applied={}; loading.value=false; error.value=''; if (!auth.authorizationStale && auth.currentUser) loadPage(1); }, {deep:true,flush:'sync'});
 function closeDetails() {
   detailController?.abort();
   detailsOpen.value = false;

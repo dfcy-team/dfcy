@@ -486,21 +486,23 @@ const AppMenu = defineComponent({
   props: { items: { type: Array, required: true } },
   emits: ['select'],
   setup(props, { emit }) {
-    const renderItem = (item, topLevel = false) => {
+    const renderItem = (item, topLevel = false, parentKey = 'root') => {
+      const itemKey = `${parentKey}/${item.navigationIndex || item.path || item.label}`;
       const label = () => topLevel
         ? [h('span', { class: 'menu-entry-icon', 'aria-hidden': 'true' }, [h(menuIcons.get(item.label) || Document)]), h('span', { class: 'menu-entry-label' }, item.label)]
         : item.label;
       if (item.children) {
         return h(
           ElSubMenu,
-          { index: item.label },
+          { key: itemKey, index: item.label },
           {
             title: label,
-            default: () => item.children.map(child => renderItem(child))
+            default: () => item.children.map(child => renderItem(child, false, itemKey))
           }
         );
       }
       return h(ElMenuItem, {
+          key: itemKey,
           index: item.navigationIndex || item.path,
         onClick: async () => {
           const navigationFailure = await router.push(item.path);

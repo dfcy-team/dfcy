@@ -4,7 +4,7 @@ import re
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
-from django.db.models import BigIntegerField, Case, Count, Exists, F, Max, OuterRef, Prefetch, Q, Subquery, Sum, Value, When, Window
+from django.db.models import BigIntegerField, Case, Count, Exists, F, Max, Min, OuterRef, Prefetch, Q, Subquery, Sum, Value, When, Window
 from django.db.models.functions import Coalesce, NullIf, RowNumber, TruncDate, Upper
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -37,6 +37,7 @@ from .scopes import (
     filter_sync_job_queryset,
 )
 from .reporting import _local_day_expression, business_daily_rows, order_daily_rows, order_report_groups, sku_report
+from apps.products.models import ProductSKU
 from apps.products.sku_aliases import filter_sku_codes, latest_identity_inventory, validate_sku_mode
 from .serializers import (
     DataQualityIssueSerializer,
@@ -1089,6 +1090,20 @@ def filtered_order_records(request, queryset=None):
     if queryset is None:
         queryset = _scoped_orders(request, "sales_management.orders.view")
     scoped_orders = queryset
+    tk_type = request.query_params.get("tk_order_type")
+    if tk_type:
+        from apps.influencers.models import AffiliateOrderSnapshot, SampleFulfillment
+        queryset = queryset.filter(platform__platform_type="tiktok").exclude(external_order_id="")
+        if tk_type == "sample":
+            samples = SampleFulfillment.objects.filter(tenant_id=request.user.tenant_id,
+                store_id=OuterRef("store_id"), sample_order_no=OuterRef("external_order_id"), is_deleted=False)
+            queryset = queryset.filter(Q(source_details__tk_sample_kind__in=["free", "refundable"]) | Exists(samples))
+        elif tk_type == "affiliate":
+            matches = AffiliateOrderSnapshot.objects.filter(tenant_id=request.user.tenant_id,
+                store_id=OuterRef("store_id"), order_id=OuterRef("external_order_id"))
+            queryset = queryset.filter(Exists(matches))
+        else:
+            raise ValidationError({"tk_order_type": "无效的订单类型"})
     internal_sku_id = request.query_params.get("internal_sku_id")
     if internal_sku_id is not None:
         if (len(request.query_params.getlist("internal_sku_id")) != 1
@@ -1273,7 +1288,7 @@ class StoreSalesCollectionView(APIView):
                           "average_order_value", "refund_rate"}
         ordering = request.query_params.get("ordering", "")
         if ordering:
-            field = ordering.lstrip("-")
+            field = ordering.removeprefix("-")
             if field not in numeric_fields | {"store_name", "store_code", "platform", "region", "currency", "source_updated_at"}:
                 raise ValidationError({"ordering": "Unsupported store report ordering."})
             present = [row for row in rows if row.get(field) is not None]
@@ -1317,7 +1332,7 @@ class SKUSalesCollectionView(APIView):
         if request.query_params.get("report") == "true" or request.query_params.get("sku_mode"):
             rows, groups, trend = sku_report(orders, refunds, request.query_params.get("grouping", "store"), request.query_params.get("sku", ""), request.query_params.get("sku_mode", ""), request.query_params.get("mapping_as_of", ""))
             ordering = request.query_params.get("ordering", "-gross_sales")
-            field = ordering.lstrip("-")
+            field = ordering.removeprefix("-")
             numeric = {"gross_sales", "total_sales", "net_sales", "refund_amount", "refund_units", "units_sold", "total_units", "order_count", "valid_order_count", "cancelled_amount", "cancelled_units", "cancelled_order_count", "average_price"}
             if field not in numeric | {"sku", "seller_sku", "store_name", "currency"}:
                 raise ValidationError({"ordering": "Unsupported SKU report ordering."})
@@ -1681,15 +1696,65 @@ def _inventory_warehouse_options(source, tenant):
     ).order_by("code").values("id", "name", "code")
 
 
+class InventoryGroupSnapshotSerializer(InventorySnapshotSerializer):
+    def to_representation(self, instance):
+        result = super().to_representation(instance)
+        sku = instance.internal_sku
+        result["legacy_sku_code"] = sku.legacy_sku_code if sku else ""
+        result["image_url"] = (sku.image_url or "") if sku else ""
+        return result
+
+
+class InventorySnapshotGroupSerializer:
+    def __init__(self, rows, *, many, context):
+        rows = list(rows)
+        images = ProductSKU.objects.in_bulk(row["image_sku_id"] for row in rows if row["image_sku_id"])
+        self.data = [
+            {
+                **{key: value for key, value in row.items() if key != "image_sku_id"},
+                "group_key": f'spu:{row["spu_id"]}' if row["spu_id"] else f'source:{row["unmapped_source"]}',
+                "image_url": images[row["image_sku_id"]].image_url if row["image_sku_id"] in images else "",
+            }
+            for row in rows
+        ]
+
+
+_INVENTORY_GROUP_SORT_FIELDS = {"spu_code", "legacy_spu_code", "on_hand_qty", "available_qty", "reserved_qty", "in_transit_qty"}
+
+
+def _inventory_snapshot_groups(request, queryset, *, page, page_size, ordering):
+    # Partition unmapped snapshots by their source code instead of folding them
+    # into a single anonymous SPU. The detail lookup uses the same expression.
+    fallback = Case(
+        When(internal_sku__isnull=True, then=F("source_sku")),
+        default=Value(None),
+    )
+    groups = queryset.order_by().values(
+        spu_id=F("internal_sku__spu_id"),
+        spu_code=F("internal_sku__spu__spu_code"),
+        legacy_spu_code=F("internal_sku__spu__legacy_spu_code"),
+        product_name=F("internal_sku__spu__product_name"),
+        unmapped_source=fallback,
+    ).annotate(
+        snapshot_count=Count("pk"),
+        image_sku_id=Min("internal_sku_id", filter=Q(internal_sku__image_url__gt="")),
+        on_hand_qty=Sum("on_hand_qty"),
+        available_qty=Sum("available_qty"),
+        reserved_qty=Sum("reserved_qty"),
+        in_transit_qty=Sum("in_transit_qty"),
+    )
+    sort_key = ordering.removeprefix("-")
+    direction = [ordering] if sort_key in _INVENTORY_GROUP_SORT_FIELDS else []
+    groups = groups.order_by(*direction, F("spu_code").asc(nulls_last=True), "unmapped_source", "spu_id")
+    return paginated_data(request, groups, InventorySnapshotGroupSerializer, page=page, page_size=page_size)
+
+
 def commerce_inventory_payload(request, permission_code):
     include_virtual = str(request.query_params.get("include_virtual", "true")).lower()
     if include_virtual not in ("true", "false"):
         raise ValidationError({"include_virtual": "请选择是否包含虚拟商品。"})
     queryset = _inventory_source(request, permission_code).select_related("warehouse", "internal_sku", "internal_sku__spu")
-    warehouse_options = [
-        {"value": row["id"], "label": f'{row["name"]}（{row["code"]}）'}
-        for row in _inventory_warehouse_options(queryset, request.user.tenant)
-    ]
+    warehouse_source = queryset
     start = _parse_date(request.query_params.get("period_start") or request.query_params.get("date_from"), "period_start")
     end = _parse_date(request.query_params.get("period_end") or request.query_params.get("date_to"), "period_end")
     if start and end and start > end:
@@ -1760,6 +1825,54 @@ def commerce_inventory_payload(request, permission_code):
         queryset = queryset.exclude(internal_sku__inventory_type="virtual")
         trend_queryset = trend_queryset.exclude(internal_sku__inventory_type="virtual")
 
+    detail_view = request.query_params.get("detail_view", "")
+    group_key = request.query_params.get("group_key")
+    if detail_view not in ("", "spu") or (group_key is not None and detail_view != "spu"):
+        raise ValidationError({"detail_view": "请选择有效的库存明细视图。"})
+    ordering = request.query_params.get("ordering", "")
+    sort_fields = {
+        "source_sku": "source_sku", "internal_sku": "internal_sku__sku_code",
+        "warehouse_name": "warehouse__name", "warehouse_code": "warehouse__code",
+        "on_hand_qty": "on_hand_qty", "available_qty": "available_qty",
+        "reserved_qty": "reserved_qty", "in_transit_qty": "in_transit_qty",
+        "snapshot_time": "snapshot_at_utc", "risk_label": "risk_rank", "mapping_status": "mapping_rank",
+    }
+    if ordering and (detail_view != "spu" or group_key is not None):
+        sort_key = ordering[1:] if ordering.startswith("-") else ordering
+        if sort_key not in sort_fields:
+            raise ValidationError({"ordering": "请选择库存明细中支持排序的列。"})
+        if sort_key == "risk_label":
+            queryset = queryset.annotate(risk_rank=Case(
+                When(risk_conditions["out"], then=Value(0)),
+                When(risk_conditions["locked"], then=Value(1)),
+                When(risk_conditions["low"], then=Value(2)), default=Value(3),
+            ))
+        elif sort_key == "mapping_status":
+            queryset = queryset.annotate(mapping_rank=Case(
+                When(internal_sku__isnull=True, then=Value(0)), default=Value(1),
+            ))
+        field = F(sort_fields[sort_key])
+        direction = field.desc(nulls_last=True) if ordering.startswith("-") else field.asc(nulls_last=True)
+        queryset = queryset.order_by(direction, "id")
+    page, page_size = _pagination(request)
+    if detail_view == "spu" and group_key is not None:
+        group_type, _, identity = group_key.partition(":")
+        if group_type == "spu" and re.fullmatch(r"[1-9][0-9]{0,18}", identity) and int(identity) <= 2**63 - 1:
+            queryset = queryset.filter(internal_sku__spu_id=int(identity))
+        elif group_type == "source" and len(identity) <= InventorySnapshot._meta.get_field("source_sku").max_length:
+            queryset = queryset.filter(internal_sku__isnull=True, source_sku=identity)
+        else:
+            raise ValidationError({"group_key": "库存快照分组无效。"})
+        data = paginated_data(request, queryset, InventoryGroupSnapshotSerializer, page=page, page_size=page_size)
+        data["detail_view"] = "sku"
+        return data
+    if detail_view == "spu" and ordering.removeprefix("-") not in _INVENTORY_GROUP_SORT_FIELDS | {""}:
+        raise ValidationError({"ordering": "请选择库存分组中支持排序的列。"})
+
+    warehouse_options = [
+        {"value": row["id"], "label": f'{row["name"]}（{row["code"]}）'}
+        for row in _inventory_warehouse_options(warehouse_source, request.user.tenant)
+    ]
     aggregates = queryset.aggregate(
         total=Coalesce(Sum("on_hand_qty"), 0),
         available=Coalesce(Sum("available_qty"), 0),
@@ -1794,43 +1907,21 @@ def commerce_inventory_payload(request, permission_code):
         .order_by("-date")[:14]
     )
     trend.reverse()
-    ordering = request.query_params.get("ordering", "")
-    sort_fields = {
-        "source_sku": "source_sku", "internal_sku": "internal_sku__sku_code",
-        "warehouse_name": "warehouse__name", "warehouse_code": "warehouse__code",
-        "on_hand_qty": "on_hand_qty", "available_qty": "available_qty",
-        "reserved_qty": "reserved_qty", "in_transit_qty": "in_transit_qty",
-        "snapshot_time": "snapshot_at_utc", "risk_label": "risk_rank", "mapping_status": "mapping_rank",
-    }
-    if ordering:
-        sort_key = ordering[1:] if ordering.startswith("-") else ordering
-        if sort_key not in sort_fields:
-            raise ValidationError({"ordering": "请选择库存明细中支持排序的列。"})
-        if sort_key == "risk_label":
-            queryset = queryset.annotate(risk_rank=Case(
-                When(risk_conditions["out"], then=Value(0)),
-                When(risk_conditions["locked"], then=Value(1)),
-                When(risk_conditions["low"], then=Value(2)), default=Value(3),
-            ))
-        elif sort_key == "mapping_status":
-            queryset = queryset.annotate(mapping_rank=Case(
-                When(internal_sku__isnull=True, then=Value(0)), default=Value(1),
-            ))
-        field = F(sort_fields[sort_key])
-        direction = field.desc(nulls_last=True) if ordering.startswith("-") else field.asc(nulls_last=True)
-        queryset = queryset.order_by(direction, "id")
-    page, page_size = _pagination(request)
-    data = paginated_data(
-        request,
-        queryset,
-        InventorySnapshotSerializer,
-        page=page,
-        page_size=page_size,
-        total_count=result_count,
-    )
+    if detail_view == "spu":
+        data = _inventory_snapshot_groups(request, queryset, page=page, page_size=page_size, ordering=ordering)
+    else:
+        data = paginated_data(
+            request,
+            queryset,
+            InventorySnapshotSerializer,
+            page=page,
+            page_size=page_size,
+            total_count=result_count,
+        )
     data.update({
         "api_status": "connected",
         "dashboard_type": "inventory",
+        **({"detail_view": "spu"} if detail_view == "spu" else {}),
         "source_status": "ready" if data["count"] else "pending",
         "warehouse_options": warehouse_options,
         "refreshed_at": aggregates["refreshed_at"],
@@ -1940,7 +2031,7 @@ class SalesDataQualityView(APIView):
                     "sales_management.sync.view",
                     SyncJob.objects.filter(tenant=request.user.tenant),
                 )
-            catalog = sales_filter_catalog(orders, refunds, sync_jobs)
+            catalog = sales_filter_catalog(orders, refunds, sync_jobs, dimensions_only=request.query_params.get("projection") == "dimensions")
             catalog.update({
                 "api_status": "connected",
                 "coverage_authorized": can_view_sync,

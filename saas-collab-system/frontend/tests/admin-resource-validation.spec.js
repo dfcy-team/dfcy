@@ -117,6 +117,6 @@ describe('master-data form validation recovery', () => {
     await wrapper.find('.el-dialog input').setValue('新姓名');
     await wrapper.find('.el-dialog__footer .el-button--primary').trigger('click');
     await flushPromises();
-    expect(editHandler).toHaveBeenCalledWith(7, { full_name: '新姓名' });
+    expect(editHandler).toHaveBeenCalledWith(7, { full_name: '新姓名' }, { id: 7, full_name: '旧姓名', department_id: 12 });
   });
 });

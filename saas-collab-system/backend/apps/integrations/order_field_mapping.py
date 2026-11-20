@@ -89,6 +89,15 @@ def enrich_order_fields(platform, raw, canonical):
     """Extend the existing canonical contract without changing totals or quantities."""
     result = deepcopy(canonical)
     observed = {}
+    if platform == 'tiktok':
+        free = raw.get('is_sample_order')
+        refundable = raw.get('is_refundable_sample')
+        if refundable is True:
+            observed['tk_sample_kind'] = 'refundable'
+        elif free is True or raw.get('order_type') == 'SELLER_FUND_FREE_SAMPLE':
+            observed['tk_sample_kind'] = 'free'
+        elif free is False and refundable is False:
+            observed['tk_sample_kind'] = 'none'
     statuses = raw.get('statuses')
     raw_status = raw.get('order_status') if platform == 'shopee' else (
         statuses[-1] if platform == 'lazada' and isinstance(statuses, list) and statuses else raw.get('status'))

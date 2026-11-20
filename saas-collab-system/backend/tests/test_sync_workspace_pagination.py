@@ -73,6 +73,7 @@ def test_real_runs_and_unexecuted_plans_share_stable_sql_pagination(workspace):
     assert no_match["results"] == [] and no_match["pagination"]["total"] == 0
 
 
+@pytest.mark.parametrize("projection", [None, "list"])
 @pytest.mark.parametrize("params", [
     {"platform": "SHOPEE"}, {"platform": "tiktok"}, {"api_type": "marketplace"},
     {"environment": "mock"}, {"subject": "shop"}, {"subject": "not-present"},
@@ -84,7 +85,7 @@ def test_real_runs_and_unexecuted_plans_share_stable_sql_pagination(workspace):
     {"started_from": "2026-09-20", "started_to": "2026-09-20"},
     {"schedule_type": "daily"}, {"health_state": "healthy"},
 ])
-def test_sql_filters_match_existing_row_contract(workspace, params):
+def test_sql_filters_match_existing_row_contract(workspace, params, projection):
     user, job = workspace
     add_run(job, 1)
     add_run(job, 2, status="failed", masked_log={"execution_mode": "simulation", "retry_of": "prior"})
@@ -96,10 +97,11 @@ def test_sql_filters_match_existing_row_contract(workspace, params):
     _, _, _, jobs, runs, _ = _workspace_rows(user)
     old_rows = _run_rows(runs, jobs) + _unexecuted_plan_rows(user, jobs)
     expected = {str(row["id"]) for row in old_rows if _matches(row, params, "sync-runs")}
-    actual = integration_workspace(user, "sync-runs", params)
+    actual = integration_workspace(user, "sync-runs", {**params, **({"projection": projection} if projection else {})})
     assert {str(row["id"]) for row in actual["results"]} == expected
     assert actual["pagination"]["total"] == len(expected)
-    assert actual["summary"]["run_count"] == 4
+    if projection is None:
+        assert actual["summary"]["run_count"] == 4
 
 
 def test_workspace_reads_do_not_mutate_and_query_count_does_not_grow_with_history(workspace):

@@ -1,4 +1,6 @@
 from datetime import timedelta
+from itertools import chain
+import uuid
 
 from celery import shared_task
 from django.conf import settings
@@ -8,16 +10,20 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from .domain import TERMINAL, digest
-from .models import Batch, Plan, StoreTask, TenantControl
+from .models import Batch, ExecutionPool, Plan, StoreLock, StoreTask, TenantControl
 from .services import submit
 
 
 @shared_task
-def execute(task_id):
+def execute(task_id, delivery_token=None):
+
     if not getattr(settings, "FLASH_SALES_WORKERS_ENABLED", False):
+
         return "disabled"
+
     from .engine import run_step
-    return run_step(task_id)
+
+    return run_step(task_id, delivery_token=delivery_token)
 
 
 @shared_task
@@ -26,35 +32,57 @@ def send_notification(notification_id):
     return deliver(notification_id)
 
 
-@transaction.atomic
 def prepare_post_sync(batch_id):
+    ExecutionPool.objects.get_or_create(key="shopee")
+    return _prepare_post_sync(batch_id)
+
+
+@transaction.atomic
+def _prepare_post_sync(batch_id):
+    ExecutionPool.objects.select_for_update().get(key="shopee")
+    # Recovery and worker finalization can hold a task while waiting for its batch.
+    tasks = list(StoreTask.objects.select_for_update().filter(batch_id=batch_id).order_by("pk"))
     parent = Batch.objects.select_for_update().get(pk=batch_id)
     if not parent.finished_at or parent.operation == "sync" or parent.request_id.startswith("import:"):
         return
-    tasks = list(parent.tasks.select_related("store"))
-    child, created = Batch.objects.get_or_create(tenant_id=parent.tenant_id, request_id=f"post-sync:{parent.id}",
+    recovery_round = max((task.state.get("exception_recovery_round", 0) for task in tasks), default=0)
+    request_id = f"post-sync:{parent.id}" + (f":recovery:{recovery_round}" if recovery_round else "")
+    child, created = Batch.objects.get_or_create(tenant_id=parent.tenant_id, request_id=request_id,
         defaults={"actor": parent.actor, "source": "post_sync", "operation": "sync", "payload_hash": digest({"parent": str(parent.id)})})
     if not created:
         return
     for task in tasks:
-        sync = StoreTask.objects.create(tenant_id=parent.tenant_id, batch=child, store=task.store,
-            snapshot={"activity_ids": [], "recipients": {"users": []}})
+        if recovery_round and task.state.get("post_sync_task_id"):
+            continue
+        affected = list(task.intents.exclude(platform_id="").values_list("platform_id", flat=True).distinct())
+        sync = StoreTask.objects.create(tenant_id=parent.tenant_id, batch=child, store_id=task.store_id,
+            snapshot={"activity_ids": affected, "sync_scope": "affected", "recipients": {"users": []}},
+            status="queued" if affected else "succeeded", finished_at=None if affected else timezone.now(),
+            message="" if affected else "未涉及平台活动，无需同步")
         task.state = {**task.state, "post_sync_task_id": sync.id}
         task.save(update_fields=["state", "updated_at"])
+    if not child.tasks.exclude(status__in=TERMINAL).exists():
+        child.finished_at = timezone.now()
+        child.save(update_fields=["finished_at", "updated_at"])
 
 
-def dispatch_plans(*, now=None):
+def dispatch_plans(*, now=None, scheduler_owner="saas"):
+    if scheduler_owner not in {"saas", "sync_tasks"}:
+        raise ValueError("Unsupported flash sales scheduler owner.")
     now = now or timezone.now()
-    for control_id in TenantControl.objects.filter(scheduler_owner="saas").values_list("id", flat=True):
+    dispatched = 0
+    for control_id in TenantControl.objects.filter(scheduler_owner=scheduler_owner).values_list("id", flat=True):
         with transaction.atomic():
             control = TenantControl.objects.select_for_update().get(pk=control_id)
-            if control.scheduler_owner != "saas":
+            if control.scheduler_owner != scheduler_owner:
                 continue
             recovering = not control.last_dispatch_at or (now - control.last_dispatch_at).total_seconds() > 30
             for plan in Plan.objects.select_for_update().filter(tenant_id=control.tenant_id, enabled=True, deleted_at__isnull=True, next_due__lte=now).select_related("actor"):
                 dispatch_plan(plan, now, recovering)
+                dispatched += 1
             control.last_dispatch_at = now
             control.save(update_fields=["last_dispatch_at", "updated_at"])
+    return dispatched
 
 
 def dispatch_plan(plan, now, recovering):
@@ -93,20 +121,63 @@ def dispatch():
     if not getattr(settings, "FLASH_SALES_WORKERS_ENABLED", False):
         return "disabled"
     dispatch_plans()
-    now = timezone.now()
-    tasks = StoreTask.objects.exclude(status__in=TERMINAL).filter(
-        Q(state__migration_hold=False) | Q(state__migration_hold__isnull=True),
-        Q(state__retry_paused=False) | Q(state__retry_paused__isnull=True),
-        Q(next_attempt_at__isnull=True) | Q(next_attempt_at__lte=now),
-        Q(lease_until__isnull=True) | Q(lease_until__lte=now),
-    ).order_by("created_at", "id")[:60]
-    for task in tasks:
-        execute.apply_async((task.id,), queue="shopee-flash-sync" if task.batch.operation == "sync" else "shopee-flash", expires=30)
+    from .engine import (
+        EXECUTION_CAPACITY, delivery_candidates, fail_recovery_blocked_writer,
+        has_delivery_hold, occupied_execution_slots, ready_for_delivery,
+    )
+
+    # Settle blocked writes independently so no transaction holds a batch lock
+    # while reserving delivery for another task. Dispatch and claim can proceed
+    # with protected reads even if more blocked writes remain in the next scan.
+    blocked_ids = list(delivery_candidates(timezone.now()).exclude(batch__operation="sync")
+        .filter(status="queued", started_at__isnull=True, fence__isnull=True, recovery_blocked=True)
+        .order_by("created_at", "id").values_list("id", flat=True)[:100])
+    for task_id in blocked_ids:
+        fail_recovery_blocked_writer(task_id)
+
+    deliveries = []
+    ExecutionPool.objects.get_or_create(key="shopee")
+    with transaction.atomic():
+        ExecutionPool.objects.select_for_update().get(key="shopee")
+        now = timezone.now()
+        occupied = list(occupied_execution_slots(now).values_list("store_id", flat=True))
+        served = set(occupied)
+        capacity = max(0, EXECUTION_CAPACITY - len(occupied))
+        candidates = delivery_candidates(now).exclude(store_id__in=served)
+        foreground = candidates.exclude(batch__operation="sync").filter(store_blocked=False)
+        background = candidates.filter(batch__operation="sync").filter(
+            Q(store_blocked=False) | Q(recovery_blocked=True))
+        if foreground.exists():
+            background = background.filter(pk__in=StoreLock.objects.values("task_id"))
+        ordered = chain(foreground.order_by("created_at", "id").iterator(chunk_size=100),
+                        background.order_by("created_at", "id").iterator(chunk_size=100))
+        for task in ordered:
+            if len(deliveries) >= capacity:
+                break
+            if task.store_id in served:
+                continue
+            task = StoreTask.objects.select_for_update().get(pk=task.pk)
+            if not ready_for_delivery(task, now) or has_delivery_hold(task, now):
+                continue
+            token = str(uuid.uuid4())
+            state = dict(task.state or {})
+            state["delivery_hold"] = {"token": token, "expires_at": now.timestamp() + 120}
+            StoreTask.objects.filter(pk=task.pk).update(state=state)
+            deliveries.append((task.id, token, task.batch.operation == "sync"))
+            served.add(task.store_id)
+        for task_id, token, is_sync in deliveries:
+            transaction.on_commit(lambda task_id=task_id, token=token, is_sync=is_sync:
+                                  _publish_delivery(task_id, token, is_sync), robust=True)
     from .notifications import prepare_notifications
     from .models import Notification
     for batch_id in Batch.objects.filter(finished_at__isnull=False).exclude(operation="sync").exclude(request_id__startswith="import:").filter(tasks__state__post_sync_task_id__isnull=True).distinct().values_list("id", flat=True)[:100]:
         prepare_post_sync(batch_id)
-    for batch_id in Batch.objects.filter(finished_at__isnull=False, notifications__isnull=True).values_list("id", flat=True)[:100]:
+    for batch_id in Batch.objects.filter(
+        Q(finished_at__isnull=False, notifications__isnull=True)
+        | Q(finished_at__isnull=False, notifications__snapshot__phase="attention")
+        | Q(finished_at__isnull=False, notifications__snapshot__phase="recovery_pending")
+        | Q(finished_at__isnull=True, tasks__state__retry_paused=True, notifications__isnull=True)
+    ).exclude(operation="sync").distinct().values_list("id", flat=True)[:100]:
         prepare_notifications(batch_id)
     if getattr(settings, "FLASH_SALES_NOTIFICATIONS_ENABLED", False):
         Notification.objects.filter(status="sending", lease_until__lte=now).update(
@@ -114,3 +185,14 @@ def dispatch():
         for pk in Notification.objects.filter(status="pending").values_list("pk", flat=True)[:100]:
             send_notification.apply_async((pk,), queue="shopee-flash-notify", expires=60)
     return "dispatched"
+
+
+def _publish_delivery(task_id, token, is_sync):
+    try:
+        execute.apply_async((task_id, token), queue="shopee-flash-sync" if is_sync else "shopee-flash", expires=30)
+    except Exception:
+        with transaction.atomic():
+            task = StoreTask.objects.select_for_update().filter(pk=task_id).first()
+            if task and (task.state or {}).get("delivery_hold", {}).get("token") == token:
+                task.state.pop("delivery_hold", None)
+                task.save(update_fields=["state", "updated_at"])

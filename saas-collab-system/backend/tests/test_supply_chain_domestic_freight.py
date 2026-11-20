@@ -66,7 +66,10 @@ def test_domestic_carrier_options_transport_permissions_and_scope(world):
 
 @pytest.mark.django_db
 def test_domestic_payment_idempotency_and_goods_purpose_isolation(world):
-    buyer = internal_user(world, 'domestic-payment-buyer')
+    world['tenant'].payment_approval_required = False
+    world['tenant'].save(update_fields=['payment_approval_required'])
+    buyer = internal_user(world, 'domestic-payment-buyer',
+        codes=('supply.v2.view', 'supply.v2.manage', 'finance.reconcile'))
     order = confirmed_order(world, buyer, payload=po_payload(world, number='PO-DOM-PAY'))
     shipment = services.create_supplier_shipment(buyer,
         shipment_payload(world, order, 'domestic-payment-shipment'), idempotency_key='domestic-payment-shipment')

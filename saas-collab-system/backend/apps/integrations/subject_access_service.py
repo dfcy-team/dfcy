@@ -457,17 +457,13 @@ def _warehouse_provider(subject):
         raise ValueError("仓库绑定的平台不是仓储服务平台类型，已阻断 API 接入。")
     if service_platform.platform_type != WAREHOUSE_TYPE_TO_PLATFORM_TYPE.get(subject.warehouse_type):
         raise ValueError("仓库类型与仓储服务平台类型不一致，已阻断 API 接入。")
-    connector_state = service_platform.warehouse_connector_state
-    if connector_state == "selected":
-        provider = service_platform.warehouse_connector_key
-    elif connector_state in {"pending", "none"}:
-        provider = ""
-    else:
-        provider = integration_platform_key(
-            platform_type=service_platform.platform_type,
-            code=service_platform.code,
-            name=service_platform.name,
-        )
+    provider = integration_platform_key(
+        platform_type=service_platform.platform_type,
+        warehouse_connector_state=service_platform.warehouse_connector_state,
+        warehouse_connector_key=service_platform.warehouse_connector_key,
+        code=service_platform.code,
+        name=service_platform.name,
+    )
     if not provider:
         raise ValueError("仓储服务平台尚未匹配受支持的库存 API 服务商，请先维护平台档案。")
     try:

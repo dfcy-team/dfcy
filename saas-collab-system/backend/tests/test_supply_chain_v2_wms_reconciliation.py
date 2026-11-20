@@ -57,6 +57,35 @@ def confirmed_receipt(world, buyer, rows, carrier, warehouse, *, quantities=None
 
 
 @pytest.mark.django_db
+def test_inbound_movements_local_day_and_export(world):
+    buyer, _, _, _, warehouse = setup(world)
+    warehouse.country_code = 'PH'
+    warehouse.save(update_fields=['country_code'])
+    grant_sales_view(buyer, warehouse_ids=[warehouse.pk])
+    sku = world['sku']
+    first = wms_line(buyer, warehouse, sku, site='PH', quantity=3)
+    second = wms_line(buyer, warehouse, sku, site='PH', quantity=7, number='WMS-2')
+    InboundRecord.objects.filter(pk=first.pk).update(received_at_utc=datetime(2026, 10, 12, 16, tzinfo=timezone.utc))
+    InboundRecord.objects.filter(pk=second.pk).update(received_at_utc=datetime(2026, 10, 12, 15, 59, tzinfo=timezone.utc))
+    other = WarehouseMaster.objects.create(tenant=buyer.tenant, code='ph-hidden', name='Hidden warehouse', country_code='PH')
+    hidden = wms_line(buyer, other, sku, site='PH', quantity=11, number='WMS-HIDDEN')
+    InboundRecord.objects.filter(pk=hidden.pk).update(received_at_utc=NOW)
+    api = client(buyer)
+    url = BASE + 'wms-inbound-movements/'
+    filters = {'site_code': 'PH', 'start_date': '2026-10-13', 'end_date': '2026-10-13'}
+    response = api.get(url, filters)
+    assert response.status_code == 200, response.data
+    data = response.data['data']
+    assert (data['total'], data['received_quantity']) == (1, 3)
+    assert data['items'][0]['id'] == first.pk
+    export = api.get(url, {**filters, 'export': 'csv'})
+    assert export.status_code == 200
+    assert 'WMS-1' in export.content.decode('utf-8-sig')
+    assert 'WMS-2' not in export.content.decode('utf-8-sig')
+    assert 'WMS-HIDDEN' not in export.content.decode('utf-8-sig')
+
+
+@pytest.mark.django_db
 def test_expected_warehouse_date_is_audited_and_closed_at_arrival(world):
     buyer, first, second, carrier, warehouse = setup(world)
     api = client(buyer)

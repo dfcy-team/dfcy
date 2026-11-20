@@ -158,6 +158,8 @@ def source_checkpoint(store_ids):
 
 def metadata(dataset, user, *, checkpoint=True, include_values=True):
     state = dataset.accounting_state
+    # Manual-only batches read source tables during explicit rebuilds, not page polling.
+    check_sources = checkpoint and dataset.metadata.get('automatic_update_enabled', True)
     try:
         document_path(dataset)
         source_available = True
@@ -168,12 +170,13 @@ def metadata(dataset, user, *, checkpoint=True, include_values=True):
     jobs = list(FinanceSummaryCalculation.objects.filter(tenant=dataset.tenant, kind='rebuild').order_by('-pk').values(
         'id', 'dataset_id', 'result_dataset_id', 'status', 'error_code', 'created_at', 'finished_at')[:10])
     from .summary_recent import recent_scope
-    return {'automation': {'mode': 'server', 'interval_seconds': 300,
+    return {'automation': {'mode': 'server', 'enabled': dataset.metadata.get('automatic_update_enabled', True), 'interval_seconds': 300,
                           'scope': recent_scope(dataset.metadata.get('store_ids', []))}, 'rebuild_history': jobs,
             'scope_stores': list(StoreMaster.objects.filter(tenant=dataset.tenant).order_by('code').values('id', 'code')),
             'source_available': source_available, 'dataset': dataset.pk, 'label': dataset.label, 'source_hash': dataset.source_hash,
             'imported_at': dataset.created_at.isoformat(), 'source': dataset.metadata,
-            'source_changed': checkpoint and source_checkpoint(dataset.metadata['store_ids']) != dataset.metadata.get('checkpoint'),
+            'source_checked': bool(check_sources),
+            'source_changed': source_checkpoint(dataset.metadata['store_ids']) != dataset.metadata.get('checkpoint') if check_sources else None,
             'revision': state.revision, **({'values': unpack_values(state.values)} if include_values else {}), 'can_edit': has_full_scope(user, 'finance.import')}
 
 

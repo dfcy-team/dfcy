@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "24d64c752cdf24eaedeaa3c4be4e1eb81eadfcc61e1b3452c0f275ffb3a05d1a",
+  "catalog_hash": "9f742927af0892929a56c6051c09feaa1fdc296e4223cc1e4e14c8989624bf1f",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -153,6 +153,10 @@
     {
       "file": "src/components/inventory/CountryInventoryDecisions.vue",
       "permission_code": "sales_management.operating_orders.manage"
+    },
+    {
+      "file": "src/components/inventory/InventoryAbcSettings.vue",
+      "permission_code": "masterdata.settings.manage"
     },
     {
       "file": "src/components/inventory/InventoryAbcStatus.vue",
@@ -349,6 +353,14 @@
     {
       "file": "src/router/menu.js",
       "permission_code": "influencers.outreach.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "influencers.requirements.review"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "influencers.requirements.submit"
     },
     {
       "file": "src/router/menu.js",
@@ -573,6 +585,10 @@
     {
       "file": "src/router/menu.js",
       "permission_code": "menu.influencers.influencers_outreach_tasks.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.influencers.influencers_requirements.view"
     },
     {
       "file": "src/router/menu.js",
@@ -805,6 +821,10 @@
     {
       "file": "src/router/menu.js",
       "permission_code": "menu.sales_management.category_inventory.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.sales_management.inventory_movements.view"
     },
     {
       "file": "src/router/menu.js",
@@ -1859,5 +1879,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "7513c3a849a74ddfd04242c09dc80249adc23ce4b829507e9c292af4c239766e"
+  "surface_hash": "2b6827dbbce22549a04da72063c986651f964a1ea68cfcb939c5657e6ea06ee2"
 }

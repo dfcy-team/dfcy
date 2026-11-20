@@ -2,6 +2,7 @@ from decimal import Decimal
 
 import pytest
 
+from apps.permissions.models import Permission, UserRole
 from apps.supply_chain.models import PaymentRecord, domain_write
 from tests.test_supply_chain_payments import itemized_batch, save_itemized_fee
 from tests.test_supply_chain_v2_costs import fee_body, get, write
@@ -9,9 +10,22 @@ from tests.test_supply_chain_v2_foundation import world
 from tests.test_supply_chain_v2_logistics import BASE
 
 
+def enable_manual_payment_mode(world, buyer):
+    world['tenant'].payment_approval_required = False
+    world['tenant'].save(update_fields=['payment_approval_required'])
+    buyer.tenant.payment_approval_required = False
+    buyer.tenant.save(update_fields=['payment_approval_required'])
+    role = UserRole.objects.get(tenant=world['tenant'], user=buyer).role
+    finance_permission, _ = Permission.objects.update_or_create(
+        code='finance.reconcile', defaults={'name': 'Reconcile finance data',
+            'module': 'finance', 'action': 'reconcile', 'description': 'Run and review finance reconciliation'})
+    role.permissions.add(finance_permission)
+
+
 @pytest.mark.django_db(transaction=True)
 def test_dashboard_fee_item_status_uses_current_revision_and_reversal(world):
     buyer, api, batch, carrier, profiles = itemized_batch(world)
+    enable_manual_payment_mode(world, buyer)
     save_itemized_fee(api, batch, profiles)
     base = f'{BASE}dashboard/queue/?queue=carrier&status=all'
 

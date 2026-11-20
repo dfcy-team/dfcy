@@ -18,7 +18,7 @@ from .warehouse_order_models import OrderWarehouseLookup
 from .warehouse_order_policy import fingerprint, unpaid, next_refresh
 
 
-LABELS = {'pending': '等待查询', 'running': '查询中', 'matched': '已关联仓库',
+LABELS = {'pending': '等待查询', 'running': '查询中', 'matched': '已关联仓库', 'cancelled': '订单已取消',
           'not_found': '仓库未查到', 'conflict': '多个仓库匹配', 'partial': '查询未完成',
           'blocked': '查询条件未就绪', 'failed': '查询失败', 'not_requested': '尚未查询', 'deferred': '待付款，暂缓查询'}
 
@@ -61,6 +61,25 @@ def publish_lookup(pk, revision):
     return True
 
 
+def is_platform_cancelled(order):
+    return (str(order.normalized_status or '').lower() in {'cancelled', 'canceled'}
+            and str(order.raw_status or '').upper() in {'CANCELLED', 'CANCELED'}
+            and order.platform.platform_type == 'tiktok')
+
+
+def close_cancelled_lookup(row, status):
+    # Invalidate both broker delivery and in-flight claims; keep warehouse evidence intact.
+    row.order_status = status
+    if row.status != 'cancelled' or row.lease is not None:
+        row.revision = uuid.uuid4()
+    row.status = 'cancelled'
+    row.message = '平台订单已取消，停止自动查询；此前查到的仓库记录保留。'
+    row.lease = row.lease_until = row.next_query_at = row.polling_until = None
+    row.followup_required = False
+    row.save(update_fields=['order_status', 'revision', 'status', 'message', 'lease',
+                            'lease_until', 'next_query_at', 'polling_until', 'followup_required'])
+
+
 @transaction.atomic
 def request_lookup(order_id, actor=None, *, manual=False, scheduled=False):
     order = SalesOrder.objects.select_for_update().select_related(
@@ -73,6 +92,10 @@ def request_lookup(order_id, actor=None, *, manual=False, scheduled=False):
         actor = order.internal_sync_batch.source.created_by
     status = fingerprint(order)
     now = timezone.now()
+    if is_platform_cancelled(order):
+        row, _ = OrderWarehouseLookup.objects.select_for_update().get_or_create(order=order)
+        close_cancelled_lookup(row, status)
+        return row
     if not manual and unpaid(order):
         row = OrderWarehouseLookup.objects.select_for_update().filter(order=order).first()
         if row:
@@ -232,6 +255,9 @@ def synchronize(pk, revision, *, run_guard=None):
         now = timezone.now()
         if str(row.revision) != str(revision) or row.status not in {'pending', 'running'}:
             return 'superseded'
+        if is_platform_cancelled(row.order):
+            close_cancelled_lookup(row, fingerprint(row.order))
+            return 'cancelled'
         if row.status == 'running' and row.lease_until and row.lease_until > now:
             return 'already_running'
         row.status, row.lease, row.lease_until = 'running', uuid.uuid4(), now + timedelta(minutes=10)
@@ -293,6 +319,7 @@ def synchronize(pk, revision, *, run_guard=None):
         authorization, packages = matches[0]
         warehouse = authorization.warehouse
         changes.update(warehouse=warehouse, snapshot={'authorization_id': authorization.pk, 'warehouse_code': warehouse.code,
+            'site_code': country,
             'warehouse_name': warehouse.name, 'packages': packages}, snapshot_at=timezone.now())
     with transaction.atomic():
         latest = OrderWarehouseLookup.objects.select_for_update().get(pk=pk)
@@ -314,6 +341,13 @@ def synchronize(pk, revision, *, run_guard=None):
         changes['next_query_at'], changes['retry_count'] = next_refresh(latest, order, state, checks, matches[0][1] if state == 'matched' else [])
         OrderWarehouseLookup.objects.filter(pk=pk).update(**changes)
         if state == 'matched':
+            from .outbound_movements import replace_shipment_lines
+            diagnostics = replace_shipment_lines(pk, order.tenant_id, warehouse.pk, packages, site_code=country)
+            if diagnostics:
+                snapshot = dict(changes.get('snapshot') or latest.snapshot or {})
+                snapshot['projection_diagnostics'] = diagnostics
+                latest.snapshot = snapshot
+                latest.save(update_fields=['snapshot'])
             from .aftersales import track_source
             from apps.commerce.models import RefundReturn
             track_source(order)

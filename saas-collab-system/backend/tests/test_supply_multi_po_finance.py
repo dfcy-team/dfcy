@@ -83,9 +83,12 @@ def _deposit(api, order, suffix):
 
 @pytest.mark.django_db
 def test_multipo_apply_rejects_unrelated_source_caps_each_po_and_reversal_restores(world):
+    world['tenant'].payment_approval_required = False
+    world['tenant'].save(update_fields=['payment_approval_required'])
     from tests.test_supply_chain_v2_foundation import confirmed_order, po_payload
 
-    buyer = internal_user(world, 'finance-multi')
+    buyer = internal_user(world, 'finance-multi',
+        codes=('supply.v2.view', 'supply.v2.manage', 'finance.reconcile'))
     api, first, second, shipment = _multi_shipment(world, buyer)
     unrelated = confirmed_order(world, buyer, key='finance-unrelated',
         payload=po_payload(world, number='FINANCE-UNRELATED'))

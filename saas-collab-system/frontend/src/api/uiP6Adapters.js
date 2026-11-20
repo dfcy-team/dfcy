@@ -55,9 +55,17 @@ export function normalizeAnalyticsResponse(response) {
   return { ...response, data: { ...response.data, results } };
 }
 
+const normalizeInventorySnapshot = (row) => ({
+  ...row,
+  internal_sku: row.internal_sku || '未关联',
+  mapping_status: row.internal_sku ? '已关联' : '未关联',
+  snapshot_time: row.snapshot_at_utc ? new Date(row.snapshot_at_utc).toISOString().replace('T', ' ').slice(0, 19) : '--',
+});
+
 export function normalizeInventoryAnalysisResponse(response) {
   if (!response?.success || !response.data) return response;
   const data = response.data;
+  if (data.detail_view === 'sku') return { ...response, data: { ...data, results: data.results.map(normalizeInventorySnapshot) } };
   if (data.quality?.metric_version !== 'inventory_snapshot.v1') {
     return { ...response, data: { ...data, count: 0, results: [], metrics: [], trend: [],
       quality: { score: null, status_label: '暂无库存快照', note: '尚无真实库存快照，不能计算 SKU 映射率。' },
@@ -76,11 +84,7 @@ export function normalizeInventoryAnalysisResponse(response) {
       status_label: !quality.total_count ? '暂无样本' : quality.mapped_count === quality.total_count ? '已全部关联' : '待关联',
       note: `当前范围 ${quality.total_count || 0} 条仓库 SKU，已关联内部 SKU ${quality.mapped_count || 0} 条。未关联不代表库存数量错误；关联后才能进行内部商品分析。`,
     },
-    results: (data.results || []).map(row => ({ ...row,
-      internal_sku: row.internal_sku || '未关联',
-      mapping_status: row.internal_sku ? '已关联' : '未关联',
-      snapshot_time: row.snapshot_at_utc ? new Date(row.snapshot_at_utc).toISOString().replace('T', ' ').slice(0, 19) : '--',
-    })),
+    results: data.detail_view === 'spu' ? data.results : (data.results || []).map(normalizeInventorySnapshot),
     trend: points.length >= 2 ? points : [],
     trend_message: points.length === 1 ? '当前范围仅有 1 天快照，尚不足以展示历史趋势。' : '当前范围暂无库存快照。',
   } };

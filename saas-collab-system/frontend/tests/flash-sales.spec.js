@@ -6,12 +6,28 @@ const api = vi.hoisted(() => ({flashRequest:vi.fn()}));
 const navigation = vi.hoisted(() => ({route:null}));
 vi.mock('../src/api/flashSales', async original => ({...await original(), ...api}));
 vi.mock('vue-router', () => ({useRoute:() => navigation.route,useRouter:() => ({replace:vi.fn()})}));
-import { copyPayload, copyRows, flashTime } from '../src/api/flashSales';
+import { copyPayload, copyRows, flashTime, taskLabel } from '../src/api/flashSales';
 import FlashCopyDialog from '../src/views/marketing/FlashCopyDialog.vue';
 import FlashSalesWorkspace from '../src/views/marketing/FlashSalesWorkspace.vue';
 import FlashBatchDialog from '../src/views/marketing/FlashBatchDialog.vue';
 import FlashActivityDetail from '../src/views/marketing/FlashActivityDetail.vue';
 let wrappers = [];
+it('distinguishes upstream rate limits, local queue waits and paused tasks', () => {
+  expect(taskLabel({status:'waiting',message:'平台返回 HTTP 429，该店铺接口等待'})).toBe('限流等待');
+  expect(taskLabel({status:'waiting',message:'应用请求排队等待'})).toBe('请求排队');
+  expect(taskLabel({status:'waiting',message:'平台暂不可用'})).toBe('等待重试');
+  expect(taskLabel({status:'waiting',retry_paused:true,message:'平台返回 HTTP 429'})).toBe('已暂停，需人工继续');
+});
+it('renders specification tables only when expanded and limits each page to 50 rows', async () => {
+  api.flashRequest.mockResolvedValue({id:'lazy',source:'manual',operation:'run',tasks:[{id:1,store_name:'测试店',status:'waiting',retry_paused:true,intents:[{id:9,platform_id:'123',target:{},result:{specifications:Array.from({length:51},(_,i)=>({...product,model_id:String(i),state:'enabled'}))}}]}],notifications:[]});
+  const w=render(FlashBatchDialog,{batchId:'lazy'});await flushPromises();
+  expect(w.text()).toContain('已暂停');
+  expect(w.findComponent(stubs.ElTable).exists()).toBe(false);
+  w.get('details').element.open=true;await w.get('details').trigger('toggle');await nextTick();
+  expect(w.findComponent(stubs.ElTable).props('data')).toHaveLength(50);
+  await w.findComponent({name:'ElPagination'}).vm.$emit('update:currentPage',2);await nextTick();
+  expect(w.findComponent(stubs.ElTable).props('data')).toHaveLength(1);
+});
 beforeEach(() => {navigation.route=reactive({query:{}});api.flashRequest.mockReset();localStorage.clear();vi.stubGlobal('ResizeObserver',class {observe(){} unobserve(){} disconnect(){}});});
 afterEach(() => {wrappers.forEach(w => w.unmount());wrappers=[];vi.useRealTimers();vi.unstubAllGlobals();});
 const tableRows = Symbol('flash-test-rows');
@@ -124,11 +140,10 @@ it('preserves store selection after a workspace refresh',async () => {
   await w.get('input[aria-label="选择 测试店"]').setValue(true);await button(w,'刷新');
   expect(w.get('input[aria-label="选择 测试店"]').element.checked).toBe(true);expect(w.text()).toContain('运行已选 1');
 });
-it('shows and filters visible stores even without configuration or activity history',async () => {
+it('hides unconfigured stores from activity filters',async () => {
   api.flashRequest.mockResolvedValue({workers_enabled:false,capabilities:{},stores:[{id:27,name:'未配置店铺',code:'SP27',configured:false,activity_count:0}],activities:[],batches:[],plans:[],people:[],fallback_ids:[],activity_total:0,batch_total:0});
   const w=render(FlashSalesWorkspace);await flushPromises();
-  await button(w,'SP27（0）');
-  expect(api.flashRequest.mock.calls.at(-1)[3]).toMatchObject({store_id:27});
+  expect(w.findAll('button').some(b=>b.text()==='SP27（0）')).toBe(false);
   expect(api.flashRequest.mock.calls.every(call => !call[1] || call[1] === 'get')).toBe(true);
 });
 it('does not display scheduled batches in the compact task bar',async () => {
@@ -192,6 +207,52 @@ it('restores selections after reopening and reuses an uncertain manual submissio
 });
 
 const emptyWorkspace = {workspace_key:'parity:user',workers_enabled:false,capabilities:{execute:true,configure:true,plans:true},stores:[],activities:[],batches:[],plans:[],people:[],fallback_ids:[],activity_total:0,batch_total:0};
+it('keeps notification settings hidden for a non-admin and omits them from stock edits', async () => {
+  const workspace={...emptyWorkspace,capabilities:{configure:true,notifications:true,notification_settings:false},stores:[{id:1,code:'SP1',name:'店一',configured:true,enabled:true,version:1,stock:3,runs:1,notification_mode:'fallback',recipient_ids:[],upcoming:[]}]};
+  api.flashRequest.mockResolvedValue(workspace);
+  const w=render(FlashSalesWorkspace);await flushPromises();
+  expect(w.findAll('button').some(b=>b.text()==='飞书通知设置')).toBe(false);
+  await button(w,'编辑');expect(w.findAllComponents({name:'ElRadioGroup'})).toHaveLength(0);
+  await button(w,'保存');
+  const payload=api.flashRequest.mock.calls.find(c=>c[0]==='configs/1/')[2];
+  expect(payload).not.toHaveProperty('notification_mode');expect(payload).not.toHaveProperty('recipient_ids');
+});
+it('opens only the selected store from expanded history and reopens it after collapse', async () => {
+  const batch={id:'reopen-batch',source:'manual',operation:'run',tasks:[{id:11,store_name:'店一',status:'waiting',intents:[]},{id:12,store_name:'店二',status:'succeeded',intents:[]}],notifications:[]};
+  api.flashRequest.mockImplementation(async path=>path==='workspace/' ? {...emptyWorkspace,batches:[batch]} : batch);
+  const w=render(FlashSalesWorkspace);await flushPromises();
+  expect(w.findAll('button').some(b=>b.text()==='处理 / 详情')).toBe(false);
+  await w.get('button[aria-label="查看店一运行详情"]').trigger('click');await flushPromises();
+  expect(w.findComponent(FlashBatchDialog).findAll('article')).toHaveLength(1);
+  expect(w.findComponent(FlashBatchDialog).text()).toContain('店一');
+  expect(w.findComponent(FlashBatchDialog).text()).not.toContain('店二');
+  expect(w.findComponent(FlashBatchDialog).text()).not.toContain('安全停止');
+  await button(w,'收起');expect(w.findComponent(FlashBatchDialog).text()).not.toContain('收起');
+  await w.get('button[aria-label="查看店一运行详情"]').trigger('click');await flushPromises();
+  expect(w.findComponent(FlashBatchDialog).text()).toContain('收起');
+  await w.get('button[aria-label="查看店二运行详情"]').trigger('click');await flushPromises();
+  expect(w.findComponent(FlashBatchDialog).text()).toContain('店二');
+  expect(w.findComponent(FlashBatchDialog).text()).not.toContain('店一');
+});
+it('does not fall back to all stores when a selected task is missing', async () => {
+  api.flashRequest.mockResolvedValue({id:'scoped',source:'manual',tasks:[{id:1,store_name:'其他店铺',status:'succeeded',intents:[]}],notifications:[]});
+  const w=render(FlashBatchDialog,{batchId:'scoped',taskId:999});await flushPromises();
+  expect(w.text()).not.toContain('其他店铺');expect(w.text()).toContain('未找到该店铺的运行记录');
+});
+it('saves disabled notification mode without recipients and displays it after reopening', async () => {
+  const store={id:1,code:'SP1',name:'店一',configured:true,version:3,notification_mode:'custom',recipient_ids:[8]};
+  const workspace={...emptyWorkspace,capabilities:{...emptyWorkspace.capabilities,notification_settings:true},stores:[store],people:[{id:8,name:'测试人员'}]};
+  api.flashRequest.mockImplementation(async (path,method,body)=>{
+    if(path==='notifications/') {Object.assign(store,body.stores[0]);return {};}
+    return workspace;
+  });
+  const w=render(FlashSalesWorkspace);await flushPromises();await button(w,'飞书通知设置');
+  const mode=()=>w.findAllComponents({name:'ElSelect'}).find(c=>c.attributes('aria-label')==='SP1 接收方式');
+  expect(mode().findAll('option').some(o=>o.text()==='关闭')).toBe(true);
+  await mode().vm.$emit('update:modelValue','disabled');await button(w,'保存设置');
+  expect(api.flashRequest).toHaveBeenCalledWith('notifications/','put',{stores:[{store_id:1,version:3,notification_mode:'disabled',recipient_ids:[]}]});
+  await button(w,'飞书通知设置');expect(mode().props('modelValue')).toBe('disabled');expect(w.text()).toContain('已关闭推送');
+});
 it('tracks route changes for tabs and batch details, including clearing the batch',async () => {
   api.flashRequest.mockImplementation(async path=>path==='workspace/' ? emptyWorkspace : {id:path,source:'manual',operation:'run',tasks:[],notifications:[]});
   const w=render(FlashSalesWorkspace);await flushPromises();
@@ -224,7 +285,7 @@ it.each(['success','failure'])('keeps activity details scoped to the latest sele
   await flushPromises();expect(w.text()).toContain('新活动商品');expect(w.text()).not.toContain('旧活动商品');expect(w.text()).not.toContain('旧活动读取失败');
 });
 it('keeps notification edits as a draft and saves changed stores together with the fallback', async () => {
-  const workspace={...emptyWorkspace,capabilities:{configure:true,notifications:true},stores:[{id:1,code:'SP1',name:'店一',configured:true,version:3,notification_mode:'owner',recipient_ids:[]}],people:[{id:8,name:'测试人员'}]};
+  const workspace={...emptyWorkspace,capabilities:{configure:true,notifications:true,notification_settings:true},stores:[{id:1,code:'SP1',name:'店一',configured:true,version:3,notification_mode:'owner',recipient_ids:[]}],people:[{id:8,name:'测试人员'}]};
   const bodies=[];let fail=true;
   api.flashRequest.mockImplementation(async (path,method,body)=>{if(path==='notifications/') {bodies.push(body);if(fail) throw new Error('暂未保存');return {};}return workspace;});
   const w=render(FlashSalesWorkspace);await flushPromises();await button(w,'飞书通知设置');
@@ -285,4 +346,10 @@ it('saves a time point before selecting shops and displays plan dimensions', asy
   const w=render(FlashSalesWorkspace);await flushPromises();await button(w,'定时计划');await button(w,'新增执行时间点');await button(w,'保存时间点');
   expect(bodies).toHaveLength(1);expect(bodies[0].store_ids).toEqual([]);
   expect(w.text()).toContain('执行店铺');expect(w.text()).toContain('下次执行');
+});
+it('offers read-only cleanup verification on a failed protected store task', async () => {
+  api.flashRequest.mockResolvedValue({id:'protected',operation:'run',tasks:[{id:42,store_name:'店一',status:'failed',recovery_pending:true}],notifications:[]});
+  const w=render(FlashBatchDialog,{batchId:'protected',canExecute:true});await flushPromises();
+  await button(w,'只读核对清理结果');
+  expect(api.flashRequest).toHaveBeenCalledWith('batches/protected/','post',{action:'reconcile',task_id:42});
 });

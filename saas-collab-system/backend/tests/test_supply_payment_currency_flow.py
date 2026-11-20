@@ -75,7 +75,11 @@ def test_request_rejects_currency_conflicting_with_confirmed_payable(world):
 
 
 def test_direct_payment_captures_currency_and_locks_original(world):
+    world['tenant'].payment_approval_required = False
+    world['tenant'].save(update_fields=['payment_approval_required'])
     actor,api,shipment=pilot(world);split(world,actor,shipment)
+    from tests.test_sales_management import grant
+    grant(actor, 'finance.reconcile')
     account=write(api,f'costs/shipment/{shipment.pk}/payee-accounts/',{'nature':'corporate','account_name':'test','account_holder':'supplier','bank_name':'bank','account_number':'6222000000001111','active':True},'direct-currency-account').data['data']['account']
     state=api.get(BASE+f'costs/shipment/{shipment.pk}/payments/').data['data']
     response=write(api,f'costs/shipment/{shipment.pk}/payments/',{'currency':'CNY','amount':'1','date':'2026-10-01','payee_account_id':account['id'],'expected_version':state['version']},'direct-currency')

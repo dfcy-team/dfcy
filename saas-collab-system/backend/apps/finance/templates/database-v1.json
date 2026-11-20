@@ -1,0 +1,6 @@
+{
+  "version": "finance-database-template.v1",
+  "sha256": "d764fe3047f5c25ab18a39dfc264f9f91b6429dc79bbc6c4c8a54f9a5c0072ac",
+  "contains_business_data": false,
+  "extraction": "verified calculation scripts; empty source collections; historical reference examples removed; store IDs resolved from current source"
+}

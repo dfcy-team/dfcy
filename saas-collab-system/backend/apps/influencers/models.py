@@ -4,6 +4,7 @@ import re
 import unicodedata
 
 from django.conf import settings
+
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
@@ -459,6 +460,7 @@ class OutreachTask(StateMachineTenantModel):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         IN_PROGRESS = "in_progress", "In progress"
+        PAUSED = "paused", "Paused"
         COMPLETED = "completed", "Completed"
         CANCELLED = "cancelled", "Cancelled"
 
@@ -501,6 +503,8 @@ class OutreachTask(StateMachineTenantModel):
     deleted_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    dispatch_requirements = models.CharField(max_length=1000, blank=True, default="", db_default="")
+
     tenant_relation_fields = ("influencer", "store", "spu", "dispatcher", "owner")
 
     class Meta:
@@ -1396,6 +1400,20 @@ class InfluencerProfile(TenantValidatedModel):
                 if fields is not None:
                     kwargs["update_fields"] = set(fields) | {"canonical_external_id_digest"}
             return super().save(*args, **kwargs)
+
+
+class InfluencerUsernameAlias(TenantValidatedModel):
+    """Historical TikTok usernames for archive search, not identity resolution."""
+
+    influencer = models.ForeignKey(Influencer, on_delete=models.PROTECT, related_name="username_aliases")
+    username = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    tenant_relation_fields = ("influencer",)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["tenant", "influencer", "username"], name="uniq_inf_username_alias",
+        )]
 
 
 class TikTokCreatorProfileSnapshot(TenantValidatedModel):
@@ -2432,3 +2450,23 @@ class TikTokVideoSyncEvidence(TenantValidatedModel):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["batch", "attempt", "page"], name="uniq_tk_video_receipt")]
+
+
+class InfluencerRequirement(models.Model):
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.CASCADE)
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    title = models.CharField(max_length=120)
+    description = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-id"]
+        indexes = [models.Index(fields=["tenant", "author", "-id"], name="inf_req_tenant_author_idx")]
+
+
+class InfluencerRequirementImage(models.Model):
+    requirement = models.ForeignKey(InfluencerRequirement, on_delete=models.CASCADE, related_name="images")
+    content = models.BinaryField()
+
+    class Meta:
+        ordering = ["id"]

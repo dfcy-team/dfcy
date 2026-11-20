@@ -103,6 +103,11 @@ def query_best_return(user, auth, case):
             config_id=auth.integration_config_id, warehouse_id=auth.warehouse_id):
         raise ValidationError('百世仓库不在查看范围内。')
     number = text(case.warehouse_return_no)
+    if auth.integration_config.contract_version == 'glink':
+        from apps.integrations.best_glink_business import request_payload as glink_payload, return_receipt as glink_receipt
+        result = execute_operation(actor=user, authorization=auth, name='GLINK_BATCH_QUERY_ASN_NOTIFY',
+            payload=glink_payload(auth, asnNumbers=[number], asnType='RETURN', page=1, pageSize=100))
+        return glink_receipt(result['data'], auth, number)
     result = execute_operation(actor=user, authorization=auth, name='GET_RMA_STATUS_REQ',
         payload=request_payload(auth, rmaCode=number))
     # Response only identifies rmaCode. Keep platform/tracking fields blank;

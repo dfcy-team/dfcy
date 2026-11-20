@@ -5,6 +5,7 @@ performed here. A provider timeout never authorizes replaying a write.
 """
 import hashlib
 import json
+import re
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
@@ -24,6 +25,7 @@ from .warehouse_credential_service import require_verified_warehouse
 def _redact(value):
     if isinstance(value, dict):
         return {k: "<REDACTED>" if k.replace("_", "").lower() in SENSITIVE_KEYS | {"invoicesecretkey", "partnerkey"}
+                or re.search(r"password|secret|token|cookie|authorization|username", k, re.I)
                 else _redact(v) for k, v in value.items()}
     if isinstance(value, list):
         return [_redact(v) for v in value]
@@ -40,7 +42,7 @@ def execution_gate(operation):
 def execute_operation(*, actor, authorization, name, payload, confirmed=False, idempotency_key="", client=None):
     is_best = getattr(authorization, "provider", None) == "best_ecapi"
     if is_best:
-        from .best_ecapi import operation_for as best_operation, prepare_operation as best_prepare, check_identity, parse_xml
+        from .best_glink import operation_for as best_operation, prepare_operation as best_prepare, check_identity, parse_data
     operation = best_operation(name) if is_best else operation_for(name)
     execution_gate(operation)
     prepared = best_prepare(name, payload) if is_best else prepare_operation(name, payload)
@@ -59,7 +61,7 @@ def execute_operation(*, actor, authorization, name, payload, confirmed=False, i
         raise PermissionDenied("仓库超出当前操作的数据范围。")
     require_verified_warehouse(authorization)
     if is_best:
-        check_identity(parse_xml(payload["bizData"], "request"), authorization)
+        check_identity(parse_data(payload["bizData"]), authorization)
     # Do not permit a user-supplied warehouse override or forwarding auth fields.
     if isinstance(payload, dict):
         for key in ("warehouse", "warehouseCode"):
@@ -71,7 +73,7 @@ def execute_operation(*, actor, authorization, name, payload, confirmed=False, i
         if transaction.get_connection().in_atomic_block:
             raise ValidationError("写入必须在独立提交边界执行，不能在未提交事务中调用仓库。")
     if is_best:
-        from .best_ecapi import BestEcapiClient
+        from .best_glink import BestGlinkClient as BestEcapiClient
     client_class = BestEcapiClient if is_best else JifengWmsReadonlyClient
     api = client or client_class(config, authorization, http_client=PlatformHttpClient(max_retries=0))
     # Reuse all existing module/network/contract/custody approvals before reserving a write.

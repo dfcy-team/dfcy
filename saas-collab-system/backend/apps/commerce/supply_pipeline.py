@@ -83,7 +83,7 @@ def valid_wms_allocations(rows):
         wms, local = row.wms_line, row.receipt_line
         if (wms.source_run.status != 'success' or wms.source_run.failed_count or
             wms.source_run.sync_job.resource_type != 'inbound' or
-            wms.source_run.sync_job.integration_config.platform != 'jifeng_wms' or
+            wms.source_run.sync_job.integration_config.platform not in {'jifeng_wms', 'best_ecapi'} or
             wms.internal_sku_id != local.sku_id or wms.warehouse_id != local.receipt.warehouse_id or
             wms.site_code.upper() != local.receipt.inbound.batch.country_code_snapshot.upper() or
             totals.get(wms.pk, 0) > wms.received_quantity):
@@ -179,7 +179,7 @@ def pipeline_for(actor, country, sku_ids, *, today, target_days, warehouse_ids=N
     upstream = InboundRecord.objects.filter(tenant_id=actor.tenant_id, site_code__iexact=country.country_code,
         internal_sku_id__in=sku_ids, received_quantity__gt=0, source_run__status='success',
         source_run__failed_count=0, source_run__sync_job__resource_type='inbound',
-        source_run__sync_job__integration_config__platform='jifeng_wms')
+        source_run__sync_job__integration_config__platform__in=['jifeng_wms', 'best_ecapi'])
     if restricted:
         upstream = upstream.filter(warehouse_id__in=warehouse_ids)
     linked = defaultdict(int)

@@ -574,7 +574,7 @@ def _self_service_access(user, config):
     normalized = normalize_config(config)
     dataset = DATASETS[normalized["dataset"]]
     source_permission = selected_permission(user, dataset)
-    export_permission = "finance.export" if normalized["dataset"] in {"finance", "inventory_value"} else "sales_management.export" if normalized["dataset"] in {"sales", "sales_skus", "refunds"} else None
+    export_permission = "finance.export" if normalized["dataset"] in {"finance", "inventory_value"} else "sales_management.export" if normalized["dataset"] in {"sales", "sales_skus", "refunds", "sales_abc"} else None
     codes = sorted(set(["reports.view", "reports.export", source_permission, *dataset.get("extra_permissions", []), *([export_permission] if export_permission else [])]))
     for code in codes:
         if not check_user_permission(user, code) or not get_permission_data_scopes(user, code):
@@ -582,7 +582,7 @@ def _self_service_access(user, config):
     # selected_permission already resolves typed legacy OR explicit report
     # resource policies. Rechecking legacy-only scope contradicts that decision.
     name = normalized["dataset"]
-    resource = "commerce.inventory" if name in {"inventory", "inventory_value"} else "sales_management.sales" if name in {"sales", "sales_skus", "refunds"} else None
+    resource = "commerce.inventory" if name in {"inventory", "inventory_value"} else "sales_management.sales" if name in {"sales", "sales_skus", "refunds", "sales_abc"} else None
     return normalized, export_permission, {
         code: _scope_snapshot(user, code, _report_resource(dataset) if code == "reports.view"
                               else resource if code == source_permission or code == "sales_management.export" else None)
@@ -611,10 +611,11 @@ def _create_self_service_export(user, filters, permission_code, file_format):
     config, export_scope, source_scope = _self_service_access(user, filters["config"])
     result = query_dataset(SimpleNamespace(user=user), config, limit=MAX_EXPORT_ROWS, use_cache=False, export_scope=export_scope)
     rejected = result["truncated"]
+    export_rows = sum(len(row.get("children", [])) or 1 for row in result["rows"]) if config["dataset"] == "sales_abc" else len(result["rows"])
     export_request = ReportExportRequest(tenant=user.tenant, report_type=ReportExportRequest.ReportType.SELF_SERVICE, requested_by=user,
         data_scope=_scope_snapshot(user, permission_code), source_scope=source_scope, filters={"config": result["config"], "snapshot": {"metric_version": result["metric_version"], "mapping_version": result["mapping_version"], "computed_at": result["computed_at"].isoformat()}},
         status=ReportExportRequest.Status.REJECTED if rejected else ReportExportRequest.Status.COMPLETED,
-        row_count=len(result["rows"]), file_format=file_format, rejection_reason="row_limit_exceeded" if rejected else "", finished_at=timezone.now())
+        row_count=export_rows, file_format=file_format, rejection_reason="row_limit_exceeded" if rejected else "", finished_at=timezone.now())
     export_request._export_service_write = True
     export_request.save()
     if not rejected:
@@ -623,8 +624,12 @@ def _create_self_service_export(user, filters, permission_code, file_format):
         else:
             stream = io.StringIO(newline="")
             writer = csv.writer(stream, lineterminator="\r\n")
-            columns = result["columns"]
+            columns = list(result["columns"])
+            if config["dataset"] == "sales_abc" and not any(column["key"] == "sku" for column in columns):
+                columns.extend([{"key": "sku", "label": "新编码（SKU）", "kind": "dimension"}, {"key": "legacy_sku", "label": "旧编码（SKU）", "kind": "dimension"}])
             identity_titles = {"store_id": "店铺名称", "warehouse_id": "仓库名称", "sku": "商品名称", "internal_sku": "内部商品名称"}
+            if config["dataset"] == "sales_abc":
+                identity_titles.pop("sku", None)
             headers = []
             for column in columns:
                 key = column["key"]
@@ -632,7 +637,13 @@ def _create_self_service_export(user, filters, permission_code, file_format):
                 if key in identity_titles:
                     headers.append(identity_titles[key])
             writer.writerow(headers)
+            source_rows = []
             for row in result["rows"]:
+                if config["dataset"] == "sales_abc" and row.get("children"):
+                    source_rows.extend({**{key: value for key, value in row.items() if key != "children"}, **child} for child in row["children"])
+                else:
+                    source_rows.append(row)
+            for row in source_rows:
                 values = []
                 for column in columns:
                     key = column["key"]

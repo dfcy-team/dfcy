@@ -413,7 +413,7 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
         candidate_values = attrs.get("platform_config", getattr(self.instance, "platform_config", {})) or {}
         if platform == "best_ecapi":
             from .best_access import validate_gateway
-            if not isinstance(candidate_values, dict) or set(candidate_values) - {"api_type", "partner_id", "customer_code", "api_host", "site_code"}:
+            if not isinstance(candidate_values, dict) or set(candidate_values) - {"api_type", "partner_id", "customer_code", "api_host", "site_code", "business_time_zone"}:
                 raise serializers.ValidationError({"platform_config": "百世配置仅接受公开接入参数，密钥须通过托管入口保存。"})
             if any(not isinstance(candidate_values.get(key), str) or not candidate_values[key].strip()
                    for key in ("partner_id", "customer_code", "api_host", "site_code")):
@@ -515,7 +515,10 @@ class RotateCredentialsSerializer(serializers.Serializer):
 
 
 class CredentialPayloadSerializer(serializers.Serializer):
-    partner_id = serializers.CharField(max_length=32, required=False, write_only=True)
+    partner_id = serializers.CharField(max_length=64, required=False, write_only=True)
+    customer_code = serializers.CharField(max_length=64, required=False, write_only=True)
+    api_host = serializers.URLField(max_length=300, required=False, write_only=True)
+    site_code = serializers.CharField(max_length=8, required=False, write_only=True)
     partner_key = serializers.CharField(max_length=4096, required=False, write_only=True, trim_whitespace=False)
     ads_app_id = serializers.CharField(max_length=255, required=False, write_only=True)
     ads_secret = serializers.CharField(max_length=4096, required=False, write_only=True, trim_whitespace=False)
@@ -635,10 +638,10 @@ class WarehouseAuthorizationSerializer(serializers.ModelSerializer):
     oauth_token_available = serializers.SerializerMethodField()
 
     def get_oauth_token_available(self, obj):
-        return bool(obj.token_id)
+        return bool(obj.integration_config.credential_id) if obj.provider == "best_ecapi" else bool(obj.token_id)
 
     def get_token_configured(self, obj):
-        return bool(obj.bootstrap_credential_id)
+        return bool(obj.integration_config.credential_id) if obj.provider == "best_ecapi" else bool(obj.bootstrap_credential_id)
 
     class Meta:
         model = WarehouseAuthorization

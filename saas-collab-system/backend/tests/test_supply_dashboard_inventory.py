@@ -173,3 +173,16 @@ def test_inventory_countries_are_discovered_without_supply_orders_and_respect_co
     assert [row['country_code'] for row in data['countries']] == ['CA']
     assert data['totals']['available_quantity'] == 11
     assert api.get(BASE + 'dashboard/?section=inventory&country_id=' + str(f['world']['country'].pk)).status_code == 404
+
+
+@pytest.mark.django_db
+def test_provider_only_inventory_scope_does_not_grant_country_catalog(inventory_facts):
+    from apps.permissions.models import DataScope
+    from apps.supply_chain.dashboard import scope
+    f=inventory_facts
+    actor=internal_user(f['world'],username='provider-only-no-country-grant',
+        scope=DataScope.ScopeType.CUSTOM,config={'platforms':['jifeng_wms']},
+        codes=('supply.v2.view','sales_management.view'))
+    countries,orders,demands,*_=scope(actor)
+    assert not orders.exists() and not demands.exists()
+    assert not countries.exists()

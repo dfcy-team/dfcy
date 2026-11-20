@@ -22,6 +22,7 @@ class WarehouseOrderLookupAdapter(PlatformAdapter):
         self.source_run = None
         self.readiness = {}
         self.permission_cache = {}
+        self._polling_cleanup_done = False
 
     def validate_configuration(self, job):
         if not getattr(settings, 'SALES_ORDER_WAREHOUSE_SYNC_ENABLED', False):
@@ -51,6 +52,7 @@ class WarehouseOrderLookupAdapter(PlatformAdapter):
 
     def bind_run(self, run):
         self.source_run = run
+        self._polling_cleanup_done = False
         saved = (run.masked_log or {}).get('warehouse_order_lookup', {})
         self.summary = Counter({key: value for key, value in saved.items()
                                 if key in self.STATES and type(value) is int and value >= 0})
@@ -74,7 +76,9 @@ class WarehouseOrderLookupAdapter(PlatformAdapter):
             return {'records': [], 'next_cursor': ''}
         from apps.sales_management.warehouse_unified import process_next_lookup
         result = process_next_lookup(job, run_guard=lambda: self._still_allowed(job),
-                                     readiness=self.readiness, permission_cache=self.permission_cache)
+                                     readiness=self.readiness, permission_cache=self.permission_cache,
+                                     cleanup_expired_polling=not self._polling_cleanup_done)
+        self._polling_cleanup_done = True
         if result is None:
             return {'records': [], 'next_cursor': ''}
         if not self.validate_record(result):

@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from django.db.models import Exists, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 from django.utils.dateparse import parse_datetime
@@ -98,6 +99,7 @@ class ManualInboundSourceInput(serializers.Serializer):
 
 
 class GenerateInput(VersionInput):
+    split_by_shipment = serializers.BooleanField(default=False)
     lines = ManualInboundSourceInput(many=True, allow_empty=False, required=False)
     notes = serializers.CharField(max_length=10000, allow_blank=True, default='')
     warehouse_id = serializers.IntegerField(min_value=1, allow_null=True, required=False, default=None)
@@ -264,8 +266,51 @@ class CancelInbound(InternalAPI):
 
 class GenerateInbound(InternalAPI):
     def post(self, request, pk):
-        obj = services.generate_inbound_draft(request.user, pk, **validated(GenerateInput, request), idempotency_key=key(request))
-        return Response({'data': logistics.inbound_data(obj)})
+        body = validated(GenerateInput, request)
+        if body.get('split_by_shipment') and not body.get('lines'):
+            raise ValidationError({'lines': '分批创建入库单必须选择本次入库明细。'})
+        request_key = key(request)
+        if not body.pop('split_by_shipment'):
+            obj = services.generate_inbound_draft(request.user, pk, **body, idempotency_key=request_key)
+            return Response({'data': logistics.inbound_data(obj)})
+        return self.split(request.user, pk, body, request_key)
+
+    @transaction.atomic
+    def split(self, actor, pk, body, request_key):
+        from .inbound_split import _normalize_lines, create_manual_inbound
+        from .models import domain_write
+
+        services._internal(actor)
+        services._tenant_lock(actor)
+        permitted = logistics.batch_for(actor, pk, MANAGE)
+        batch = DispatchBatch.objects.select_for_update().get(pk=permitted.pk)
+        lines = _normalize_lines(body['lines'])
+        payload = {**body, 'lines': lines}
+        prior = services._prior_event(actor, batch, 'inbound_split_created', request_key, payload)
+        if prior:
+            return Response({'data': {'inbounds': prior.payload['inbounds']}})
+        services._version(batch, body['expected_version'])
+        sources = dict(ShipmentLine.objects.filter(
+            tenant_id=actor.tenant_id, pk__in=[line['shipment_line_id'] for line in lines],
+        ).values_list('pk', 'shipment_id'))
+        groups = {}
+        for line in lines:
+            shipment_id = sources.get(line['shipment_line_id'])
+            if shipment_id is None:
+                raise ValidationError('找不到本次选择的发货明细。')
+            groups.setdefault(shipment_id, []).append(line)
+        inbounds = []
+        for offset, group in enumerate(groups.values()):
+            child_key = 'split-' + services.request_hash({'key': request_key, 'index': offset})
+            doc = create_manual_inbound(actor, pk, **{
+                **body, 'lines': group, 'expected_version': batch.version + offset,
+            }, idempotency_key=child_key)
+            inbounds.append({'id': doc.pk, 'number': doc.number})
+        batch.refresh_from_db()
+        with domain_write():
+            services._event(actor, batch, 'inbound_split_created', request_key, payload,
+                            audit={'inbounds': inbounds})
+        return Response({'data': {'inbounds': inbounds}})
 
 
 def prepare_inbound_list(page):
@@ -355,18 +400,20 @@ class InboundExtraSkuOptions(InternalAPI):
 
         inbound = logistics.inbound_for(request.user, pk, MANAGE)
         search = request.query_params.get('search', '').strip()[:160]
-        if inbound.status != 'draft' or len(search) < 2:
+        exact = request.query_params.get('exact') == '1'
+        if inbound.status != 'draft' or len(search) < (1 if exact else 2):
             return Response({'data': []})
         source_skus = inbound.lines.values('shipment_line__sku_id')
         latest_price = price_queryset(request.user).filter(
             sku_id=OuterRef('pk'), effective_date__lte=business_date(),
         ).order_by('-effective_date', '-updated_at', '-pk').values('unit_price')[:1]
-        matches = ProductSKU.objects.filter(tenant_id=inbound.tenant_id, is_active=True).exclude(
-            pk__in=source_skus
-        ).filter(
+        codes = Q(sku_code__iexact=search) | Q(legacy_sku_code__iexact=search) if exact else (
             Q(sku_code__icontains=search) | Q(legacy_sku_code__icontains=search)
             | Q(product_name__icontains=search) | Q(spu__product_name__icontains=search)
-        ).annotate(
+        )
+        matches = ProductSKU.objects.filter(tenant_id=inbound.tenant_id, is_active=True).exclude(
+            pk__in=source_skus
+        ).filter(codes).annotate(
             reference_unit_price=Coalesce(Subquery(latest_price), 'purchase_price'),
         ).order_by('sku_code', 'pk').values(
             'id', 'sku_code', 'legacy_sku_code', 'product_name', 'spu__product_name', 'reference_unit_price'
@@ -428,6 +475,16 @@ class WmsReconciliation(InternalAPI):
         return Response({'data': wms_reconciliation.reconcile_data(request.user, obj)})
 
 
+class WmsInboundMovements(InternalAPI):
+    def get(self, request):
+        from .inbound_movements import inbound_movements, outbound_movements
+        query = outbound_movements if request.query_params.get('direction') == 'outbound' else inbound_movements
+        result = query(request.user, request.query_params)
+        if hasattr(result, 'status_code'):
+            return result
+        return Response({'data': result})
+
+
 class WmsCandidates(InternalAPI):
     def get(self, request, pk):
         obj = logistics.inbound_for(request.user, pk, VIEW)
@@ -474,3 +531,14 @@ class DispatchBigSeller(InternalAPI):
 
     def get(self, request, pk):
         raise ValidationError('BigSeller 采购单须从已确认入库单导出。')
+
+class WmsInboundDocuments(InternalAPI):
+    def get(self, request):
+        from .wms_documents import list_documents
+        return Response({'data': list_documents(request.user, request.query_params)})
+
+
+class WmsInboundDocument(InternalAPI):
+    def get(self, request, pk):
+        from .wms_documents import document_detail
+        return Response({'data': document_detail(request.user, pk)})

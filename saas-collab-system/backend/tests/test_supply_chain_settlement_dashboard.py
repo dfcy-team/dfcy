@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from apps.permissions.models import DataScope
+from apps.permissions.models import DataScope, Permission, UserRole
 from apps.supply_chain import services
 from apps.supply_chain.cost_models import PaymentRecord
 from apps.supply_chain.models import domain_write
@@ -11,6 +11,18 @@ from tests.test_supply_chain_v2_costs import pilot, mark, fee
 from tests.test_supply_chain_v2_foundation import (world, internal_user, confirmed_order,
     po_payload, shipment_payload, freight)
 from tests.test_supply_chain_v2_logistics import BASE, client, write
+
+
+def enable_manual_payment_mode(world, buyer):
+    world['tenant'].payment_approval_required = False
+    world['tenant'].save(update_fields=['payment_approval_required'])
+    buyer.tenant.payment_approval_required = False
+    buyer.tenant.save(update_fields=['payment_approval_required'])
+    role = UserRole.objects.get(tenant=world['tenant'], user=buyer).role
+    finance_permission, _ = Permission.objects.update_or_create(
+        code='finance.reconcile', defaults={'name': 'Reconcile finance data',
+            'module': 'finance', 'action': 'reconcile', 'description': 'Run and review finance reconciliation'})
+    role.permissions.add(finance_permission)
 
 
 def account(api, kind, obj):
@@ -62,6 +74,7 @@ def test_dashboard_domestic_freight_is_separate_and_unselected_carrier_is_visibl
 @pytest.mark.django_db(transaction=True)
 def test_dashboard_deposit_application_is_not_counted_as_cash_and_party_filter_pages(world):
     buyer, api, shipment = pilot(world)
+    enable_manual_payment_mode(world, buyer)
     acct = account(api, 'purchase', shipment.order)
     payment = write(api, f'costs/purchase/{shipment.order_id}/payments/', {'amount':'1','date':'2026-10-14',
         'payee_account_id':acct,'expected_version':0}, 'deposit-cash')
@@ -104,6 +117,7 @@ def test_dashboard_deposit_application_is_not_counted_as_cash_and_party_filter_p
 @pytest.mark.django_db(transaction=True)
 def test_dashboard_settled_drillthrough_country_and_party_permission_filters(world):
     buyer, api, shipment = pilot(world)
+    enable_manual_payment_mode(world, buyer)
     acct = account(api, 'supplier', world['supplier'])
     paid = write(api, f'costs/shipment/{shipment.pk}/payments/', {'amount':'20','date':'2026-10-14',
         'payee_account_id':acct,'expected_version':0}, 'settle-cash')

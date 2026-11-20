@@ -267,6 +267,8 @@ def rotate_config_secrets(
     if actor.tenant_id != config.tenant_id:
         raise ValidationError("Credential rotation actor must belong to the config tenant.")
     payload = {"version": version, "reason": reason, "credentials": credentials}
+    if config.platform == "best_ecapi":
+        payload["platform_config"] = platform_config
     operation, repeated = _mutation_request(
         config,
         CredentialMutationRequest.Action.ROTATE,
@@ -341,7 +343,8 @@ def rotate_config_secrets(
                 locked.platform_config = platform_config
             if callback_url is not None:
                 locked.callback_url = callback_url
-            locked.sync_read_enabled = True
+            if locked.platform != "best_ecapi":
+                locked.sync_read_enabled = True
             locked.config_version += 1
             with authorization_service_write():
                 locked.save(

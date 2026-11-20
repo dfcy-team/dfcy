@@ -249,6 +249,10 @@ def test_same_source_multi_fee_batch_confirmation_excludes_its_own_reservations(
     batch = created.data['data']
     submitted = write(api, f'payment-batches/{batch["id"]}/submit/', {'expected_version': batch['version']},
         'same-source-reservation-submit').data['data']
+    # Existing submitted approvals remain valid when manual registration is enabled.
+    world['tenant'].payment_approval_required = False
+    world['tenant'].save(update_fields=['payment_approval_required'])
+    buyer.tenant.payment_approval_required = False
     state = costs.payment_summary(buyer, 'batch', source.pk)
     direct = {'amount': '6.0000', 'date': '2026-10-14', 'payee_account_id': accounts[item_a.pk]['id'],
               'fee_item_id': item_a.pk, 'expected_version': state['version']}
@@ -332,6 +336,10 @@ def test_batch_rejection_or_withdrawal_releases_prepayment_reservation(world, mo
         'bank_name': '测试银行', 'account_number': '6222000000005555', 'active': True,
     }, f'deposit-batch-{resolution}-account')
     assert order_account.status_code == 201, order_account.data
+    # Existing submitted approvals remain valid when manual registration is enabled.
+    world['tenant'].payment_approval_required = False
+    world['tenant'].save(update_fields=['payment_approval_required'])
+    buyer.tenant.payment_approval_required = False
     deposit = write(api, f'costs/purchase/{shipment.order_id}/payments/', {
         'amount': '1.0000', 'payee_account_id': order_account.data['data']['account']['id'],
         'date': '2026-10-14', 'expected_version': 0,

@@ -33,7 +33,8 @@ def managed_for_order_id(order_id):
     return bool(pair and (pair[0], (pair[1] or "").upper()) in managed_country_pairs())
 
 
-def process_next_lookup(job, *, run_guard=None, readiness=None, permission_cache=None):
+def process_next_lookup(job, *, run_guard=None, readiness=None, permission_cache=None,
+                        cleanup_expired_polling=True):
     """Process at most one eligible requested order for this job's authorization."""
     now = timezone.now()
     if run_guard is not None and not run_guard():
@@ -49,13 +50,15 @@ def process_next_lookup(job, *, run_guard=None, readiness=None, permission_cache
     scoped = OrderWarehouseLookup.objects.filter(
         order__tenant_id=job.tenant_id, order__store__country_code__iexact=country,
     )
-    scoped.exclude(status__in=['pending', 'running']).filter(next_query_at__lte=now).filter(
-        Q(polling_until__isnull=True) | Q(polling_until__lte=now)
-    ).update(next_query_at=None)
+    if cleanup_expired_polling:
+        scoped.exclude(status__in=['pending', 'running']).filter(next_query_at__lte=now).filter(
+            Q(polling_until__isnull=True) | Q(polling_until__lte=now)
+        ).update(next_query_at=None)
     eligible = scoped.filter(
         (Q(status="pending") & (Q(lease_until__isnull=True) | Q(lease_until__lte=now))) |
         Q(status="running", lease_until__lte=now) |
-        (~Q(status__in=["pending", "running"]) & Q(next_query_at__lte=now))
+        (~Q(status__in=["pending", "running"]) & Q(next_query_at__lte=now) &
+         Q(polling_until__gt=now))
     )
     # Bound database work and serialize competing unified dispatchers while selecting.
     with transaction.atomic():

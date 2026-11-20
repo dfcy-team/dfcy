@@ -32,6 +32,7 @@ const SalesAnalysis = () => import('../views/analytics/SalesAnalysis.vue');
 const InventoryAnalysis = () => import('../views/analytics/InventoryAnalysis.vue');
 const WarehouseInventoryDetails = () => import('../views/inventory/WarehouseInventoryDetails.vue');
 const InventoryWorkbench = () => import('../views/inventory/InventoryWorkbench.vue');
+const InventoryMovements = () => import('../views/inventory/InventoryMovements.vue');
 const AdvertisingOverview = () => import('../views/analytics/AdvertisingOverview.vue');
 const AdvertisingPerformance = () => import('../views/analytics/AdvertisingPerformance.vue');
 const MarketingAdvertising = () => import('../views/analytics/MarketingAdvertising.vue');
@@ -190,6 +191,7 @@ const routes = [
       { path: 'inventory/workbench', component: InventoryWorkbench },
       { path: 'inventory/warehouse-details', component: WarehouseInventoryDetails },
       { path: 'inventory/category-query', redirect: '/inventory/warehouse-details' },
+      { path: 'inventory/movements', component: InventoryMovements },
       { path: 'analytics/advertising-overview', component: AdvertisingOverview },
       { path: 'analytics/advertising-performance', component: AdvertisingPerformance },
       { path: 'marketing/campaigns', component: PlatformCampaigns },
@@ -376,6 +378,7 @@ const routes = [
       { path: 'influencers/outreach-tasks', component: OutreachTaskList },
       { path: 'influencers/sample-fulfillments', component: SampleFulfillmentList },
       { path: 'influencers/bd-performance', component: BdPerformance },
+      { path: 'influencers/requirements', component: () => import('../views/influencers/InfluencerRequirements.vue') },
       {
         path: 'influencers/bd-config',
         component: BdPerformanceConfig,

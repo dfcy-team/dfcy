@@ -8,6 +8,7 @@ from rest_framework.exceptions import ValidationError
 
 from apps.integrations.best_business import count, packages, return_receipt, utc_time
 from apps.sales_management.best_warehouse_orders import fetch_packages
+from apps.finance.summary_shipped_items import shipped_items
 from tests.test_order_aftersales import case_data
 
 
@@ -39,6 +40,16 @@ def test_invalid_quantity_is_not_zero_or_truncated(value):
         count(value)
 
 
+def test_singleton_xml_package_reaches_costs_using_actual_sku():
+    result = packages(outbound(), authorization())
+    assert result[0]['status_label'] == '已发货'
+    lookup = SimpleNamespace(status='matched', warehouse_id=3, snapshot={'packages': result})
+    items, reasons = shipped_items(lookup, 'Asia/Shanghai')
+    assert not reasons
+    assert items == [{'source_sku': 'SKU-A', 'quantity': 2, 'shipped_date': '2026-09-02',
+                      'warehouse_order_no': 'WMS-1/PACK-1'}]
+
+
 def test_packages_never_repeat_order_quantity_and_reject_duplicate_identity():
     value = outbound()
     second = deepcopy(value['packageList']['packageItem'])
@@ -63,6 +74,8 @@ def test_pending_delivery_cannot_supply_costs():
     value['status'] = 'WMS_PACKAGE'
     result = packages(value, authorization())
     assert result[0]['shipped_at_utc'] is None
+    items, _ = shipped_items(SimpleNamespace(status='matched', warehouse_id=3, snapshot={'packages': result}), 'Asia/Shanghai')
+    assert items == []
 
 
 def test_return_good_and_defective_counts_are_both_real_receipts():

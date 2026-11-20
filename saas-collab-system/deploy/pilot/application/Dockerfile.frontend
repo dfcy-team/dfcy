@@ -26,6 +26,9 @@ COPY backend/apps/finance/summary_periods.cjs /backend/apps/finance/summary_peri
 COPY backend/apps/finance/summary_runtime.js /backend/apps/finance/summary_runtime.js
 COPY backend/apps/finance/summary_tools.js /backend/apps/finance/summary_tools.js
 COPY backend/apps/permissions/permission_manifest.json /backend/apps/permissions/permission_manifest.json
+COPY backend/apps/influencers/requirement_feedback.py /backend/apps/influencers/requirement_feedback.py
+COPY backend/apps/influencers/views.py /backend/apps/influencers/views.py
+COPY backend/apps/influencers/migrations/0051_requirement_images.py /backend/apps/influencers/migrations/0051_requirement_images.py
 COPY frontend/ ./
 RUN VITE_USE_MOCK=true npm run test
 RUN npm run build

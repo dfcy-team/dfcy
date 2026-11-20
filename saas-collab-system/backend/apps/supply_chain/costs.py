@@ -1176,7 +1176,20 @@ def validate_payment_currency(actor,kind,obj,value):
     known=_payment_currency_codes(actor,kind,obj)
     if code and any(code!=item for item in known):
         raise ValidationError({'currency':'付款币种与来源或已确认的应付/付款计划币种不一致，请先核对。'})
-    return code
+    if len(known)>1:
+        raise ValidationError({'currency':'来源币种信息不一致，请先核对。'})
+    return code or (next(iter(known)) if len(known)==1 else '')
+
+
+def recorded_payment_currency(actor, payment):
+    """Only immutable posting currency is an authorization boundary.
+
+    Legacy display confirmations are editable by business managers and cannot
+    grant finance access. Missing posting currency remains unrestricted-only.
+    """
+    if payment.tenant_id != actor.tenant_id:
+        raise PermissionDenied()
+    return (payment.account_snapshot or {}).get('currency') or ''
 
 
 def payment_summary(actor, kind, pk):
@@ -1429,7 +1442,8 @@ def payment_summary(actor, kind, pk):
 
 
 @transaction.atomic
-def create_payment(actor, kind, pk, payload, request_key, *, verified_request=None, verified_batch=None):
+def create_payment(actor, kind, pk, payload, request_key, *, verified_request=None, verified_batch=None,
+                   verified_batch_currency=None):
     services._internal(actor)
     services._tenant_lock(actor)
     obj = _payment_owner(actor, kind, pk, MANAGE)
@@ -1465,12 +1479,24 @@ def create_payment(actor, kind, pk, payload, request_key, *, verified_request=No
                 verified_request.fee_item_id != payload.get('fee_item_id')):
             raise ValidationError('付款申请与当前入账对象不匹配。')
     if verified_batch is not None:
+        from .payment_batches import _manual_allowed
+        approved = (verified_batch.status == 'submitted' and verified_batch.approval_id and verified_batch.approval.status == 'approved')
+        if verified_batch_currency is None:
+            manual = not approved and _manual_allowed(actor, verified_batch)
+        else:
+            # post_batch has checked the entire batch under this tenant lock.
+            # Retain per-line checks without scanning all other lines again.
+            from .payment_approval_api import approval_required
+            from .payment_requests import finance_allowed
+            manual = (verified_batch.status == 'draft' and not verified_batch.approval_id and
+                not approval_required(actor) and finance_allowed(actor, verified_batch_currency, unknown_as_cny=False) and
+                (source_payment_currency(actor, kind, obj) or '') == verified_batch_currency)
         if (not isinstance(verified_batch, SupplyPaymentBatch) or
-                verified_batch.tenant_id != actor.tenant_id or verified_batch.status != 'submitted' or
-                not verified_batch.approval_id or verified_batch.approval.status != 'approved' or
+                verified_batch.tenant_id != actor.tenant_id or
+                not (approved or manual) or
                 not verified_batch.lines.filter(tenant_id=actor.tenant_id, kind=kind, source_id=obj.pk,
                     amount=amount, payee_account_id=payload['payee_account_id'],
-                    fee_item_id=payload.get('fee_item_id'), status='submitted', payment__isnull=True).exists()):
+                    fee_item_id=payload.get('fee_item_id'), status=verified_batch.status, payment__isnull=True).exists()):
             raise ValidationError('付款批次与当前入账对象不匹配。')
     if verified_request is not None and verified_batch is not None:
         raise ValidationError('不能同时指定付款申请和付款批次。')

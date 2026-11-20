@@ -20,7 +20,7 @@ class StoreConfig(TenantRecord):
     stock = models.PositiveIntegerField(validators=[MinValueValidator(1), MaxValueValidator(999999)])
     runs = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1), MaxValueValidator(999999)])
     notification_mode = models.CharField(max_length=12, default="owner", choices=[
-        ("owner", "店铺负责人"), ("custom", "自定义人员"), ("fallback", "使用兜底"),
+        ("owner", "店铺负责人"), ("custom", "自定义人员"), ("fallback", "使用兜底"), ("disabled", "关闭"),
     ])
     recipients = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name="flash_store_configs")
     version = models.PositiveIntegerField(default=1)
@@ -35,6 +35,7 @@ class TenantControl(TenantRecord):
     scheduler_owner = models.CharField(max_length=80, default="paused")
     cutover_watermark = models.DateTimeField(null=True, blank=True)
     last_dispatch_at = models.DateTimeField(null=True, blank=True)
+    notifications_not_before = models.DateTimeField(null=True, blank=True)
     version = models.PositiveIntegerField(default=1)
 
 

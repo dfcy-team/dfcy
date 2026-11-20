@@ -109,7 +109,11 @@ def test_voucher_file_limit_and_other_tenant_download(world, monkeypatch):
 
 
 def test_payment_transaction_voucher_upload_list_and_download(world):
+    world['tenant'].payment_approval_required = False
+    world['tenant'].save(update_fields=['payment_approval_required'])
     buyer, api, shipment = pilot(world)
+    from tests.test_sales_management import grant
+    grant(buyer, 'finance.reconcile')
     with domain_write():
         account = PayeeAccount.objects.create(tenant=world['tenant'], created_by=buyer,
             supplier=shipment.order.supplier, nature='corporate', account_name='A',

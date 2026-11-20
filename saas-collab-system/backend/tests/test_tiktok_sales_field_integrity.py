@@ -115,6 +115,8 @@ def test_refund_line_invalid_structure_is_not_zero(bad):
         adapter(MarketplaceRefundAdapter).normalize_record(value)
 
 
+# Missing unit quantities now consult exact persisted order-line evidence.
+@pytest.mark.django_db
 @pytest.mark.parametrize("quantity", [None, "", 0, -1, 1.5, "unknown", True])
 def test_refund_quantity_must_be_reported_and_positive_integral(quantity):
     value = refund_record()

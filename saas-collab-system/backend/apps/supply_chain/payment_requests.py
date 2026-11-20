@@ -50,7 +50,7 @@ def _current(actor, row):
         fee = costs.fee_record(row.kind, obj)
         breakdown = fee.current_revision.item_breakdown if fee and fee.current_revision else []
         match = next((i for i in breakdown if str(i['fee_item_id']) == str(row.fee_item_id)), None)
-        if (breakdown and not row.fee_item_id) or (row.fee_item_id and (match is None or match != row.item_snapshot)):
+        if (breakdown and not row.fee_item_id) or (row.fee_item_id and (match is None or match != {key: value for key, value in row.item_snapshot.items() if key != "transport"})):
             raise ValidationError('费用项目已变化，请取消后重新申请。')
     validate_request_link(actor, row, obj)
     return obj
@@ -60,8 +60,22 @@ def _unpaid(actor, row):
     try: return row.approval.status
     except Exception: return 'pending'
 
-def finance_allowed(actor, currency=''):
-    return user_has_finance_permission(actor, 'finance.reconcile') and finance_values_allowed(actor, 'finance.reconcile', platform='', currency=currency or 'CNY')
+def finance_allowed(actor, currency='', *, unknown_as_cny=True):
+    value = (currency or 'CNY') if unknown_as_cny else currency
+    return user_has_finance_permission(actor, 'finance.reconcile') and finance_values_allowed(actor, 'finance.reconcile', platform='', currency=value)
+
+
+def request_finance_allowed(actor, row):
+    if row.payment_id:
+        currency = costs.recorded_payment_currency(actor, row.payment)
+    else:
+        source = costs._payment_owner(actor, row.kind, row.source_id, VIEW)
+        try:
+            costs.validate_payment_currency(actor, row.kind, source, row.currency)
+        except ValidationError:
+            return False
+        currency = costs.source_payment_currency(actor, row.kind, source) or ''
+    return finance_allowed(actor, currency, unknown_as_cny=False)
 
 
 def request_data(actor, row):
@@ -74,9 +88,10 @@ def request_data(actor, row):
     approval_status = row.batch.approval.status if row.batch_id and row.batch.approval_id else _unpaid(actor,row)
     reversed_payment = bool(row.payment_id and (row.payment.reverses_id or row.payment.reversal.exists()))
     allowed_manage = check_user_permission(actor, MANAGE)
-    can_submit = row.status=='draft' and row.created_by_id==actor.pk and allowed_manage and check_user_permission(actor,'workflow.approvals.submit') and scope_allows_value(actor,'workflow.approvals.submit','approval_types','finance')
+    from .payment_approval_api import approval_required
+    can_submit = row.status=='draft' and row.created_by_id==actor.pk and allowed_manage and check_user_permission(actor,'workflow.approvals.submit') and scope_allows_value(actor,'workflow.approvals.submit','approval_types','finance') and approval_required(actor)
     can_cancel = not row.payment_id and row.status!='cancelled' and row.created_by_id==actor.pk and allowed_manage
-    can_confirm = bool(row.approval_id and approval_status=='approved' and vouchers and not row.payment_id and row.status!='cancelled' and allowed_manage and finance_allowed(actor,row.currency))
+    can_confirm = bool(row.approval_id and approval_status=='approved' and vouchers and not row.payment_id and row.status!='cancelled' and allowed_manage and request_finance_allowed(actor,row))
     result = {'id':row.pk,'version':row.version,'status':'reversed' if reversed_payment else 'paid' if row.payment_id else ('cancelled' if row.status=='cancelled' else approval_status if (row.approval_id or (row.batch_id and row.batch.approval_id)) else row.status),
         'amount':str(row.amount),'reason':row.reason,'item_snapshot':row.item_snapshot,'account_snapshot':{**row.account_snapshot,'account_number':costs._mask_account_number(row.account_snapshot.get('account_number',''))},'approval_id':row.approval_id,
         'currency':row.currency,'corporate_tax':row.item_snapshot.get('corporate_tax') if row.kind=='shipment' else None,
@@ -174,6 +189,9 @@ class RequestAPI(InternalAPI):
         if not account: raise ValidationError('收款账户无效或不属于当前业务对象。')
         if p.get('payment_nature') and p['payment_nature'] != account.nature:
             raise ValidationError({'payee_account_id': '收款账户与选择的付款性质不一致。'})
+        from .payment_approval_api import approval_required
+        if not approval_required(actor):
+            raise ValidationError('付款审批已关闭，请使用手工登记。')
         confirmed_currency=costs.validate_payment_currency(actor,kind,obj,p.get('currency',''))
         fee_item=None; item={}; amt=p['amount']
         if kind in ('batch','inbound'):
@@ -231,6 +249,9 @@ class RequestAction(InternalAPI):
         if old: return Response({'data':request_data(actor,row)})
         if request.data.get('expected_version')!=row.version: raise ValidationError('申请已变化，请刷新。')
         if action=='submit':
+            from .payment_approval_api import approval_required
+            if not approval_required(actor):
+                raise ValidationError('付款审批已关闭，请使用手工登记。')
             if row.status!='draft': raise ValidationError('仅草稿可提交。')
             if row.created_by_id != actor.pk: raise PermissionDenied()
             if not check_user_permission(actor,'workflow.approvals.submit') or not scope_allows_value(actor,'workflow.approvals.submit','approval_types','finance'): raise PermissionDenied()

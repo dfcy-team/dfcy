@@ -15,11 +15,9 @@ from .permissions import IsDatasetReportViewer
 @permission_classes([IsDatasetReportViewer])
 def report_datasets(request):
     return success_response({"datasets": dataset_catalog(request.user, permission_cache=request._permission_resolution_cache), "pending": [
-        {"name": "广告费用对账", "module": "财务中心", "status": "pending", "reason": "广告自助分析已接入店铺日报；费用对账仍需平台扣费账单及入账关联"},
         {"name": "订单利润", "module": "财务中心", "status": "pending", "reason": "需要订单商品关联、完整历史成本、退款、费用分摊及汇率；流水净额不代替利润"},
         {"name": "结算利润与实际回款", "module": "财务中心", "status": "pending", "reason": "需要完整结算账单、提现、银行到账和对账关联"},
-        {"name": "销售 ABC 与库存周转", "module": "库存管理 / 经营分析", "status": "pending", "reason": "需要可靠销售 SKU 关联、完整销量窗口及同口径平均库存"},
-        {"name": "补货建议", "module": "库存管理", "status": "pending", "reason": "需要仓库需求分配、采购提前期、安全库存及可靠在途"},
+        {"name": "库存周转", "module": "库存管理 / 经营分析", "status": "pending", "reason": "需要可靠销售 SKU 关联、完整销量窗口及同口径平均库存"},
         {"name": "批次库龄", "module": "库存管理", "status": "pending", "reason": "需要批次标识及真实入库日期；库存快照日期不等于入库日期"},
         {"name": "收发存", "module": "库存管理 / 供应链协同", "status": "pending", "reason": "需要完整出入库和盘点记录；快照差额不等于出入库流水"},
     ]})

@@ -50,6 +50,12 @@
         <el-descriptions-item label="正报应付（含税）"><strong>{{ detail.payment_context.amount }} {{ detail.payment_context.currency }}</strong></el-descriptions-item>
       </el-descriptions>
       <p><template v-if="!detail.payment_context.corporate_tax">本次付款金额：{{ detail.payment_context.amount }} {{ detail.payment_context.currency || '币种未记录' }} · </template><template v-if="['corporate','personal'].includes(detail.payment_context.account_snapshot?.nature)">付款性质：{{ detail.payment_context.account_snapshot.nature==='corporate'?'对公（正报）':'对私' }} · </template>收款方：{{ detail.payment_context.account_snapshot?.account_holder || '请核对来源单据' }}</p>
+      <el-table v-if="detail.payment_context.transport_lines?.length" :data="detail.payment_context.transport_lines" border>
+        <el-table-column prop="number" label="来源单据" min-width="135" />
+        <el-table-column label="运单号" min-width="135"><template #default="{row}">{{row.waybill_number ? (row.kind === 'domestic_freight' ? '国内 · ' : '') + row.waybill_number : '—'}}</template></el-table-column>
+        <el-table-column label="实际柜号" min-width="130"><template #default="{row}">{{row.container_number || '—'}}</template></el-table-column>
+        <el-table-column prop="amount" label="金额" min-width="100" />
+      </el-table>
       <div v-for="file in detail.payment_context.vouchers || []" :key="file.id"><el-button link @click="previewEvidence(file)">{{ file.file_name }} · 预览</el-button><el-button link @click="downloadEvidence(file)">下载</el-button></div>
       <div v-for="file in detail.payment_context.vouchers || []" :key="`voucher-${file.id}`"><el-button link @click="previewEvidence(file)">{{ file.file_name }} · 预览</el-button><el-button link @click="downloadEvidence(file)">下载</el-button><el-button v-if="detail.status === 'pending' && detail.payment_context.can_upload" link type="danger" :disabled="saving || uploading" @click="removeEvidence(file)">删除</el-button></div>
       <div v-if="detail.payment_context.mode === 'single' && detail.payment_context.attachments?.length"><strong>申请附件</strong><div v-for="file in detail.payment_context.attachments" :key="`attachment-${file.id}`"><el-button link @click="previewApplicationAttachment(file)">{{file.file_name}} · 预览</el-button><el-button link @click="downloadApplicationAttachment(file)">下载</el-button></div></div>

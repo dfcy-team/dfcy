@@ -68,6 +68,7 @@ LIVE_PLATFORM_MAX_RETRY_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_RETRY_WAIT", "
 LIVE_PLATFORM_MAX_TOTAL_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_TOTAL_WAIT", "15"))
 LIVE_READONLY_SYNC_ENABLED = env_bool("LIVE_READONLY_SYNC_ENABLED", False)
 BEST_ECAPI_ENABLED = env_bool("BEST_ECAPI_ENABLED", False)
+BEST_GLINK_CALLBACKS_ENABLED = env_bool("BEST_GLINK_CALLBACKS_ENABLED", False)
 SALES_ORDER_WAREHOUSE_SYNC_ENABLED = env_bool("SALES_ORDER_WAREHOUSE_SYNC_ENABLED", False)
 SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED = env_bool("SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED", False)
 
@@ -450,6 +451,8 @@ SUPPLY_NOTIFICATION_PUBLIC_BASE_URL = os.getenv('SUPPLY_NOTIFICATION_PUBLIC_BASE
 SUPPLY_CHAIN_LEGACY_WRITES_ENABLED = os.getenv('SUPPLY_CHAIN_LEGACY_WRITES_ENABLED', 'false').lower() == 'true'
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_DEFAULT_QUEUE = "celery"
+FINANCE_SUMMARY_QUEUE = os.getenv("FINANCE_SUMMARY_QUEUE", "finance-summary")
+FINANCE_SUMMARY_REBUILD_QUEUE = os.getenv("FINANCE_SUMMARY_REBUILD_QUEUE", FINANCE_SUMMARY_QUEUE)
 CELERY_TASK_DEFAULT_PRIORITY = 5
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_BROKER_TRANSPORT_OPTIONS = {"queue_order_strategy": "round_robin", "socket_timeout": 2, "socket_connect_timeout": 2}
@@ -463,6 +466,7 @@ INVENTORY_SNAPSHOT_MAINTENANCE_TENANT_ID = int(os.getenv("INVENTORY_SNAPSHOT_MAI
 REPLENISHMENT_MAINTENANCE_ENABLED = env_bool("REPLENISHMENT_MAINTENANCE_ENABLED", False)
 CELERY_TASK_ROUTES = {
     "apps.flash_sales.tasks.dispatch": {"queue": "shopee-flash-control"},
+    "apps.integrations.tasks.dispatch_due_flash_sales_plans": {"queue": "shopee-flash-control"},
     "apps.flash_sales.tasks.execute": {"queue": "shopee-flash"},
     "apps.flash_sales.tasks.send_notification": {"queue": "shopee-flash-notify"},
     "apps.integrations.tasks.dispatch_due_readonly_sync_jobs": {"queue": "sync-control"},
@@ -473,7 +477,7 @@ CELERY_BEAT_SCHEDULE = {
     'dispatch-finance-summary-calculations': {
         'task': 'apps.finance.summary_jobs.dispatch_calculations',
         'schedule': 30.0,
-        'options': {'queue': 'finance-summary', 'expires': 25},
+        'options': {'queue': FINANCE_SUMMARY_QUEUE, 'expires': 25},
     },
     'dispatch-platform-wallet-sync': {
         'task': 'apps.finance.tasks.dispatch_platform_wallet_sync',
@@ -670,6 +674,11 @@ if SALES_ORDER_WAREHOUSE_SYNC_ENABLED:
         "options": {"queue": "warehouse-orders", "expires": 55},
     }
 if FLASH_SALES_WORKERS_ENABLED:
+    CELERY_BEAT_SCHEDULE["dispatch-sync-task-shopee-flash-plans"] = {
+        "task": "apps.integrations.tasks.dispatch_due_flash_sales_plans",
+        "schedule": 5.0,
+        "options": {"queue": "shopee-flash-control", "expires": 4},
+    }
     CELERY_BEAT_SCHEDULE["dispatch-shopee-flash-sales"] = {
         "task": "apps.flash_sales.tasks.dispatch",
         "schedule": 5.0,

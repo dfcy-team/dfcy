@@ -476,6 +476,111 @@ def test_outreach_task_list_returns_existing_rows():
     assert [row["id"] for row in payload["results"]] == [task.id]
 
 
+def test_recent_outreach_requirements_are_scoped_and_ordered_by_dispatch_time():
+    tenant = Tenant.objects.create(name="Activity tenant", code="activity-tenant")
+    user, client = user_with_permissions(tenant, "activity-reader", "influencers.outreach.view")
+    store = store_for(tenant, "activity-store")
+    now = timezone.now()
+
+    def make(number, minutes, *, requirements="Show the product", priority="normal"):
+        return OutreachTask.objects.create(
+            tenant=tenant, task_no=number, store=store, owner=user, dispatcher=user,
+            dispatch_time=now - timedelta(minutes=minutes), dispatch_requirements=requirements, priority=priority,
+        )
+
+    newest = make("LATEST", 1)
+    QuerySet.update(OutreachTask.objects.filter(pk=newest.pk), status="paused")
+    make("OLDER", 8)
+    middle = make("MIDDLE", 3)
+    third = make("THIRD", 5)
+    deleted = make("DELETED", 0, priority="high")
+    QuerySet.update(OutreachTask.objects.filter(pk=deleted.pk), is_deleted=True, deleted_at=now)
+    make("EMPTY", 0, requirements="")
+    urgent = make("URGENT", 0, requirements="", priority="urgent")
+    high = [make(f"HIGH-{i}", i, requirements="", priority="high") for i in range(4)]
+    foreign = Tenant.objects.create(name="Other activity tenant", code="other-activity-tenant")
+    outsider = CustomUser.objects.create_user(username="other-activity-reader", tenant=foreign)
+    OutreachTask.objects.create(
+        tenant=foreign, task_no="FOREIGN", store=store_for(foreign, "foreign-activity-store"),
+        owner=outsider, dispatcher=outsider, dispatch_time=now, dispatch_requirements="Private requirements", priority="urgent",
+    )
+    response = client.get("/api/internal/influencers/outreach-tasks/", {
+        "recent_requirements": "true", "page": 2, "status": "completed", "include_deleted": "true",
+    })
+    assert response.status_code == 200
+    rows = response.data["data"]["results"]
+    assert [row["id"] for row in rows] == [newest.pk, middle.pk, third.pk]
+    assert rows[0]["status"] == "paused"
+    assert rows[0]["dispatch_requirements"] == "Show the product"
+    priority_tasks = response.data["data"]["priority_tasks"]
+    assert [row["id"] for row in priority_tasks["urgent"]] == [urgent.pk]
+    assert [row["id"] for row in priority_tasks["high"]] == [task.pk for task in high[:3]]
+    assert set(priority_tasks["high"][0]) == {"id", "task_no", "task_name"}
+
+
+def test_outreach_dispatcher_and_priority_filters_run_before_pagination():
+    tenant = Tenant.objects.create(name="Dispatcher tenant", code="dispatch-filter")
+    viewer, client = user_with_permissions(tenant, "dispatch-viewer", "influencers.outreach.view")
+    dispatcher = CustomUser.objects.create_user(username="target-dispatcher", full_name="Selected dispatcher", tenant=tenant)
+    store = store_for(tenant, "dispatch-filter")
+    statuses = ("completed", "cancelled", "in_progress", "pending")
+    expected = {}
+    for index, status in enumerate(statuses):
+        task = OutreachTask.objects.create(tenant=tenant, task_no=f"OLDER-{index}", store=store,
+                                           owner=viewer, dispatcher=dispatcher,
+                                           priority="high" if status == "pending" else "normal")
+        QuerySet.update(OutreachTask.objects.filter(pk=task.pk), status=status)
+        expected[status] = task.pk
+    for index in range(3):
+        OutreachTask.objects.create(tenant=tenant, task_no=f"RECENT-{index}", store=store,
+                                    owner=viewer, dispatcher=viewer)
+    foreign = Tenant.objects.create(name="Other Dispatcher tenant", code="other-dispatch-filter")
+    outsider = CustomUser.objects.create_user(username="foreign-dispatcher", tenant=foreign)
+    OutreachTask.objects.create(tenant=foreign, task_no="FOREIGN", store=store_for(foreign, "foreign"),
+                                owner=outsider, dispatcher=outsider)
+
+    url = "/api/internal/influencers/outreach-tasks/"
+    assert client.get(url, {"page_size": 2, "dispatcher": "bad"}).status_code == 400
+    assert client.get(url, {"dispatcher": outsider.pk}).data["data"]["count"] == 0
+    first, second = (
+        client.get(url, {"page": page, "page_size": 2, "dispatcher": dispatcher.pk})
+        for page in (1, 2)
+    )
+    assert first.status_code == second.status_code == 200
+    payloads = [first.data["data"], second.data["data"]]
+    assert [payload["count"] for payload in payloads] == [4, 4]
+    assert {row["status"]: row["id"] for payload in payloads for row in payload["results"]} == expected
+    filtered = client.get(url, {"dispatcher": dispatcher.pk, "normal_only": "true", "status": "completed"})
+    assert [row["id"] for row in filtered.data["data"]["results"]] == [expected["completed"]]
+    normal = client.get(url, {"dispatcher": dispatcher.pk, "normal_only": "true"})
+    assert normal.data["data"]["count"] == 3
+    options = client.get("/api/internal/influencers/outreach-task-options/").data["data"]["dispatchers"]
+    assert {row["id"] for row in options} == {viewer.pk, dispatcher.pk}
+    assert {"id": dispatcher.pk, "name": "Selected dispatcher"} in options
+def test_outreach_multiselect_intersection_before_pagination():
+    tenant = Tenant.objects.create(name="Multi", code="task-multi")
+    user, client = user_with_permissions(tenant, "multi-viewer", "influencers.outreach.view")
+    a, _, first = base_records(tenant, user, "multi-a")
+    b, creator, second = base_records(tenant, user, "multi-b")
+    base_records(tenant, user, "multi-c")
+    extra = create_outreach_task(user=user, validated_data={
+        "task_no": "TASK-multi-extra", "influencer": creator, "store": b, "owner": user,
+    })
+    # Exercise existing persisted states independently of transition permissions.
+    from django.db import connection
+    with connection.cursor() as cursor:
+        for task, status in [(first, "pending"), (second, "completed"), (extra, "cancelled")]:
+            cursor.execute(f"UPDATE {connection.ops.quote_name(OutreachTask._meta.db_table)} SET status=%s WHERE id=%s", [status, task.pk])
+    url = "/api/internal/influencers/outreach-tasks/"
+    params = {"status": "pending,completed", "store": f"{a.pk},{b.pk}", "page_size": 1}
+    pages = [client.get(url, {**params, "page": page}).data["data"] for page in (1, 2)]
+    assert all(page["count"] == 2 for page in pages)
+    assert {page["results"][0]["id"] for page in pages} == {first.pk, second.pk}
+    assert client.get(url, {"store": str(b.pk), "status": "completed"}).data["data"]["count"] == 1
+    assert client.get(url).data["data"]["count"] == 4
+    assert client.get(url, {"store": "1,abc"}).status_code == 400
+
+
 def test_sample_pricing_data_migration_backfills_historical_values():
     tenant = Tenant.objects.create(name="Backfill Tenant", code="backfill-tenant")
     user = CustomUser.objects.create_user(username="backfill-user", tenant=tenant)
@@ -725,6 +830,18 @@ def test_sample_fulfillment_list_filters_by_owner_and_options_are_tenant_scoped(
         )
         assert response.status_code == 201
 
+    url = "/api/internal/influencers/sample-fulfillments/"
+    statuses = "pending,completed"
+    stores = f"{store.pk},{other_store.pk}"
+    for page in (1, 2):
+        result = client.get(url, {"store": stores, "status": statuses, "page_size": 1, "page": page})
+        assert result.status_code == 200
+        assert result.data["data"]["count"] == 2
+        assert len(result.data["data"]["results"]) == 1
+    assert client.get(url, {"store": str(store.pk), "status": statuses}).data["data"]["count"] == 1
+    assert client.get(url, {"store": stores, "status": "cancelled,completed"}).data["data"]["count"] == 0
+    assert client.get(url, {"store": "1,x"}).status_code == 400
+    assert client.get(url, {"status": "pending,unknown"}).status_code == 400
     filtered = client.get(
         "/api/internal/influencers/sample-fulfillments/",
         {"owner": other_owner.pk},
@@ -1619,6 +1736,8 @@ def test_outreach_task_detail_patch_is_allowlisted_versioned_and_soft_deleted():
         "influencers.outreach.manage",
     )
     store, _, task = base_records(tenant, user, "task-edit")
+    task.notes = "Existing fulfillment feedback"
+    task.save(update_fields=["notes"])
     replacement_store = store_for(tenant, "replacement-store")
     foreign_store = store_for(other_tenant, "foreign-store")
     original_times = {
@@ -1632,6 +1751,7 @@ def test_outreach_task_detail_patch_is_allowlisted_versioned_and_soft_deleted():
         f"/api/internal/influencers/outreach-tasks/{task.pk}/",
         {
             "task_name": "Edited task",
+            "dispatch_requirements": "  Show the product in use  ",
             "priority": "high",
             "store": replacement_store.id,
             "external_product_id": "EDITED-PRODUCT",
@@ -1644,8 +1764,11 @@ def test_outreach_task_detail_patch_is_allowlisted_versioned_and_soft_deleted():
     )
 
     assert updated.status_code == 200
+    assert updated.json()["data"]["dispatch_requirements"] == "Show the product in use"
     task.refresh_from_db()
     assert task.task_name == "Edited task"
+    assert task.dispatch_requirements == "Show the product in use"
+    assert task.notes == "Existing fulfillment feedback"
     assert task.priority == "high"
     assert task.store_id == replacement_store.id
     assert task.external_product_id == "EDITED-PRODUCT"

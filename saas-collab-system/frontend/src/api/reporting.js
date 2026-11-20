@@ -2,6 +2,8 @@ import { requestApi } from './request';
 export const fetchReportDatasets = () => requestApi({ method: 'get', url: '/api/report/datasets/' });
 export const queryReport = (config, signal) =>
   requestApi({ method: 'post', url: '/api/report/query/', data: config, signal, timeout: 30000 });
+export const fetchSalesAbcOptions = (signal) =>
+  requestApi({ method: 'get', url: '/api/report/sales-abc-options/', signal, timeout: 30000 });
 export const fetchReportStoreOptions = (dataset, search = '', signal) =>
   requestApi({ method: 'post', url: '/api/report/filter-options/', data: { dataset, search }, signal });
 export const fetchSavedReportViews = () => requestApi({ method: 'get', url: '/api/report/views/' });

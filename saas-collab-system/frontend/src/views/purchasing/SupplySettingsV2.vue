@@ -1,6 +1,6 @@
 <template>
   <AppPage title="供应链设置" subtitle="管理业务单据编号和国家补货策略。" :capability="loadError ? 'degraded' : 'connected'" class="sc2-ui">
-    <el-tabs v-model="settingsTab">
+    <el-tabs v-model="settingsTab" @tab-change="tab => tab === 'payments' && loadPaymentMode()">
       <el-tab-pane label="单号规则" name="numbers" lazy>
     <div class="heading"><h2>单号规则</h2><el-button :loading="loading" :disabled="saving" @click="loadRules">刷新</el-button></div>
     <el-alert type="info" :closable="false" title="规则只对后续新建单据生效，已有单号保持不变。流水号按单据类型独立递增，作废后不回收；预览不会占用单号。" />
@@ -47,12 +47,26 @@
       <el-tab-pane label="入库通知" name="inbound-notification" lazy>
         <InboundNotificationSettings :countries="countries" />
       </el-tab-pane>
+      <el-tab-pane label="费用与结算" name="payments" lazy>
+        <el-alert v-if="paymentModeError" :title="paymentModeError" type="error" :closable="false" />
+        <el-form v-if="paymentMode" label-position="top" @submit.prevent>
+          <el-form-item label="付款登记前需审批">
+            <el-switch v-model="approvalRequired" aria-label="付款登记前需审批" :disabled="!paymentMode.can_manage || paymentModeSaving" />
+          </el-form-item>
+          <p class="hint">{{ approvalRequired ? '提交审批后按现有流程登记付款。' : '财务可手工登记已发生的付款。已提交的申请继续按原流程处理。' }}</p>
+          <el-form-item v-if="paymentMode.can_manage" label="修改说明">
+            <el-input v-model="paymentModeReason" maxlength="300" />
+          </el-form-item>
+          <el-button v-if="paymentMode.can_manage" type="primary" :loading="paymentModeSaving" :disabled="approvalRequired === paymentMode.approval_required || !paymentModeReason.trim()" @click="savePaymentMode">保存设置</el-button>
+        </el-form>
+      </el-tab-pane>
     </el-tabs>
   </AppPage>
 </template>
 
 <script setup>
 import '../../styles/supplyTypography.css';
+import { getApprovalMode, setApprovalMode } from '../../api/paymentBatchesV2';
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
@@ -65,6 +79,34 @@ import { createIdempotencyKey } from '../../api/supplyChainV2';
 import { fetchSupplyNumberRules, previewSupplyNumberRule, saveSupplyNumberRule } from '../../api/supplySettingsV2';
 
 const auth = useAuthStore();
+const paymentMode = ref(null);
+const approvalRequired = ref(true);
+const paymentModeReason = ref('');
+const paymentModeError = ref('');
+const paymentModeSaving = ref(false);
+function applyPaymentMode(response) {
+  if (!response?.success) throw new Error(response?.message || '付款审批设置读取失败');
+  paymentMode.value = response.data;
+  approvalRequired.value = response.data.approval_required;
+  paymentModeReason.value = '';
+}
+async function loadPaymentMode() {
+  paymentModeError.value = '';
+  try { applyPaymentMode(await getApprovalMode()); }
+  catch (error) { paymentModeError.value = error.message; }
+}
+async function savePaymentMode() {
+  paymentModeSaving.value = true;
+  paymentModeError.value = '';
+  try {
+    applyPaymentMode(await setApprovalMode({
+      approval_required: approvalRequired.value,
+      expected_version: paymentMode.value.version,
+      reason: paymentModeReason.value.trim(),
+    }));
+  } catch (error) { paymentModeError.value = error.message; }
+  finally { paymentModeSaving.value = false; }
+}
 const settingsTab = ref('numbers');
 const rules = ref([]), countries = ref([]), previewCountry = ref(''), businessDate = ref(''), loading = ref(false), loadError = ref(''), serverCanManage = ref(false);
 const canEdit = computed(() => serverCanManage.value && auth.hasPermission('supply.v2.manage') && !auth.authorizationStale);

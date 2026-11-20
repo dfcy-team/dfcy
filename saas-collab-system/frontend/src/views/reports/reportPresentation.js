@@ -88,3 +88,5 @@ export function drillQuery(dataset, row, config) {
     return { ...filters, kind: 'shop_daily', view: 'details', region: row.country || row.storecountry || filters.region || filters.country || filters.storecountry, period_start: filters.date_from, period_end: filters.date_to };
   return filters;
 }
+
+Object.assign(filterLabels, { country: "国家", platform: "平台", demand_mode: "需求口径" });

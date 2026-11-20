@@ -101,9 +101,9 @@ class RequestAttachmentDownload(InternalAPI):
         if hashlib.sha256(body).hexdigest()!=file.sha256: raise ValidationError('附件完整性校验失败。')
         response=FileResponse(BytesIO(body),as_attachment=True,filename=file.file_name,content_type=file.media_type)
         response['X-Content-Type-Options']='nosniff'; return response
-def remove_request_voucher(actor, owner, voucher_id, version, request_key):
+def remove_request_voucher(actor, owner, voucher_id, version, request_key, *, manual_draft=False):
     """Hide rejected evidence while retaining its original bytes and audit trail."""
-    if owner.status != 'submitted' or not owner.approval_id or owner.approval.status != 'pending':
+    if not manual_draft and (owner.status != 'submitted' or not owner.approval_id or owner.approval.status != 'pending'):
         raise ValidationError('仅待审批且未入账的单据可以删除凭证。')
     services._version(owner, version)
     voucher = active_vouchers(owner.vouchers.all()).defer('content').filter(
@@ -179,7 +179,14 @@ class RequestConfirm(InternalAPI):
 @transaction.atomic
 def post_request(actor, row, p):
     from apps.permissions.services import check_user_permission
-    if not check_user_permission(actor, MANAGE) or not finance_allowed(actor,row.currency):
+    services._tenant_lock(actor)
+    source = costs._payment_owner(actor, row.kind, row.source_id, MANAGE)
+    if row.payment_id:
+        auth_currency = costs.recorded_payment_currency(actor, row.payment)
+    else:
+        costs.validate_payment_currency(actor, row.kind, source, row.currency)
+        auth_currency = costs.source_payment_currency(actor, row.kind, source) or ''
+    if not check_user_permission(actor, MANAGE) or not finance_allowed(actor,auth_currency,unknown_as_cny=False):
         raise PermissionDenied('需要本业务范围的财务核对权限才能确认入账。')
     costs._payment_owner(actor, row.kind, row.source_id, MANAGE)
     kind, pk = row.kind, row.source_id

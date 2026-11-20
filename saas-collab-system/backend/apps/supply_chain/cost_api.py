@@ -1,5 +1,6 @@
 from .serializers import VersionInput
 from decimal import Decimal
+from django.db import transaction
 from django.db.models import Exists, OuterRef, Q
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
@@ -348,11 +349,36 @@ class CostPaymentCurrency(InternalAPI):
 
 class CostPayments(InternalAPI):
     def get(self, request, kind, pk):
-        return Response({'data': costs.payment_summary(request.user, kind, pk)})
+        from .payment_approval_api import approval_required
+        from .payment_requests import finance_allowed
+        data = costs.payment_summary(request.user, kind, pk)
+        required = approval_required(request.user)
+        currencies = costs._payment_currency_codes(request.user, kind,
+            costs._payment_owner(request.user, kind, pk, costs.VIEW))
+        can_register = len(currencies) <= 1 and finance_allowed(request.user,
+            next(iter(currencies), ''), unknown_as_cny=False)
+        return Response({'data': {**data, 'approval_required': required,
+                                  'can_register_payment': not required and can_register}})
 
+    @transaction.atomic
     def post(self, request, kind, pk):
-        return Response({'data': costs.create_payment(request.user, kind, pk,
-            validated(PaymentInput, request), key(request))}, status=201)
+        from rest_framework.exceptions import PermissionDenied
+        from . import services
+        from .payment_approval_api import approval_required
+        from .payment_requests import finance_allowed
+        actor = request.user
+        costs._payment_owner(actor, kind, pk, costs.MANAGE)
+        services._tenant_lock(actor)
+        obj = costs._payment_owner(actor, kind, pk, costs.MANAGE)
+        payload = validated(PaymentInput, request)
+        if approval_required(actor):
+            raise ValidationError('付款登记前需审批，请提交付款申请。')
+        costs.validate_payment_currency(actor, kind, obj, payload.get('currency', ''))
+        auth_currency = costs.source_payment_currency(actor, kind, obj) or ''
+        if not finance_allowed(actor, auth_currency, unknown_as_cny=False):
+            raise PermissionDenied()
+        payload['notes'] = ('手工补录 ' + payload.get('notes', ''))[:10000]
+        return Response({'data': costs.create_payment(actor, kind, pk, payload, key(request))}, status=201)
 
 
 class CostShipmentDiscountAdjustment(InternalAPI):

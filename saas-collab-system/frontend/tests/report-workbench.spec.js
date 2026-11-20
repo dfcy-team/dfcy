@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 
-const api = vi.hoisted(() => ({ fetchReportDatasets: vi.fn(), fetchReportStoreOptions: vi.fn(), queryReport: vi.fn(), saveReportView: vi.fn(), createReportExport: vi.fn() }));
+const api = vi.hoisted(() => ({ fetchReportDatasets: vi.fn(), fetchReportStoreOptions: vi.fn(), fetchSalesAbcOptions: vi.fn(), queryReport: vi.fn(), saveReportView: vi.fn(), createReportExport: vi.fn() }));
 const auth = vi.hoisted(() => ({ currentUser: { permissions: ['reports.view', 'reports.export', 'sales_management.export'] }, hasPermission(code) { return this.currentUser?.is_superuser || this.currentUser?.permissions?.includes(code); } }));
 const nav = vi.hoisted(() => ({ route: { query: {} }, push: vi.fn() }));
 vi.mock('../src/api/reporting', () => api);
@@ -28,6 +28,31 @@ const stubs = {
 const mountPage = props => mount(ReportWorkbench, { props, global: { stubs } });
 
 describe('ReportWorkbench', () => {
+  it('uses the original workbench controls for ABC and filters master stores without fact queries', async () => {
+    const abc = { ...dataset, id: 'sales_abc', name: '销售 ABC', filters: ['country', 'platform', 'store_id', 'date_from', 'date_to', 'demand_mode'] };
+    api.fetchReportDatasets.mockResolvedValue({ success: true, data: { datasets: [abc] } });
+    api.fetchSalesAbcOptions.mockResolvedValue({ success: true, data: { countries: ['PH', 'MY'], platforms: ['shopee'], options: [
+      { value: '1', label: '菲律宾店', country: 'PH', platform: 'shopee' },
+      { value: '2', label: '马来店', country: 'MY', platform: 'shopee' }
+    ] } });
+    const wrapper = mountPage(); await flushPromises();
+    await new Promise(resolve => setTimeout(resolve, 20)); await flushPromises();
+    expect(wrapper.text()).toContain('调整字段和图表');
+    expect(wrapper.text()).toContain('保存视图');
+    expect(wrapper.text()).toContain('导出已查询结果');
+    expect(wrapper.vm.config.filters.demand_mode).toBe('non_cancelled');
+    expect(api.queryReport).not.toHaveBeenCalled();
+    wrapper.vm.config.filters.store_id = '1';
+    wrapper.vm.config.filters.country = 'MY'; await flushPromises();
+    await new Promise(resolve => setTimeout(resolve, 20)); await flushPromises();
+    expect(wrapper.vm.config.filters.store_id).toBe('');
+    expect(api.fetchSalesAbcOptions).toHaveBeenCalledTimes(1);
+    expect(api.fetchReportStoreOptions).not.toHaveBeenCalled();
+    await wrapper.vm.run();
+    expect(api.queryReport).toHaveBeenLastCalledWith(expect.objectContaining({ dataset: 'sales_abc', filters: expect.objectContaining({ country: 'MY', demand_mode: 'non_cancelled' }) }), expect.anything());
+    expect(wrapper.findAll('button').find(button => button.text().includes('导出已查询结果')).element.disabled).toBe(false);
+    wrapper.unmount();
+  });
   it('retains the last successful scope on timeout but clears it on authorization rejection', async () => {
     const wrapper = mountPage(); await flushPromises();
     const prior = JSON.parse(JSON.stringify(wrapper.vm.result));

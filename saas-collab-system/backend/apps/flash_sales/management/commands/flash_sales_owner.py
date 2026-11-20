@@ -19,7 +19,8 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--tenant-code", required=True)
         parser.add_argument("--actor", required=True, help="Current tenant superuser username, not a numeric ID")
-        parser.add_argument("--owner", required=True, choices=["paused", "saas", "legacy"])
+        parser.add_argument("--owner", required=True, choices=["paused", "saas", "manual", "legacy", "sync_tasks"])
+        parser.add_argument("--expected-version", type=int)
         parser.add_argument("--evidence")
         parser.add_argument("--sha256")
 
@@ -33,6 +34,10 @@ class Command(BaseCommand):
         control, _ = TenantControl.objects.get_or_create(tenant=tenant)
         control = TenantControl.objects.select_for_update().get(pk=control.pk)
         owner = options["owner"]
+        if owner == "sync_tasks" or (owner == "saas" and options["expected_version"] is not None):
+            previous = "saas" if owner == "sync_tasks" else "sync_tasks"
+            self.transfer_saas_scheduler(actor, control, previous, owner, options["expected_version"])
+            return
         evidence_hash = ""
         if owner != "paused":
             if control.scheduler_owner != "paused":
@@ -59,3 +64,14 @@ class Command(BaseCommand):
         control.save()
         audit(actor, "flash_scheduler_owner", control, {"owner": owner, "evidence_sha256": evidence_hash, "plans_paused": True})
         self.stdout.write(json.dumps({"owner": owner, "plans_paused": True, "version": control.version}))
+
+    def transfer_saas_scheduler(self, actor, control, previous, owner, expected_version):
+        # Both SaaS dispatchers acquire this same tenant row before claiming
+        # plans. Transfer the owner without touching timestamps or plan rows.
+        if control.scheduler_owner != previous or control.version != expected_version:
+            raise CommandError("闪购执行源或版本已变化，未切换。")
+        control.scheduler_owner = owner
+        control.version += 1
+        control.save(update_fields=["scheduler_owner", "version", "updated_at"])
+        audit(actor, "flash_scheduler_owner", control, {"owner": owner, "previous_owner": previous, "plans_paused": False})
+        self.stdout.write(json.dumps({"owner": owner, "plans_paused": False, "version": control.version}))

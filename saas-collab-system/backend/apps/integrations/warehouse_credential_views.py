@@ -97,9 +97,19 @@ def warehouse_readonly_check(request, pk):
     # Reuse existing shared configuration gates; no per-check approval is added.
     # Reject before constructing a client or accessing custody/platform APIs.
     blockers = warehouse_config_blockers(config)
+    if config.platform == "best_ecapi" and config.status == "configured":
+        blockers = [code for code in blockers if code != "config_not_approved"]
     if blockers:
         from .readiness_service import BLOCKER_LABELS
         raise ValidationError("仓库只读检查条件未满足：" + "、".join(BLOCKER_LABELS[code] for code in blockers))
+    if config.platform == "best_ecapi":
+        if record.provider != "best_ecapi":
+            raise ValidationError("仓库服务商与百世配置不一致，请检查绑定。")
+        from .best_access import check_connection_for_warehouse
+        response = check_connection_for_warehouse(request, record.warehouse_id, authorization_id=record.pk)
+        if response.data["data"].get("selection_required"):
+            raise ValidationError("请到仓库档案的百世接入中选择仓库并确认国家后，再执行只读检查。")
+        return response
     # No job is needed: validation must precede task creation. Do not exchange
     # or consume the bootstrap token here. Only the inventory read is allowed.
     # An explicit capability-matrix check may recover a historical validation error.
