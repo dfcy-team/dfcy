@@ -35,3 +35,27 @@ it('ticks running time locally and stops adding time during retry waiting', asyn
   wrapper.unmount();
   expect(vi.getTimerCount()).toBe(0);
 });
+
+
+it('continues the protected original task and polls its batch after recovery', async () => {
+  vi.useFakeTimers();
+  const failed = {id:512,store_name:'测试店铺',status:'failed',execution_ms:0,waiting_ms:0,intents:[]};
+  const original = {...failed,id:486,status:'queued',message:'按原时段处理异常'};
+  const batch = {id:'blocked',operation:'run',source:'manual',finished_at:'2026-11-19',tasks:[failed],notifications:[]};
+  flashRequest.mockImplementation((path,method) => Promise.resolve(method === 'post' ? {id:'original',task_id:486}
+    : path === 'batches/original/' ? {...batch,id:'original',finished_at:null,tasks:[original]} : batch));
+  const wrapper = mount(FlashBatchDialog,{props:{batchId:'blocked',taskId:512,canExecute:true},global:{stubs:{
+    ElDialog:{template:'<div><slot/><slot name="footer"/></div>'},
+    ElButton:{template:'<button @click="$emit(\'click\')"><slot/></button>'},ElAlert:true,
+  }}});
+  await flushPromises();
+  await wrapper.findAll('button').find(button => button.text() === '按原时段处理异常').trigger('click');
+  await flushPromises();
+  expect(flashRequest).toHaveBeenCalledWith('batches/blocked/','post',{action:'recover',task_id:512});
+  expect(wrapper.text()).toContain('queued');
+  expect(wrapper.text()).toContain('按原时段处理异常');
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(flashRequest).toHaveBeenLastCalledWith('batches/original/');
+  wrapper.unmount();
+  expect(vi.getTimerCount()).toBe(0);
+});

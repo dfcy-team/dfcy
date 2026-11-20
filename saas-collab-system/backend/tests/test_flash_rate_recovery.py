@@ -25,6 +25,18 @@ def test_rate_limit_does_not_exhaust_execution_retries(shop, monkeypatch, writte
     def limited(*args):
         raise RateLimited('synthetic rate limit', retry_after=300)
     monkeypatch.setattr(engine, 'step', limited)
+    if written:
+        for _ in range(3):
+            assert due(task, adapter) == 'waiting'
+        assert due(task, adapter) == 'queued'
+        assert task.intents.get().status == 'cleaning'
+        for _ in range(3):
+            assert due(task, adapter) == 'waiting'
+        assert due(task, adapter) == 'failed'
+        assert task.state['recovery_pending'] and task.finished_at
+        assert StoreLock.objects.get(store=store).task_id == task.id
+        assert not any(e == 'delete_shop_flash_sale' for e, _ in adapter.calls)
+        return
     for _ in range(6):
         assert due(task, adapter) == 'waiting'
     assert task.next_attempt_at and not task.finished_at

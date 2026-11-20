@@ -33,4 +33,4 @@ def test_paginated_sync_reports_real_unique_activity_count():
     adapter.progress = messages.append
     assert len(adapter.activities()) == 101
     assert len(messages) == len(calls) == 4
-    assert messages[-1] == '正在读取活动列表：本轮已读取 101 条活动，完成 4 次分页请求'
+    assert messages[-1] == '正在读取活动列表：本轮已核对 101 条活动，处理 4 页'

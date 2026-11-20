@@ -31,6 +31,14 @@ def audit(user, action, record, detail=None):
 
 def request_stop(batch):
     Batch.objects.filter(pk=batch.pk, tenant_id=batch.tenant_id).update(stop_requested=True)
+    for task_id in batch.tasks.exclude(status__in=TERMINAL).filter(state__retry_paused=True).values_list("pk", flat=True):
+        with transaction.atomic():
+            task = StoreTask.objects.select_for_update().get(pk=task_id)
+            if task.state.get("migration_hold") or task.finished_at:
+                continue
+            task.state.update(retry_paused=False, retry_pause_reason="", no_progress_count=0)
+            task.message = "已请求安全停止，先核对原写入和目标活动；保护保留。"
+            task.save(update_fields=["state", "message", "updated_at"])
     for task_id in batch.tasks.filter(status="queued", started_at__isnull=True).values_list("pk", flat=True):
         with transaction.atomic():
             # Claim and worker completion also lock the task before its store lock.

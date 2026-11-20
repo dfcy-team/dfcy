@@ -32,11 +32,15 @@ def prepare_post_sync(batch_id):
     if not parent.finished_at or parent.operation == "sync" or parent.request_id.startswith("import:"):
         return
     tasks = list(parent.tasks.select_related("store"))
-    child, created = Batch.objects.get_or_create(tenant_id=parent.tenant_id, request_id=f"post-sync:{parent.id}",
+    recovery_round = max((task.state.get("exception_recovery_round", 0) for task in tasks), default=0)
+    request_id = f"post-sync:{parent.id}" + (f":recovery:{recovery_round}" if recovery_round else "")
+    child, created = Batch.objects.get_or_create(tenant_id=parent.tenant_id, request_id=request_id,
         defaults={"actor": parent.actor, "source": "post_sync", "operation": "sync", "payload_hash": digest({"parent": str(parent.id)})})
     if not created:
         return
     for task in tasks:
+        if recovery_round and task.state.get("post_sync_task_id"):
+            continue
         affected = list(task.intents.exclude(platform_id="").values_list("platform_id", flat=True).distinct())
         sync = StoreTask.objects.create(tenant_id=parent.tenant_id, batch=child, store=task.store,
             snapshot={"activity_ids": affected, "sync_scope": "affected", "recipients": {"users": []}},
@@ -120,6 +124,7 @@ def dispatch():
     for batch_id in Batch.objects.filter(
         Q(finished_at__isnull=False, notifications__isnull=True)
         | Q(finished_at__isnull=False, notifications__snapshot__phase="attention")
+        | Q(finished_at__isnull=False, notifications__snapshot__phase="recovery_pending")
         | Q(finished_at__isnull=True, tasks__state__retry_paused=True, notifications__isnull=True)
     ).exclude(operation="sync").distinct().values_list("id", flat=True)[:100]:
         prepare_notifications(batch_id)

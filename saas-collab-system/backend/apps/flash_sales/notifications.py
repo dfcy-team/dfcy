@@ -49,22 +49,28 @@ def task_result(task):
     attempts = {}
     for intent in intents:
         attempts[intent.slot_id] = max(attempts.get(intent.slot_id, 0), intent.result.get("execution_attempt", 0))
-    failed_activities = [i for i in intents if i.platform_id and i.status != "succeeded"]
+    failed_activities = [i for i in intents if i.status != "succeeded" and
+        (i.platform_id or i.reservation_key or i.result.get("cleanup_status") == "unconfirmed")]
     cleanup = ("失败活动已全部清理" if all(i.absence_evidence.get("absent") for i in failed_activities) else
                "失败活动清理尚未确认，需人工核对") if failed_activities else "无待清理的失败活动"
     succeeded = [i for i in intents if i.status == "succeeded"]
-    specifications = [row for i in succeeded for row in i.result.get("specifications", [])]
+    latest = {i.slot_id: i for i in intents}
+    specifications = [row for i in latest.values() for row in i.result.get("specifications", [])]
+    planned = sum(len(i.items) for i in latest.values())
     latest_failed = {i.slot_id: i for i in intents if i.status == "failed"}
     reasons = list(dict.fromkeys(row["reason"] for i in latest_failed.values()
         for row in i.result.get("specifications", []) if row.get("state") == "rejected" and row.get("reason")))
     return {"store_id": task.store_id, "name": task.store.name, "status": task.status,
             "completed": task.completed, "requested": task.requested, "message": task.message,
             "retries": sum(attempts.values()), "cleanup": cleanup,
+            "verification_retries": max(0, task.state.get("verification_failures", task.retry_count) - 1),
+            "planned_specifications": planned,
+            "unconfirmed_specifications": max(0, planned - sum(r.get("state") in {"enabled", "rejected"} for r in specifications)),
             "failure_details": reasons[:3],
             "enabled_specifications": sum(row.get("state") == "enabled" for row in specifications),
             "rejected_specifications": sum(row.get("state") == "rejected" for row in specifications),
             "activities": [{"id": i.platform_id, "start": i.target.get("start_time"),
-                            "end": i.target.get("end_time")} for i in succeeded]}
+                            "end": i.target.get("end_time")} for i in latest.values()]}
 
 
 def notification_text(batch, snapshot):
@@ -94,6 +100,7 @@ def notification_text(batch, snapshot):
             lines.append(f"重建重试：{retries} 次（不含限流等待）")
             if success and retries and store["requested"] == 1:
                 lines.append(f"第 {retries} 次重试成功")
+        lines.append(f"回读核对重试：{store.get('verification_retries', 0)} 次")
         lines.append(f"{'结果' if success else '失败原因'}：{store['message']}")
         if not success and store.get("failure_details"):
             lines.append("平台原因：" + "；".join(store["failure_details"]))
@@ -102,8 +109,8 @@ def notification_text(batch, snapshot):
         for activity in store.get("activities", []):
             if activity.get("start") and activity.get("end"):
                 lines.append(f"活动时段：{stamp(activity['start'])} ～ {stamp(activity['end'])}（北京）")
-        if store.get("enabled_specifications") or store.get("rejected_specifications"):
-            lines.append(f"规格结果：已参加 {store['enabled_specifications']}，平台拒绝 {store['rejected_specifications']}")
+        if store.get("planned_specifications"):
+            lines.append(f"规格结果：目标 {store['planned_specifications']}，已确认参加 {store['enabled_specifications']}，平台拒绝 {store['rejected_specifications']}，未确认或尚未处理 {store['unconfirmed_specifications']}")
     base = settings.SUPPLY_NOTIFICATION_PUBLIC_BASE_URL.rstrip("/")
     lines.extend(["", f"查看运行详情：{base}/marketing/campaigns?activity=flash&tab=history&batch={batch.id}"])
     return "\n".join(lines)
@@ -122,7 +129,7 @@ def prepare_notifications(batch_id):
         return
     groups = {}
     for task in batch.tasks.select_related("store").prefetch_related(
-            Prefetch("intents", queryset=Intent.objects.defer("items").order_by())).order_by("id"):
+            Prefetch("intents", queryset=Intent.objects.order_by())).order_by("id"):
         routing = task.snapshot.get("recipients", {})
         if attention and not task.state.get("retry_paused"):
             continue
@@ -136,7 +143,11 @@ def prepare_notifications(batch_id):
         snapshot["phase"] = "attention" if attention else "final"
         row, created = Notification.objects.get_or_create(tenant_id=batch.tenant_id, batch=batch, recipient_id=user_id,
                                             defaults={"snapshot": snapshot})
-        if not created and not attention and row.snapshot.get("phase") == "attention" and not row.lease_until:
+        if not created and not attention and row.snapshot.get("phase") in {"attention", "recovery_pending"} and not row.lease_until:
+            if row.snapshot.get("phase") == "recovery_pending":
+                snapshot.update(recovery_revision=row.snapshot["recovery_revision"],
+                    recovery_started_at=row.snapshot["recovery_started_at"],
+                    previous_receipt=row.snapshot["previous_receipt"])
             snapshot["attention_receipt"] = {"status": row.status, "message_id": row.message_id}
             row.snapshot, row.status, row.message, row.message_id = snapshot, "pending", "", ""
             row.save(update_fields=["snapshot", "status", "message", "message_id", "updated_at"])
@@ -148,6 +159,8 @@ def deliver(pk, service=None):
         now = timezone.now()
         if row.status == "accepted" or (row.lease_until and row.lease_until > now):
             return row.status
+        if row.snapshot.get("phase") == "recovery_pending":
+            return "pending"
         if row.batch.operation == "sync" or row.batch.source == "post_sync":
             row.status, row.message, row.lease_until = "skipped", "同步任务不推送飞书", None
             row.save(update_fields=["status", "message", "lease_until", "updated_at"])
@@ -159,7 +172,8 @@ def deliver(pk, service=None):
             row.status, row.message, row.lease_until = "skipped", "启用推送前的历史批次，不补发", None
             row.save(update_fields=["status", "message", "lease_until", "updated_at"])
             return row.status
-        if (row.message or row.status == "sending") and now - row.created_at > DELIVERY_IDEMPOTENCY_WINDOW:
+        delivery_started_at = datetime.fromisoformat(row.snapshot["recovery_started_at"]) if row.snapshot.get("recovery_started_at") else row.created_at
+        if (row.message or row.status == "sending") and now - delivery_started_at > DELIVERY_IDEMPOTENCY_WINDOW:
             row.status, row.message, row.lease_until = "uncertain_expired", "原发送结果未确认且已超过去重窗口，请核对飞书记录；未重复发送", None
             row.save(update_fields=["status", "message", "lease_until", "updated_at"])
             return row.status
@@ -176,6 +190,8 @@ def deliver(pk, service=None):
         if not connection:
             raise ValidationError("飞书连接未启用。")
         key = f"flash:{row.batch_id}:{row.recipient_id}" + (":attention" if row.snapshot.get("phase") == "attention" else "")
+        if row.snapshot.get("recovery_revision"):
+            key += f":recovery:{row.snapshot['recovery_revision']}"
         message_id = (service or FeishuMessageService()).send(connection, row.snapshot["open_id"], "text",
             {"text": notification_text(row.batch, row.snapshot)}, key)
     except Exception:

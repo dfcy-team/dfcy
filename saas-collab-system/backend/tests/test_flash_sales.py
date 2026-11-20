@@ -156,7 +156,7 @@ def test_unknown_create_recovers_without_a_second_creation(shop):
     assert run_step(task.id, adapter=fake) == "confirming"
     assert WriteOperation.objects.get().status == "submitted"
     drain(task, fake)
-    assert task.status == "confirming"
+    assert task.status == "failed" and task.state["recovery_pending"]
     assert not any(endpoint == "add_shop_flash_sale_items" for endpoint, _ in fake.calls)
     assert sum(endpoint == "create_shop_flash_sale" for endpoint, _ in fake.calls) == 1
 

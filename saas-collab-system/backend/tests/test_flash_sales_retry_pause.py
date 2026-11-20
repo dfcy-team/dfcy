@@ -99,7 +99,7 @@ def test_unexpected_error_keeps_safe_diagnostic_without_exception_payload(shop, 
     assert "synthetic-secret" not in task.message
 
 
-def test_three_unchanged_failures_pause_persistently_and_require_explicit_resume(shop, monkeypatch, settings):
+def test_legacy_pause_requires_explicit_resume(shop, monkeypatch, settings):
     user, store, client = shop
     configured(shop)
     batch = submit(user, request_id="pause-before-intent", store_ids=[store.id])
@@ -110,6 +110,9 @@ def test_three_unchanged_failures_pause_persistently_and_require_explicit_resume
     for count in range(1, 4):
         retry(task)
         assert task.state["no_progress_count"] == count
+    # Existing paused rows remain protected until explicit recovery.
+    StoreTask.objects.filter(pk=task.pk).update(state={**task.state, "retry_paused": True}, next_attempt_at=None)
+    task.refresh_from_db()
     assert task.state["retry_paused"] and task.next_attempt_at is None
     assert task.retry_count == 3 and task.finished_at is None
     assert StoreLock.objects.get(store=store).task_id == task.id
@@ -192,10 +195,10 @@ def test_paused_unknown_creation_never_replays_create_after_resume(shop):
     batch = submit(user, request_id="lost-create-pause", store_ids=[store.id])
     task = batch.tasks.get()
     adapter = FakeShopee(lose_create=True)
-    for _ in range(10):
-        retry(task, adapter)
-        if task.state.get("retry_paused"):
-            break
+    retry(task, adapter)
+    retry(task, adapter)
+    StoreTask.objects.filter(pk=task.pk).update(state={**task.state, "retry_paused": True}, next_attempt_at=None)
+    task.refresh_from_db()
     assert task.state["retry_paused"]
     intent = task.intents.get()
     original = (intent.pk, intent.platform_id, intent.reservation_key)
@@ -231,6 +234,8 @@ def test_pause_survives_fresh_worker_processes(shop, monkeypatch):
     monkeypatch.setattr(engine, "step", unavailable)
     for _ in range(3):
         retry(task)
+    StoreTask.objects.filter(pk=task.pk).update(state={**task.state, "retry_paused": True}, next_attempt_at=None)
+    task.refresh_from_db()
     assert task.state["retry_paused"]
     environment = dict(os.environ, DB_ENGINE=db["ENGINE"], DB_HOST=db["HOST"],
                        DB_PORT=str(db["PORT"]), DB_NAME=db["NAME"], DB_USER=db["USER"],
