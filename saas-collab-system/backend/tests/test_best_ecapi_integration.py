@@ -48,12 +48,12 @@ class BestConfigurationTests(TestCase):
         force_authenticate(request, self.actor)
         with patch.object(best_access, "check_user_permission", return_value=True), \
              patch.object(best_access, "integration_values_allowed", return_value=True), \
-             patch("apps.integrations.best_ecapi.BestEcapiClient") as client:
-            client.return_value.fetch_inventory.return_value = {"records": [{"itemSkuCode": "A"}]}
+             patch("apps.integrations.best_glink.BestGlinkClient") as client:
+            client.return_value.discover_warehouses.return_value = [{"code": "TEST-W", "name": "Test", "country": "PH"}]
             response = best_access.check_connection(request, pk=self.warehouse.pk)
         self.assertEqual(response.status_code, 200)
         self.assertTrue(client.call_args.kwargs["verification_only"])
-        binding = WarehouseAuthorization.objects.get(warehouse=self.warehouse)
+        binding = WarehouseAuthorization.objects.get(warehouse=self.warehouse, status="active")
         self.assertEqual(binding.validation_status, "verified")
         self.assertEqual(binding.integration_config.status, "verified")
         self.assertFalse(binding.integration_config.sync_read_enabled)
@@ -71,7 +71,9 @@ class BestConfigurationTests(TestCase):
         self.assertNotIn("TEST-SECRET-ONLY", str(config.platform_config))
         self.assertNotIn("TEST-SECRET-ONLY", str(list(IntegrationAuditLog.objects.values("masked_detail"))))
         self.custody.store_secrets.assert_called_once()
-        self.assertEqual(self.invoke().data["data"]["warehouse_code"], "TEST-W")
+        self.assertEqual(self.invoke().data["data"]["warehouse_code"], "")
+        self.assertEqual(config.contract_version, "glink")
+        self.assertEqual(config.platform_config["api_host"], "https://edi-glink.800best.com/gateway/api/glink")
 
     def test_update_retains_key_and_invalidates_validation(self):
         saved = self.invoke("post", self.payload).data["data"]
@@ -93,8 +95,7 @@ class BestConfigurationTests(TestCase):
         self.custody.store_secrets.assert_not_called()
 
     def test_invalid_gateway_and_missing_secret_leave_no_config(self):
-        for changes in ({"gateway": "http://warehouse.example.test/ecapi/api/process"}, {"partner_key": ""},
-                        {"gateway": "https://warehouse.example.test:99999/ecapi/api/process"}):
+        for changes in ({"partner_key": ""}, {"partner_key": "   "}):
             response = self.invoke("post", {**self.payload, **changes})
             self.assertEqual(response.status_code, 400, response.data)
         self.assertFalse(PlatformIntegrationConfig.objects.exists())
@@ -106,6 +107,70 @@ class BestConfigurationTests(TestCase):
             warehouse_type="third_party", service_platform=self.warehouse.service_platform)
         self.assertEqual(self.invoke("post", self.payload, warehouse_id=another.pk).status_code, 409)
         self.custody.store_secrets.assert_called_once()
+        self.custody.rotate_secrets.assert_not_called()
+
+
+    def test_multiple_warehouses_require_an_explicit_returned_choice(self):
+        self.invoke("post", self.payload)
+        def check(selected=""):
+            request = APIRequestFactory().post("/", {"warehouse_code": selected}, format="json")
+            force_authenticate(request, self.actor)
+            with patch.object(best_access, "check_user_permission", return_value=True), \
+                 patch.object(best_access, "integration_values_allowed", return_value=True), \
+                 patch("apps.integrations.best_glink.BestGlinkClient") as client:
+                client.return_value.discover_warehouses.return_value = [{"code": "W1", "name": "One", "country": "PH"}, {"code": "W2", "name": "Two", "country": "PH"}]
+                return best_access.check_connection(request, pk=self.warehouse.pk)
+        response = check()
+        self.assertTrue(response.data["data"]["selection_required"])
+        self.assertEqual(check("OTHER").status_code, 400)
+        self.assertEqual(check("W2").status_code, 200)
+        binding = WarehouseAuthorization.objects.get(warehouse=self.warehouse, status="active")
+        self.assertEqual(binding.external_warehouse_code, "W2")
+        self.assertEqual(binding.validation_status, "verified")
+
+    def test_country_difference_requires_current_version_and_confirmation(self):
+        saved = self.invoke("post", self.payload).data["data"]
+        def check(extra):
+            request = APIRequestFactory().post("/", {"warehouse_code": "TEST-W", **extra}, format="json")
+            force_authenticate(request, self.actor)
+            with patch.object(best_access, "check_user_permission", return_value=True), \
+                 patch.object(best_access, "integration_values_allowed", return_value=True), \
+                 patch("apps.integrations.best_glink.BestGlinkClient") as client:
+                client.return_value.discover_warehouses.return_value = [{"code": "TEST-W", "name": "Test", "country": "CN", "time_zone": "PRC"}]
+                return best_access.check_connection(request, pk=self.warehouse.pk)
+        self.assertTrue(check({}).data["data"]["country_confirmation_required"])
+        self.assertFalse(WarehouseAuthorization.objects.filter(validation_status="verified").exists())
+        stale = {"confirm_country_mismatch": True, "version": saved["version"] - 1, "confirmed_country": "CN"}
+        self.assertTrue(check(stale).data["data"]["country_confirmation_required"])
+        response = check({**stale, "version": saved["version"]})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["data"]["status"], "verified")
+        log = IntegrationAuditLog.objects.get(action="best_warehouse_check")
+        self.assertTrue(log.masked_detail["country_mismatch_confirmed"])
+        self.assertEqual(log.masked_detail["provider_country"], "CN")
+
+    def test_failed_check_clears_config_verification(self):
+        self.invoke("post", self.payload)
+        binding = WarehouseAuthorization.objects.get(warehouse=self.warehouse, status="active")
+        PlatformIntegrationConfig.objects.filter(pk=binding.integration_config_id).update(status="verified", last_verified_at=timezone.now())
+        request = APIRequestFactory().post("/", {}, format="json")
+        force_authenticate(request, self.actor)
+        with patch.object(best_access, "check_user_permission", return_value=True), \
+             patch.object(best_access, "integration_values_allowed", return_value=True), \
+             patch("apps.integrations.best_glink.BestGlinkClient") as client:
+            client.return_value.discover_warehouses.side_effect = ValidationError("synthetic failure")
+            response = best_access.check_connection(request, pk=self.warehouse.pk)
+        self.assertEqual(response.status_code, 400)
+        binding.refresh_from_db()
+        config = PlatformIntegrationConfig.objects.get(pk=binding.integration_config_id)
+        self.assertEqual(binding.validation_status, "failed")
+        self.assertEqual(config.status, "configured")
+        self.assertIsNone(config.last_verified_at)
+
+    def test_changing_partner_without_key_is_rejected(self):
+        saved = self.invoke("post", self.payload).data["data"]
+        response = self.invoke("post", {**self.payload, "partner_id": "OTHER", "partner_key": "", "version": saved["version"]})
+        self.assertEqual(response.status_code, 400)
         self.custody.rotate_secrets.assert_not_called()
 
 

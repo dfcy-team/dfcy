@@ -80,7 +80,7 @@ def inventory_data(actor, scoped, country_id=None):
     # configs/jobs/warehouses inside the window made MySQL revisit the tenant
     # history once per job rather than scan the covering index once.
     job_ids = list(SyncJob.objects.filter(tenant_id=actor.tenant_id,
-        integration_config__platform="jifeng_wms", resource_type="inventory_snapshot")
+        integration_config__platform__in=["jifeng_wms", "best_ecapi"], resource_type="inventory_snapshot")
         .order_by().values_list("pk", flat=True))
     run_query = SyncRun.objects.filter(tenant_id=actor.tenant_id,
         sync_job_id__in=job_ids).order_by().values_list("pk", flat=True)

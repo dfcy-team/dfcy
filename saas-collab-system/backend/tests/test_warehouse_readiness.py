@@ -100,3 +100,72 @@ def test_warehouse_readiness_retains_safety_gates(ready_warehouse_config, field,
     row = build_config_readiness(config)
     assert blocker in row["blocker_codes"]
     assert row["can_approve_readonly"] is False
+
+def test_best_readiness_has_warehouse_gates_without_oauth(ready_warehouse_config, monkeypatch, settings):
+    config, _, _ = ready_warehouse_config
+    settings.BEST_ECAPI_ENABLED = True
+    config.platform = 'best_ecapi'
+    config.contract_version = 'glink'
+    config.platform_config = {'partner_id': 'TEST-P', 'customer_code': 'TEST-C',
+        'api_host': 'https://edi-glink.800best.com/gateway/api/glink'}
+    monkeypatch.setattr('apps.integrations.net_guard.get_allowed_hosts', lambda: {'edi-glink.800best.com'})
+    row = build_config_readiness(config)
+    assert row['subject_type'] == 'warehouse'
+    assert row['can_approve_readonly'] is True
+    assert 'warehouse_domain_missing' not in row['blocker_codes']
+    assert 'warehouse_client_id_missing' not in row['blocker_codes']
+    config.platform_config['api_host'] = 'https://kytest.800best.com/gateway/api/glink'
+    assert 'best_gateway_invalid' in build_config_readiness(config)['blocker_codes']
+    config.platform_config['api_host'] = 'https://edi-glink.800best.com/gateway/api/glink'
+    settings.BEST_ECAPI_ENABLED = False
+    assert 'best_feature_disabled' in build_config_readiness(config)['blocker_codes']
+
+def test_best_runtime_contract_is_supported_without_oauth_fields():
+    from apps.integrations.production_settings import validate_runtime_config
+    approved = validate_runtime_config({'platforms': {'best_ecapi': {'contract_approved': True}}})
+    assert approved['platforms']['best_ecapi']['contract_approved'] is True
+    with pytest.raises(DjangoValidationError):
+        validate_runtime_config({'platforms': {'best_ecapi': {'auto_refresh_enabled': True}}})
+
+
+def test_best_authorization_summary_uses_signature_credentials():
+    from apps.integrations.serializers import WarehouseAuthorizationSerializer
+    row = SimpleNamespace(provider='best_ecapi', token_id='', bootstrap_credential_id='',
+        integration_config=SimpleNamespace(credential_id='synthetic-custody-ref'))
+    serializer = WarehouseAuthorizationSerializer()
+    assert serializer.get_oauth_token_available(row) is True
+    assert serializer.get_token_configured(row) is True
+    row.integration_config.credential_id = ''
+    assert serializer.get_oauth_token_available(row) is False
+
+def test_best_is_supported_by_warehouse_readonly_approval_gate():
+    from apps.integrations.views import _require_marketplace_readiness_config
+    config = SimpleNamespace(platform='best_ecapi')
+    assert _require_marketplace_readiness_config(config, allow_warehouse=True) == ''
+
+
+@pytest.mark.parametrize("platform,best_approved,jifeng_approved,blocked", [
+    ("best_ecapi", True, False, False),
+    ("best_ecapi", False, True, True),
+    ("jifeng_wms", True, False, True),
+    ("jifeng_wms", False, True, False),
+])
+def test_warehouse_contract_isolated_by_provider(ready_warehouse_config, monkeypatch, settings,
+        platform, best_approved, jifeng_approved, blocked):
+    config, _, _ = ready_warehouse_config
+    config.platform = platform
+    settings.BEST_ECAPI_ENABLED = True
+    if platform == "best_ecapi":
+        config.contract_version = "glink"
+        config.platform_config = {"partner_id": "TEST-P", "customer_code": "TEST-C",
+            "api_host": "https://edi-glink.800best.com/gateway/api/glink"}
+        monkeypatch.setattr("apps.integrations.net_guard.get_allowed_hosts", lambda: {"edi-glink.800best.com"})
+    approved = {"best_ecapi": best_approved, "jifeng_wms": jifeng_approved}
+    lookup = lambda provider: {"contract_approved": approved[provider]}
+    monkeypatch.setattr(gates, "get_runtime_platform_config", lookup)
+    monkeypatch.setattr("apps.integrations.readiness_service.get_runtime_platform_config", lookup)
+    row = build_config_readiness(config)
+    assert ("platform_contract_not_enabled" in row["blocker_codes"]) is blocked
+    assert row["contract_approved"] is (not blocked)
+    assert row["can_approve_readonly"] is (not blocked)
+    assert config.network_enabled is False and config.sync_read_enabled is False

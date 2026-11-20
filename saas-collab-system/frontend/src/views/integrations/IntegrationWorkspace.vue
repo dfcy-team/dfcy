@@ -246,11 +246,11 @@
       <el-alert v-if="environmentSource" :title="`来源：${environmentSource.account_alias}（${label('environment', environmentSource.environment)}）。请选择目标环境。新配置需重新维护凭据、回调和授权，原配置及任务保持原状。`" type="info" :closable="false" />
       <p class="dialog-note">仅创建开发者配置引用，不在这里绑定店铺或仓库 Token</p>
       <el-form :model="configForm" label-position="top" class="dialog-grid">
-        <el-form-item label="配置名称 *"><el-input v-model="configForm.account_alias" placeholder="例如 Shopee 商城生产配置" /></el-form-item>
-        <el-form-item label="平台 *"><el-select v-model="configForm.platform" placeholder="请选择平台" @change="normalizeConfigApiType"><el-option v-for="platform in referencePlatforms" :key="platform.id || platform.value" :label="platform.label" :value="platform.value" :disabled="!platform.enabled" /></el-select></el-form-item>
-        <el-form-item label="API 类型 *"><el-select v-model="configForm.api_type" placeholder="请选择 API 类型"><el-option v-for="option in configApiTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
-        <el-form-item label="环境 *"><el-select v-model="configForm.environment" placeholder="请选择环境"><el-option v-for="option in referenceEnvironments" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
-        <el-form-item label="适用站点 *" class="wide">
+        <el-form-item label="配置名称 *" :error="configErrors.account_alias"><el-input v-model="configForm.account_alias" placeholder="例如 Shopee 商城生产配置" /></el-form-item>
+        <el-form-item label="平台 *" :error="configErrors.platform"><el-select v-model="configForm.platform" placeholder="请选择平台" @change="normalizeConfigApiType"><el-option v-for="platform in referencePlatforms" :key="platform.id || platform.value" :label="platform.label" :value="platform.value" :disabled="!platform.enabled" /></el-select></el-form-item>
+        <el-form-item label="API 类型 *" :error="configErrors.api_type"><el-select v-model="configForm.api_type" placeholder="请选择 API 类型"><el-option v-for="option in configApiTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
+        <el-form-item label="环境 *" :error="configErrors.environment"><el-select v-model="configForm.environment" placeholder="请选择环境"><el-option v-for="option in referenceEnvironments" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
+        <el-form-item label="适用站点 *" :error="configErrors.regions" class="wide">
           <el-select v-model="configForm.regions" multiple filterable collapse-tags collapse-tags-tooltip :max-collapse-tags="3" placeholder="请选择适用站点">
             <el-option v-for="region in configRegionOptions" :key="region.country_code" :label="region.label" :value="region.country_code" class="region-option">
               <el-checkbox
@@ -264,6 +264,7 @@
           <small>已选择 {{ configForm.regions.length }} 个站点；可连续勾选多个国家，选项按平台可用范围联动。</small>
         </el-form-item>
       </el-form>
+      <el-alert v-if="configErrors.general" :title="configErrors.general" type="error" :closable="false" show-icon />
       <el-alert title="平台来自平台档案；服务端仍会校验平台能力、回调地址与可用 API 类型。" type="info" :closable="false" show-icon />
       <template #footer><el-button @click="configDialog = false">取消</el-button><el-button class="handoff-action" :loading="operating" :disabled="!configCreateAccess.allowed || operating" :title="configCreateAccess.allowed ? '提交新的平台接入配置' : configCreateAccess.reason" @click="prepareConfig">创建配置</el-button></template>
     </el-dialog>
@@ -325,6 +326,13 @@
             <el-input v-model="credentialForm.redirect_uri" type="url" maxlength="500" aria-describedby="tiktok-callback-help" placeholder="https://your-domain.example/callback" />
             <span id="tiktok-callback-help" class="safe-note">填写 TikTok Shop 开放平台登记的固定 HTTPS 回调地址，不是授权完成后带 code/state 的地址。留空保留现有配置；保存仍需通过服务端登记值和白名单校验。</span>
           </el-form-item>
+        </template>
+        <template v-else-if="activeConfig?.platform === 'best_ecapi'">
+          <el-form-item label="合作方 ID" :error="credentialErrors.partner_id"><el-input v-model="credentialForm.partner_id" maxlength="64" placeholder="首次必填；留空保留现值" /></el-form-item>
+          <el-form-item label="Partner Key" :error="credentialErrors.partner_key"><el-input v-model="credentialForm.partner_key" type="password" autocomplete="new-password" placeholder="首次或更换合作方 ID 时必填" /></el-form-item>
+          <el-form-item label="客户编码" :error="credentialErrors.customer_code"><el-input v-model="credentialForm.customer_code" maxlength="64" placeholder="首次必填；留空保留现值" /></el-form-item>
+          <el-form-item label="百世站点编码" :error="credentialErrors.site_code"><el-select v-model="credentialForm.site_code" clearable placeholder="首次必填；留空保留现值"><el-option v-for="region in activeConfig?.regions || []" :key="region" :label="region" :value="region" /></el-select></el-form-item>
+          <el-form-item label="API 网关地址" class="wide" :error="credentialErrors.api_host"><el-input v-model="credentialForm.api_host" maxlength="300" placeholder="百世提供的 HTTPS 地址，路径为 /ecapi/api/process；留空保留现值" /></el-form-item>
         </template>
         <template v-else-if="activeConfig?.platform === 'jifeng_wms'">
           <el-form-item label="API Base URL" class="wide"><el-input v-model="credentialForm.api_base_url" type="url" maxlength="500" placeholder="https://api.example.com" /></el-form-item>
@@ -554,6 +562,8 @@ const creatingJobTemplate = ref(null);
 // adding another menu or exposing an unconstrained create action.
 const draft = reactive({ platform: '', status: '', environment: '', api_type: '', resource_type: '', schedule_type: '', subject: '', store_id: '', run_id: '', started_from: '', started_to: '' });
 const query = reactive({ ...draft, job_state: '' });
+const configErrors = ref({});
+const credentialErrors = ref({});
 const configForm = reactive({ account_alias: '', platform: '', api_type: '', environment: '', regions: [] });
 const referencePlatforms = computed(() => data.value.reference_options?.platforms || []);
 const referenceEnvironments = computed(() => data.value.reference_options?.environments || []);
@@ -567,6 +577,7 @@ const configRegionOptions = computed(() => {
   return regions.filter(region => supported.has(String(region.country_code || '').toUpperCase()));
 });
 const credentialForm = reactive({
+  customer_code: '', api_host: '', site_code: '',
   partner_id: '', partner_key: '', ads_app_id: '', ads_secret: '', redirect_uri: '',
   app_key: '', service_id: '', app_secret: '', api_base_url: '', domain: '', client_id: '', client_secret: '',
   reason: '按运用交接计划维护开发者凭据'
@@ -724,8 +735,8 @@ const StatusTag = defineComponent({ props: { value: String }, setup(p) { const t
 const SummaryGrid = defineComponent({ props: { items: Array }, setup(p) { return () => h('dl', { class: 'summary-grid' }, (p.items || []).map(item => h('div', [h('dt', item.label), h('dd', number(item.value))]))); } });
 
 const labels = {
-  platform: { lazada: 'Lazada', shopee: 'Shopee', tiktok: 'TikTok Shop', jifeng_wms: '极风 WMS' }, api_type: { marketplace: '商城 API', advertising: '广告 API', inventory: '库存 API' },
-  environment: { sandbox: '沙箱', pilot: '试运行', production: '生产', mock: '模拟' }, resource_type: { platform_product: '平台商品', sales_order: '销售订单', refund_return: '退款退货', inventory_snapshot: '库存快照', inbound: '入库单', shipment: '出库单' },
+  platform: { lazada: 'Lazada', shopee: 'Shopee', tiktok: 'TikTok Shop', jifeng_wms: '极风 WMS', best_ecapi: '百世海外仓' }, api_type: { marketplace: '商城 API', advertising: '广告 API', inventory: '库存 API' },
+  environment: { sandbox: '沙箱', pilot: '试运行', production: '生产', mock: '模拟' }, resource_type: { platform_product: '平台商品', sales_order: '销售订单', refund_return: '退款退货', inventory_snapshot: '库存快照', inbound: '入库单', shipment: '出库单', advertising_report: '广告数据', gmv_max_report: 'GMV Max 广告' },
   schedule_type: { manual: '手动', hourly: '每小时', interval: '间隔', daily: '每天定时', weekly: '每周定时', cron: '定时' }, execution_mode: { simulation: '本地模拟', live_readonly: '生产只读' }, schedule_state: { disabled: '已停用', running: '运行中', manual: '手动触发', unscheduled: '尚未排期', due: '等待执行', scheduled: '已排期', retry_waiting: '退避等待', retry_exhausted: '重试暂停' },
   status: { success: '成功', failed: '失败', running: '运行中', active: '已启用', configured: '已配置', verified: '已验证', referenced: '已引用', unconfigured: '未配置', disabled: '已停用', idle: '空闲', pending_review: '待审核', healthy: '运行正常', authorization: '授权异常', configuration: '配置待处理', due: '等待执行', simulation: '本地模拟', live_readonly: '生产只读' }
 };
@@ -805,10 +816,11 @@ function retryButtonTitle(row) {
   if (retryLimitReached(row)) return '已达到该任务的最大重试次数';
   return '仅在本地模拟模式创建重试运行';
 }
-const credentialFields = ['partner_id', 'partner_key', 'ads_app_id', 'ads_secret', 'redirect_uri', 'app_key', 'service_id', 'app_secret', 'api_base_url', 'domain', 'client_id', 'client_secret'];
+const credentialFields = ['customer_code', 'api_host', 'site_code', 'partner_id', 'partner_key', 'ads_app_id', 'ads_secret', 'redirect_uri', 'app_key', 'service_id', 'app_secret', 'api_base_url', 'domain', 'client_id', 'client_secret'];
 const secretCredentialFields = ['partner_key', 'ads_secret', 'app_secret', 'client_secret'];
-function clearCredentialForm() { credentialFields.forEach(key => { credentialForm[key] = ''; }); credentialForm.reason = '按运用交接计划维护开发者凭据'; }
+function clearCredentialForm() { credentialErrors.value = {}; credentialFields.forEach(key => { credentialForm[key] = ''; }); credentialForm.reason = '按运用交接计划维护开发者凭据'; }
 function normalizeConfigApiType() {
+  configErrors.value = {};
   configForm.api_type = configApiTypeOptions.value[0]?.value || '';
   configForm.regions = [];
 }
@@ -830,6 +842,7 @@ function openCreateConfig() {
     environment: referenceEnvironments.value.find(option => option.value === 'production')?.value || referenceEnvironments.value[0]?.value || '',
     regions: [],
   });
+  configErrors.value = {};
   configDialog.value = true;
 }
 function openEnvironmentConfig(row) {
@@ -841,6 +854,7 @@ function openEnvironmentConfig(row) {
   environmentSource.value = { account_alias: row.account_alias, environment: row.environment };
   Object.assign(configForm, { account_alias: row.account_alias, platform: row.platform,
     api_type: row.api_type, environment: '', regions: [...(row.regions || [])] });
+  configErrors.value = {};
   configDialog.value = true;
 }
 function openCredential(row) {
@@ -859,6 +873,8 @@ function credentialPayload() {
     ? ['app_key', 'app_secret', 'redirect_uri']
     : platform === 'shopee'
     ? ['partner_id', 'partner_key', 'redirect_uri']
+    : platform === 'best_ecapi'
+      ? ['partner_id', 'partner_key', 'customer_code', 'api_host', 'site_code']
     : platform === 'jifeng_wms'
       ? ['api_base_url', 'domain', 'client_id', 'client_secret']
       : apiType === 'advertising'
@@ -879,7 +895,16 @@ async function saveCredential() {
     );
     const idempotencyKey = globalThis.crypto?.randomUUID?.() || `credential-${Date.now()}-${activeConfig.value.id}`;
     const response = await rotateIntegrationSecretValues(activeConfig.value.id, { version: activeConfig.value.config_version, reason: credentialForm.reason, credentials, verify_after_save: false }, idempotencyKey);
-    if (!response.success) { operationFailed(response, '凭据保存失败。'); return; }
+    credentialErrors.value = {};
+    if (!response.success) {
+      const fields = response?.data?.credentials || {};
+      for (const key of credentialFields) {
+        const value = fields[key];
+        const message = (Array.isArray(value) ? value : [value]).filter(item => typeof item === 'string').join('；');
+        if (message) credentialErrors.value[key] = message;
+      }
+      operationFailed(response, '凭据保存失败。'); return;
+    }
     credentialDialog.value = false;
     clearCredentialForm();
     ElMessage.success('开发者凭据已由服务端安全保存，页面未保留原文。');
@@ -991,8 +1016,21 @@ async function prepareConfig() {
   if (!configForm.account_alias.trim() || !configForm.platform || !configForm.api_type || !configForm.environment || !configForm.regions.length) { ElMessage.warning('请填写配置名称，并选择平台、API 类型、环境和适用站点。'); return; }
   operating.value = true;
   try {
-    const response = await createIntegrationConfig({ account_alias: configForm.account_alias.trim(), platform: configForm.platform, api_type: configForm.api_type, environment: configForm.environment, regions: configForm.regions });
-    if (!response.success) { operationFailed(response, '接入配置创建失败。'); return; }
+    configErrors.value = {};
+    const payload = { account_alias: configForm.account_alias.trim(), platform: configForm.platform, api_type: configForm.api_type, environment: configForm.environment, regions: configForm.regions };
+    const response = await createIntegrationConfig(payload);
+    if (!response.success) {
+      const details = response?.data || {};
+      const fields = details;
+      for (const key of Object.keys(configForm)) {
+        const value = fields[key];
+        const message = (Array.isArray(value) ? value : [value]).filter(item => typeof item === 'string').join('；');
+        if (message) configErrors.value[key] = message;
+      }
+      const general = Array.isArray(details) ? details : [];
+      configErrors.value.general = general.join('；') || response.message || '接入配置创建失败。';
+      operationFailed(response, '接入配置创建失败。'); return;
+    }
     configDialog.value = false;
     ElMessage.success(configForm.platform === 'jifeng_wms'
       ? '接入配置已创建：请在维护凭据中填写 API Base URL、Domain、Client ID、Client Secret，再到仓库档案填写 Email 和 Token。'

@@ -27,7 +27,7 @@ def resolve_inventory_sku(*, tenant, warehouse, source_sku, seller_sku, snapshot
     history = InventorySnapshot.objects.filter(
         tenant=tenant, warehouse=warehouse, site_code=warehouse.country_code.upper(),
         source_sku=source_sku, internal_sku__isnull=False, internal_sku__tenant=tenant,
-        source_run__sync_job__integration_config__platform="jifeng_wms",
+        source_run__sync_job__integration_config__platform__in=["jifeng_wms", "best_ecapi"],
     ).values_list("source_sku", "internal_sku_id")
     targets = {sku_id for code, sku_id in history if code == source_sku}
     if targets:
@@ -74,7 +74,7 @@ def resolve_inventory_skus(*, tenant, warehouse, sku_pairs, snapshot_times=None)
         source_sku__in=source_codes,
         internal_sku__isnull=False,
         internal_sku__tenant=tenant,
-        source_run__sync_job__integration_config__platform="jifeng_wms",
+        source_run__sync_job__integration_config__platform__in=["jifeng_wms", "best_ecapi"],
     ).values_list("source_sku", "internal_sku_id"):
         if code in history_targets:
             history_targets[code].add(sku_id)

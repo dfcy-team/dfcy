@@ -146,7 +146,7 @@ describe('UI-P2 API and sensitive-field contracts', () => {
     expect(platformPage).toContain("销售渠道/独立站");
     expect(platformPage).toContain("仓储服务分类");
     expect(platformPage).toContain("ERP/其他");
-    expect(platformPage).toContain('仓储服务分类（连接器按服务商识别）');
+    expect(platformPage).toContain('仓储服务分类（需选择库存连接器）');
     expect(platformPage).toContain('`${item.label}（业务分类）`');
     expect(platformPage).toContain('WAREHOUSE_HELP');
     expect(platformPage).not.toContain("{ label: 'BigSeller', value: 'bigseller' }");

@@ -571,7 +571,7 @@ def _readiness_action_response(config, *, operation, replay=False, target_contra
 
 def _require_marketplace_readiness_config(config, *, allow_warehouse=False):
     platform = str(config.platform or "").lower()
-    if allow_warehouse and platform == PlatformChoices.JIFENG_WMS:
+    if allow_warehouse and platform in {PlatformChoices.JIFENG_WMS, PlatformChoices.BEST_ECAPI}:
         return ""
     if platform not in {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
         raise ValidationError({"platform": "当前页面动作仅适用于 Lazada、Shopee 或 TikTok Shop 接入配置。"})
@@ -853,18 +853,26 @@ def create_handoff_integration_config(request):
         PlatformChoices.SHOPEE,
         PlatformChoices.TIKTOK,
         PlatformChoices.JIFENG_WMS,
+        "best_ecapi",
     }:
         raise ValidationError({"platform": "平台无效。"})
     if api_type not in {"marketplace", "advertising", "inventory"}:
         raise ValidationError({"api_type": "API 类型无效。"})
-    if (platform == PlatformChoices.JIFENG_WMS) != (api_type == "inventory"):
-        raise ValidationError({"api_type": "极风 WMS 只支持库存 API，店铺平台不能使用库存 API。"})
+    if (platform in {PlatformChoices.JIFENG_WMS, "best_ecapi"}) != (api_type == "inventory"):
+        raise ValidationError({"api_type": "仓配平台只支持库存 API，店铺平台不能使用库存 API。"})
     if platform == PlatformChoices.LAZADA and api_type != "marketplace":
         raise ValidationError({"api_type": "Lazada 当前只支持商城 API 授权。"})
     if environment not in {"sandbox", "pilot", "production"}:
         raise ValidationError({"environment": "环境无效。"})
     if not regions or len(regions) != len(set(regions)) or any(len(region) > 8 for region in regions):
         raise ValidationError({"regions": "请选择一个或多个不重复的适用站点。"})
+    config_values = {"api_type": api_type}
+    if platform == "best_ecapi":
+        from apps.masterdata.models import PlatformMaster
+        if not PlatformMaster.objects.filter(tenant=request.user.tenant, status="active",
+                platform_type__in=["warehouse_third_party", "warehouse_platform"],
+                warehouse_connector_state="selected", warehouse_connector_key="best_ecapi").exists():
+            raise ValidationError({"platform": "请先在本租户平台档案中选择百世库存连接器。"})
     if platform == PlatformChoices.LAZADA:
         allowed_regions = {item["value"] for item in get_platform_schema("lazada")["regions"]}
         if not set(regions) <= allowed_regions:
@@ -898,7 +906,7 @@ def create_handoff_integration_config(request):
                     if platform in {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
                     else "shopapi-local-v1"
                 ),
-                platform_config={"api_type": api_type},
+                platform_config=config_values,
                 created_by=request.user,
             )
             with connection.cursor() as cursor:
@@ -1090,6 +1098,27 @@ def _credential_update_parts(config, values):
             )
         if values.get("app_secret"):
             secret_values["app_secret"] = values["app_secret"]
+    elif config.platform == "best_ecapi":
+        from .best_access import validate_gateway
+        if set(values) - {"partner_id", "partner_key", "customer_code", "api_host", "site_code"}:
+            raise ValidationError({"credentials": "百世凭据字段与当前配置不匹配。"})
+        for key, label in (("partner_id", "合作方 ID"), ("customer_code", "客户编码"), ("api_host", "API 网关地址"), ("site_code", "站点编码")):
+            value = str(values.get(key) or platform_config.get(key) or "").strip()
+            if not value:
+                raise ValidationError({"credentials": {key: f"请填写{label}。"}})
+            platform_config[key] = value
+        try:
+            validate_gateway(platform_config["api_host"])
+        except ValidationError as exc:
+            raise ValidationError({"credentials": {"api_host": exc.detail}}) from exc
+        platform_config["site_code"] = platform_config["site_code"].upper()
+        if platform_config["site_code"] not in config.regions:
+            raise ValidationError({"credentials": {"site_code": "站点编码必须属于配置的适用站点。"}})
+        old_partner = (config.platform_config or {}).get("partner_id")
+        if not values.get("partner_key") and (not config.credential_id or old_partner != platform_config["partner_id"]):
+            raise ValidationError({"credentials": {"partner_key": "首次维护或更换合作方 ID 时，请填写对应的 Partner Key。"}})
+        if values.get("partner_key"):
+            secret_values["secret"] = values["partner_key"]
     elif config.platform == PlatformChoices.JIFENG_WMS:
         unsupported = set(values) - {"api_base_url", "domain", "client_id", "client_secret"}
         if unsupported:
@@ -2767,6 +2796,10 @@ def _set_job_scope(job, values):
             or job.integration_config.platform in {'lazada', 'tiktok'} and job.resource_type == 'sales_order'):
         raise ValidationError({'include_logistics': '独立物流采集支持 Shopee 订单／售后及 Lazada、TikTok 订单。'})
     scope = dict(job.sync_scope or {})
+    if "warehouse_order_limit" in values:
+        if job.resource_type != "warehouse_order_lookup":
+            raise ValidationError({"warehouse_order_limit": "仅订单仓库查询任务支持订单核验上限。"})
+        scope["warehouse_order_limit"] = values["warehouse_order_limit"]
     schedule = scope.get("schedule") if isinstance(scope.get("schedule"), dict) else {}
     query = scope.get("query") if isinstance(scope.get("query"), dict) else {}
     if "execution_mode" in values:
@@ -2829,7 +2862,7 @@ def _set_job_scope(job, values):
         resolve_scope(job.ads_mapping, scope)
 
 
-def _validated_job_policy(data):
+def _validated_job_policy(data, *, warehouse_order=False):
     from datetime import time
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
     from django.utils.dateparse import parse_datetime
@@ -2844,9 +2877,15 @@ def _validated_job_policy(data):
         "query_mode", "collection_time_basis", "lookback_days", "overlap_minutes", "query_page_size", "max_pages",
         "max_records", "range_start_at", "range_end_at", "query_statuses",
     }
+    if warehouse_order:
+        allowed.add("warehouse_order_limit")
     if set(data) - allowed:
         raise ValidationError("同步策略包含不支持的字段。")
     values = dict(data)
+    if "warehouse_order_limit" in values:
+        limit = values["warehouse_order_limit"]
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValidationError({"warehouse_order_limit": "单轮订单上限必须为1到100的整数。"})
     if 'include_logistics' in values and type(values['include_logistics']) is not bool:
         raise ValidationError({'include_logistics': '物流采集开关必须为布尔值。'})
     choices = {
@@ -3001,7 +3040,7 @@ def sync_job_detail(request, pk):
         status=SyncRun.Status.QUEUED, history_segment__batch__status="paused",
     ).exists():
         raise ValidationError("排队中或运行中的同步任务不能修改。")
-    values = _validated_job_policy(request.data)
+    values = _validated_job_policy(request.data, warehouse_order=job.resource_type == "warehouse_order_lookup")
     from .sync_policy import prepare_policy, resolve_job_scope
     values = prepare_policy(job, values)
     _validate_advertising_policy(job, values)

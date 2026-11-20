@@ -23,6 +23,7 @@ MARKETPLACE_PLATFORMS = (
     ("shopee", "Shopee"),
     ("tiktok", "TikTok Shop"),
     ("jifeng_wms", "极风 WMS · 仓库"),
+    ("best_ecapi", "百世海外仓 · 仓库"),
 )
 
 BLOCKER_LABELS = {
@@ -130,7 +131,7 @@ def _config_action(code, config, *, available, blocker_codes=()):
 
 def _config_readiness(config):
     """Build a non-secret, actionable readiness row for one config."""
-    provider_blockers = warehouse_config_blockers(config) if config.platform == "jifeng_wms" else list(
+    provider_blockers = warehouse_config_blockers(config) if config.platform in {"jifeng_wms", "best_ecapi"} else list(
         integration_config_oauth_blockers(
             str(getattr(config, "platform", "") or "").lower(),
             config,
@@ -158,7 +159,7 @@ def _config_readiness(config):
         if code not in {"network_not_approved", "readonly_not_approved"}
     ]
     approve_available = bool(
-        str(getattr(config, "platform", "") or "").lower() in {"lazada", "shopee", "tiktok", "jifeng_wms"}
+        str(getattr(config, "platform", "") or "").lower() in {"lazada", "shopee", "tiktok", "jifeng_wms", "best_ecapi"}
         and not readonly_approved
         and not approval_blockers
     )
@@ -188,7 +189,7 @@ def _config_readiness(config):
     return {
         "id": config.id,
         "platform_code": config.platform,
-        "subject_type": "warehouse" if config.platform == "jifeng_wms" else "store",
+        "subject_type": "warehouse" if config.platform in {"jifeng_wms", "best_ecapi"} else "store",
         "contract_approved": bool(get_runtime_platform_config(config.platform).get("contract_approved", False)),
         "account_alias": config.account_alias,
         "environment": config.environment,

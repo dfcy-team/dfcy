@@ -236,7 +236,7 @@ def attach_board_inventory(request, groups):
             and fact["source_run__status"] == "success"
             and fact["source_run__failed_count"] == 0
             and fact["source_run__sync_job__resource_type"] == "inventory_snapshot"
-            and fact["source_run__sync_job__integration_config__platform"] == "jifeng_wms"
+            and fact["source_run__sync_job__integration_config__platform"] in {"jifeng_wms", "best_ecapi"}
             and ("available_qty" in (fact["provided_quantity_fields"] or []) or "in_transit_qty" in (fact["provided_quantity_fields"] or []))
             and now - timedelta(hours=24) <= fact["snapshot_at_utc"] <= now
         )]

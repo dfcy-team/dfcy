@@ -71,7 +71,7 @@ def _config_countries(actor, config):
         selected = {code.upper() for code in WarehouseMaster.objects.filter(tenant_id=actor.tenant_id,
             pk__in=config['warehouse_ids']).values_list('country_code', flat=True)}
         codes = selected if codes is None else codes & selected
-    if config.get('platforms') and 'jifeng_wms' not in config['platforms']:
+    if config.get('platforms') and not {'jifeng_wms', 'best_ecapi'}.intersection(config['platforms']):
         return set()
     return codes
 
@@ -344,7 +344,7 @@ def _country_inventory_source(actor, country, now):
     # Resolve stable dimension membership without joining each historical fact.
     # Preserve the original cross-table predicates exactly; no status filter.
     run_ids = list(SyncRun.objects.filter(
-        sync_job__integration_config__platform='jifeng_wms',
+        sync_job__integration_config__platform__in=['jifeng_wms', 'best_ecapi'],
         sync_job__resource_type='inventory_snapshot').values_list('pk', flat=True)[:2001])
     warehouse_ids = list(WarehouseMaster.objects.filter(
         country_code__iexact=country.country_code).values_list('pk', flat=True)[:1001])
@@ -352,7 +352,7 @@ def _country_inventory_source(actor, country, now):
     if len(run_ids) > 2000 or len(warehouse_ids) > 1000:
         # No truncation: retain the original joined query for larger catalogs.
         return source.filter(warehouse__country_code__iexact=country.country_code,
-            source_run__sync_job__integration_config__platform='jifeng_wms',
+            source_run__sync_job__integration_config__platform__in=['jifeng_wms', 'best_ecapi'],
             source_run__sync_job__resource_type='inventory_snapshot')
     return source.filter(source_run_id__in=run_ids, warehouse_id__in=warehouse_ids)
 
@@ -396,7 +396,7 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mappe
         country_code__iexact=country.country_code, status='active')
     # Only connected or observed warehouses belong to this API stock total. Planned archives without an API connection do not invent stock.
     connected = set(SyncJob.objects.filter(tenant_id=actor.tenant_id, resource_type='inventory_snapshot',
-        integration_config__platform='jifeng_wms', warehouse_authorization__warehouse__in=country_warehouses)
+        integration_config__platform__in=['jifeng_wms', 'best_ecapi'], warehouse_authorization__warehouse__in=country_warehouses)
         .values_list('warehouse_authorization__warehouse_id', flat=True))
     # Both facts describe the same latest identity set; rank once, without
     # pushing the unmapped predicate into source selection.

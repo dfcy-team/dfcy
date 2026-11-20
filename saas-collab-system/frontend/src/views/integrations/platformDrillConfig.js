@@ -1,4 +1,4 @@
-const WAREHOUSE_PLATFORMS = new Set(['jifeng_wms']);
+const WAREHOUSE_PLATFORMS = new Set(['jifeng_wms', 'best_ecapi']);
 
 /**
  * The collection endpoint serializes api_type under platform_config while

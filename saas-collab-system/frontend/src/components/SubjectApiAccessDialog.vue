@@ -904,6 +904,8 @@ const credentialMaintenanceAccess = computed(() => {
 });
 const subtitle = computed(() => props.subjectType === 'store'
   ? '从当前店铺发起授权，由当前后端完成回调校验并保存该店铺的托管凭据引用'
+  : access.value?.subject?.platform === 'best_ecapi'
+    ? '百世海外仓使用客户编码、partnerId 和 partnerKey 签名认证；保存后查询并绑定仓库，无需一次性 Token。'
   : '公共配置与仓库授权分开维护；一次性 Token 用于兑换，库存请求使用兑换后的 Access Token');
 const tokenPolicyLabel = computed(() => ({
   'tiktok-split-policy': '商城不自动刷新；广告独立长期 Token',

@@ -25,13 +25,18 @@ WAREHOUSE_SERVICE = ("warehouse_owned", "warehouse_third_party", "warehouse_plat
 # treated as connected merely because its business type is known.
 WAREHOUSE_CONNECTOR_UNMAPPED = "UNMAPPED"
 WAREHOUSE_CONNECTOR_REGISTRY = {
+    "best_ecapi": {
+        "name": "百世仓配 API (2.0)",
+        "status": "TESTING",
+        "hint": "支持仓配2.0配置；是否已连接以仓库校验结果为准。",
+    },
     "jifeng_wms": {
         "name": "极风 WMS",
         "status": "ACTIVE",
-        "hint": "已按平台编码或名称识别为极风 WMS，支持库存 API 接入。",
+        "hint": "已选择极风 WMS 连接器，支持库存 API 接入。",
     },
 }
-WAREHOUSE_CATEGORY_HINT = "业务分类，连接器按具体服务商编码或名称识别。"
+WAREHOUSE_CATEGORY_HINT = "业务分类，库存 API 接入须明确选择连接器。"
 
 LABELS = {
     "tiktok": "TikTok Shop", "temu": "Temu", "amazon": "Amazon",
@@ -141,20 +146,15 @@ def _compact_identifier(value):
     return "".join(character for character in str(value or "").strip().lower() if character.isalnum())
 
 
-def resolve_platform_connector(*, platform_type="", code="", name=""):
+def resolve_platform_connector(
+    *, platform_type="", warehouse_connector_state=None, warehouse_connector_key="", code="", name=""
+):
     """Resolve the concrete connector represented by a platform master row."""
     normalized_type = normalize_platform_code(platform_type) or str(platform_type or "").strip().lower()
     item = platform_catalog_item(normalized_type)
     if normalized_type in WAREHOUSE_SERVICE:
-        provider = ""
-        try:
-            from apps.integrations.platform_schema_service import integration_platform_key
-
-            provider = integration_platform_key(platform_type=normalized_type, code=code, name=name)
-        except (ImportError, ModuleNotFoundError):
-            provider = ""
-        if not provider and any(_compact_identifier(value) in {"myjf", "马来极风"} for value in (code, name)):
-            provider = "jifeng_wms"
+        state = str(warehouse_connector_state or "").strip().lower()
+        provider = str(warehouse_connector_key or "").strip().lower() if state == "selected" else ""
         metadata = WAREHOUSE_CONNECTOR_REGISTRY.get(provider)
         if metadata:
             return {
@@ -163,11 +163,18 @@ def resolve_platform_connector(*, platform_type="", code="", name=""):
                 "connector_status": metadata["status"],
                 "connector_hint": metadata["hint"],
             }
+        if state == "none":
+            return {
+                "connector_key": "",
+                "connector_name": "暂不接入",
+                "connector_status": "NONE",
+                "connector_hint": "该仓储平台档案已明确暂不接入库存 API。",
+            }
         return {
             "connector_key": "",
-            "connector_name": "待识别服务商",
-            "connector_status": WAREHOUSE_CONNECTOR_UNMAPPED,
-            "connector_hint": "这是仓储业务分类，不是单一连接器；请维护具体服务商编码和名称，匹配后才可进行对应 API 接入。",
+            "connector_name": "待确认连接器",
+            "connector_status": "PENDING",
+            "connector_hint": "该历史仓储平台尚未人工确认连接器；补录前不会开放新的库存 API 接入。",
         }
 
     if item:
@@ -186,6 +193,14 @@ def resolve_platform_connector(*, platform_type="", code="", name=""):
     }
 
 
-def platform_connector_resolution(*, platform_type="", code="", name=""):
+def platform_connector_resolution(
+    *, platform_type="", warehouse_connector_state=None, warehouse_connector_key="", code="", name=""
+):
     """Backward-compatible descriptive alias for record-level resolution."""
-    return resolve_platform_connector(platform_type=platform_type, code=code, name=name)
+    return resolve_platform_connector(
+        platform_type=platform_type,
+        warehouse_connector_state=warehouse_connector_state,
+        warehouse_connector_key=warehouse_connector_key,
+        code=code,
+        name=name,
+    )
