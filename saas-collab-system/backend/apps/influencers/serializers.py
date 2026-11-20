@@ -220,6 +220,17 @@ class InfluencerPublicSerializer(InfluencerSerializer):
     field when the write allow-list changes.
     """
 
+    def to_representation(self, instance):
+        from .verified_market import market_label
+
+        data = super().to_representation(instance)
+        region = getattr(instance, "_verified_market", None)
+        if data.get("profile") is not None:
+            data["profile"]["market_source"] = "tiktok_verified" if region else "archive"
+            if region:
+                data["profile"]["market"] = market_label(region)
+        return data
+
     def get_fields(self):
         fields = super().get_fields()
         fields.pop("handle", None)

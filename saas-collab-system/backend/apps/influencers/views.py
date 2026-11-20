@@ -85,6 +85,7 @@ from .bd_config import bd_performance_settings
 from .sample_nickname import allocate_sample_nickname_draft
 from .archive_associations import create_related_archive, get_related_archives
 from .platform_accounts import get_influencer_form, platform_account_prefetch, save_influencer_aggregate, require_influencer_nickname_access
+from .verified_market import filter_display_market, with_verified_market
 from .tiktok_creator_lookup import available_tiktok_lookup_stores, creator_snapshots_for_influencer, lookup_tiktok_creator
 
 
@@ -375,7 +376,11 @@ class InfluencerCollectionView(ScopedInfluencerView):
         cooperation_status = request.query_params.get("cooperation_status", "").strip()
         if cooperation_status:
             queryset = queryset.filter(cooperation_status=cooperation_status)
-        for field in ("level", "market", "tier"):
+        queryset = with_verified_market(queryset)
+        market = request.query_params.get("market", "").strip()
+        if market:
+            queryset = filter_display_market(queryset, market, request.user.tenant_id)
+        for field in ("level", "tier"):
             value = request.query_params.get(field, "").strip()
             if value:
                 queryset = queryset.filter(**{f"profile__tenant": request.user.tenant, f"profile__{field}__iexact": value})
@@ -459,12 +464,14 @@ class InfluencerDetailView(ScopedInfluencerView):
             self.read_permission_code = self.write_permission_code
         return super().get_permissions()
 
-    def get_object(self, request, pk, *, include_relations=True):
+    def get_object(self, request, pk, *, include_relations=True, verified_market=False):
         queryset = Influencer.objects.select_related("profile").prefetch_related(
             platform_account_prefetch(request.user.tenant_id, active_only=True, summaries_only=True),
         )
         if include_relations:
             queryset = queryset.prefetch_related("contacts", "restrict_events__actor")
+        if verified_market:
+            queryset = with_verified_market(queryset)
         return self.scoped_object(request, queryset, pk=pk, tenant=request.user.tenant)
 
     def get(self, request, pk):
@@ -477,7 +484,7 @@ class InfluencerDetailView(ScopedInfluencerView):
             request.query_params.get("include_relations", "true"),
             field="include_relations",
         )
-        instance = self.get_object(request, pk, include_relations=include_relations)
+        instance = self.get_object(request, pk, include_relations=include_relations, verified_market=True)
         serializer_class = InfluencerNicknameSerializer if include_nickname_id else InfluencerPublicSerializer
         return success_response(serializer_class(
             instance,
