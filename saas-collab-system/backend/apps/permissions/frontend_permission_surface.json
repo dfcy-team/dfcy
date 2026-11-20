@@ -155,6 +155,10 @@
       "permission_code": "sales_management.operating_orders.manage"
     },
     {
+      "file": "src/components/inventory/InventoryAbcSettings.vue",
+      "permission_code": "masterdata.settings.manage"
+    },
+    {
       "file": "src/components/inventory/InventoryAbcStatus.vue",
       "permission_code": "masterdata.settings.manage"
     },
@@ -1875,5 +1879,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "321c3fa35ae33c7e083a0520486ea9304aa8d2b510edb585f549114018cba10e"
+  "surface_hash": "2b6827dbbce22549a04da72063c986651f964a1ea68cfcb939c5657e6ea06ee2"
 }

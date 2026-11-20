@@ -8,7 +8,7 @@ vi.mock('../src/api/inventoryDecisions', () => ({
   createCountryOperatingOrder: mocks.create,
   createIdempotencyKey: () => `key-${++mocks.key}`
 }));
-vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ isInternal: true, authorizationStale: mocks.stale, hasPermission: () => mocks.canManage }) }));
+vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ isInternal: true, authorizationStale: mocks.stale, hasPermission: () => mocks.canManage, hasAllDataScopeFor: () => mocks.canManage }) }));
 vi.mock('vue-router', async original => ({ ...(await original()), useRouter: () => ({ push: mocks.push, currentRoute: { value: { query: mocks.query } } }) }));
 
 import { flushPromises, mount } from '@vue/test-utils';
