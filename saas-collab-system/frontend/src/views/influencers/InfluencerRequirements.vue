@@ -5,11 +5,12 @@
       <h1>达人模块需求反馈</h1>
       <p>请描述使用场景、遇到的问题和期望结果。不要填写密码、令牌或客户隐私。</p>
     </header>
-    <form v-if="allowed" @submit="submit">
+    <form v-if="allowed" @submit="submit" @paste="pasteImages">
       <h2>提交需求</h2>
       <label>需求标题<input :value="title" @input="title = $event.target.value" required maxlength="120" placeholder="例如：送样列表希望支持按仓库筛选" /></label>
       <label>需求说明<textarea :value="description" @input="description = $event.target.value" required maxlength="3000" rows="5" /></label>
       <label>补充图片<input ref="fileInput" type="file" accept="image/jpeg,image/png,image/webp" multiple :disabled="saving" @change="selectImages" /></label>
+      <div class="paste-images" tabindex="0" role="group" aria-label="粘贴图片">点击此处，按 Ctrl+V 或 ⌘+V 粘贴截图</div>
       <small>最多 3 张，每张不超过 2 MB。请遮挡密码、令牌和客户隐私。</small>
       <div class="images">
         <figure v-for="(image, index) in selectedImages" :key="image.url">
@@ -76,6 +77,25 @@ function removeImage(index) {
 function selectImages(event) {
   const files = [...event.target.files];
   event.target.value = '';
+  addImages(files);
+}
+function pasteImages(event) {
+  const clipboard = event.clipboardData;
+  if (!clipboard) return;
+  const files = Array.from(clipboard.files || []).filter(file => file.type.startsWith('image/'));
+  if (!files.length) {
+    for (const item of Array.from(clipboard.items || [])) {
+      if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+      const file = item.getAsFile();
+      if (file) files.push(file);
+    }
+  }
+  if (!files.length) return;
+  event.preventDefault();
+  addImages(files);
+}
+function addImages(files) {
+  if (saving.value || !files.length) return;
   if (selectedImages.value.length + files.length > 3 || files.some(file => file.size > 2 * 1024 * 1024 || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type))) {
     error.value = '最多选择 3 张 JPG、PNG 或 WebP 图片，每张不超过 2 MB。';
     return;
@@ -168,6 +188,8 @@ article { border-top: 1px solid #dce5ef; padding: 12px 0; overflow-wrap: anywher
 article p { white-space: pre-wrap; }
 nav { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .images { display: flex; flex-wrap: wrap; gap: 10px; }
+.paste-images { padding: 8px 12px; border: 1px dashed #94a3b8; border-radius: 6px; color: #334155; background: #f8fafc; }
+.paste-images:focus { outline: 2px solid #2459cf; outline-offset: 2px; }
 .images figure { display: grid; gap: 4px; margin: 0; }
 .images img { width: 128px; height: 96px; object-fit: contain; border: 1px solid #dce5ef; border-radius: 6px; }
 [role="alert"] { color: #b42318; }
