@@ -24,6 +24,7 @@ import {
   FULFILLMENT_STATUS_TRANSITIONS,
   formatInfluencerError,
   OUTREACH_PRIORITY_LABELS,
+  OUTREACH_STATUS_LABELS,
   resolveOrCreateInfluencerNickname,
   restoreOutreachTarget,
   sampleDuplicateWarning,
@@ -77,6 +78,10 @@ const resourceLibraryStubs = {
 };
 
 describe('influencer integration workspace contracts', () => {
+  it('labels paused outreach tasks in Chinese', () => {
+    expect(OUTREACH_STATUS_LABELS.paused).toBe('已暂停');
+  });
+
   beforeEach(() => {
     requestMock.mockReset();
     authContext.canManage = true;
@@ -375,8 +380,9 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('matchedStoreIds.value.map');
     expect(page).toContain('params.status = filters.status');
     expect(page).toContain('params.store = filters.store');
-    expect(page).toContain('matchesDispatcher');
-    expect(page).toContain("row.priority === 'normal'");
+    expect(page).toContain('params.dispatcher = filters.dispatcher');
+    expect(page).toContain("params.normal_only = 'true'");
+    expect(page).not.toContain('matchesDispatcher');
     expect(page).toContain('sample_fulfillment_count');
     expect(page).toContain('送样记录进度');
     expect(page).toContain('sampledInfluencerCount(detailTask)');

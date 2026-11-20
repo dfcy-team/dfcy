@@ -14,7 +14,7 @@
       <div><span>已建联（接口当前页）</span><strong>{{ displayValue(taskStats.linked) }}</strong></div>
       <div><span>送样记录（接口当前页）</span><strong>{{ displayValue(taskStats.fulfillments) }}</strong></div>
     </div>
-    <p class="metrics-note">统计不包含“下发人”和“正常任务”页内筛选；接口当前页指标包含因此隐藏的行。</p>
+    <p class="metrics-note">下发人和正常任务筛选适用于全部有权查看的记录；除任务总数外，其余指标按当前页统计。</p>
 
     <el-card class="workspace-card" shadow="never">
       <div class="toolbar">
@@ -47,12 +47,12 @@
         <el-checkbox v-model="filters.deletedOnly" @change="applyFilters">只显示删除的</el-checkbox>
         <el-button type="primary" @click="applyFilters">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
-        <el-button type="primary" :disabled="!canManage" @click="openCreate">新建任务</el-button>
+        <el-button type="primary" :disabled="!canManage" @click="openCreate()">新建任务</el-button>
       </div>
 
       <el-table
         v-loading="loading"
-        :data="visibleRows"
+        :data="rows"
         row-key="id"
         :row-class-name="rowClassName"
         empty-text="暂无建联任务"
@@ -116,20 +116,21 @@
         <el-table-column prop="finalized_at" label="任务完成时间" min-width="165">
           <template #default="{ row }">{{ formatTaskTime(row.finalized_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" min-width="205" fixed="right">
+        <el-table-column label="操作" min-width="240" fixed="right">
           <template #default="{ row }">
             <el-button link @click.stop="openDetail(row)">查看详情</el-button>
             <el-button v-if="!row.is_deleted" link :disabled="!canManage" @click.stop="openEdit(row)">修改</el-button>
+            <el-button v-if="!row.is_deleted" link :disabled="!canManage" @click.stop="openReuse(row)">复用</el-button>
             <el-button v-if="!row.is_deleted" link type="danger" :disabled="!canManage" @click.stop="removeTask(row)">删除</el-button>
             <el-button v-else link type="primary" :disabled="!canManage" @click.stop="restoreTask(row)">恢复</el-button>
           </template>
         </el-table-column>
       </el-table>
       <el-pagination
-        v-if="visibleTotal"
+        v-if="total"
         v-model:current-page="page"
         v-model:page-size="pageSize"
-        :total="visibleTotal"
+        :total="total"
         layout="total, prev, pager, next"
         @current-change="load"
       />
@@ -471,6 +472,7 @@ const editingTask = ref(null);
 const editingTaskTerminal = computed(() => ['completed', 'cancelled'].includes(editingTask.value?.status));
 const storeOptions = ref([]);
 const bdOptions = ref([]);
+const dispatcherOptions = ref([]);
 const influencerOptions = ref([]);
 const taskOptionsLoaded = ref(false);
 const influencerOptionsLoaded = ref(false);
@@ -553,18 +555,6 @@ const filterStoreOptions = computed(() => {
   return [...optionsById.values()];
 });
 
-const dispatcherOptions = computed(() => {
-  const optionsById = new Map();
-  rows.value.forEach((row) => {
-    const id = row.dispatcher_id ?? row.dispatcher_name;
-    if (hasValue(id) && !optionsById.has(id)) optionsById.set(id, {
-      id,
-      name: row.dispatcher_name || row.dispatcher_id
-    });
-  });
-  return [...optionsById.values()];
-});
-
 const visibleStoreOptions = computed(() => {
   if (!matchedStoreIds.value.length) return storeOptions.value;
   const optionsById = new Map(storeOptions.value.map((store) => [store.id, store]));
@@ -599,13 +589,6 @@ const editableTaskStatuses = computed(() => {
 });
 const rowClassName = () => 'clickable-task-row';
 
-const visibleRows = computed(() => rows.value.filter((row) => {
-  const dispatcher = row.dispatcher_id ?? row.dispatcher_name;
-  const matchesDispatcher = !hasValue(filters.dispatcher) || String(dispatcher) === String(filters.dispatcher);
-  const matchesNormal = !filters.normalOnly || row.priority === 'normal';
-  return matchesDispatcher && matchesNormal;
-}));
-const visibleTotal = computed(() => filters.dispatcher || filters.normalOnly ? visibleRows.value.length : total.value);
 const taskStats = computed(() => {
   const linkedValues = rows.value.map((row) => row.linked_count).filter(hasValue);
   const fulfillmentValues = rows.value
@@ -622,14 +605,19 @@ const detailProgressLabel = computed(() => {
   return outreachProgressLabel(detailProgress.value, detailTask.value);
 });
 
+let loadSeq = 0;
 async function load() {
+  const seq = ++loadSeq;
   loading.value = true;
   const params = { page: page.value, page_size: pageSize.value, ordering: filters.ordering };
   if (filters.search.trim()) params.search = filters.search.trim();
   if (filters.status) params.status = filters.status;
   if (filters.store) params.store = filters.store;
+  if (filters.dispatcher) params.dispatcher = filters.dispatcher;
+  if (filters.normalOnly) params.normal_only = 'true';
   if (filters.deletedOnly) params.deleted_only = 'true';
   const r = await fetchOutreachTasks(params);
+  if (seq !== loadSeq) return;
   loading.value = false;
   if (r.success) {
     rows.value = collectionRows(r.data);
@@ -652,6 +640,7 @@ function resetFilters() {
 function applyTaskOptions(data = {}) {
   storeOptions.value = data.stores || [];
   bdOptions.value = data.bd_users || [];
+  dispatcherOptions.value = data.dispatchers || [];
   if (Array.isArray(data.influencers)) {
     influencerOptions.value = data.influencers.filter((influencer) => influencer?.id !== undefined && influencer?.id !== null);
     influencerOptionsLoaded.value = true;
@@ -678,24 +667,29 @@ function clearProductMatch() {
   productMatchType.value = 'info';
 }
 
-async function openCreate() {
+async function openCreate(source = null) {
+  if (!canManage.value || !await loadTaskOptions(true)) return;
   editingTask.value = null;
   Object.assign(form, {
     task_no: '',
-    task_name: '',
+    task_name: source?.task_name || '',
     priority: 'normal',
-    store: null,
-    external_product_id: '',
-    sku_prefix: '',
+    store: source?.store ?? null,
+    external_product_id: source?.external_product_id || '',
+    sku_prefix: source?.sku_prefix || '',
     target_count: 1,
-    owners: [],
+    owners: source?.owners?.length ? [...source.owners] : (hasValue(source?.owner) ? [source.owner] : []),
     status: 'pending',
     started_at: null,
     finalized_at: null
   });
   clearProductMatch();
-  if (!await loadTaskOptions(true)) return;
   createVisible.value = true;
+}
+
+function openReuse(row) {
+  if (!row || row.is_deleted) return;
+  return openCreate(row);
 }
 
 async function openEdit(row) {

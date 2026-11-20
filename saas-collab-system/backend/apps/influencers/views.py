@@ -9,6 +9,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import SAFE_METHODS
 from rest_framework.views import APIView
@@ -897,6 +898,12 @@ class OutreachTaskCollectionView(ScopedInfluencerView):
         store_id = request.query_params.get("store", "").strip()
         if store_id:
             queryset = queryset.filter(store_id=store_id)
+        dispatcher = request.query_params.get("dispatcher", "").strip()
+        if dispatcher:
+            dispatcher_id = serializers.IntegerField(min_value=1, max_value=2**63 - 1).run_validation(dispatcher)
+            queryset = queryset.filter(dispatcher_id=dispatcher_id)
+        if _query_bool(request.query_params.get("normal_only", "false"), field="normal_only"):
+            queryset = queryset.filter(priority="normal")
         search = request.query_params.get("search", "").strip()
         if search:
             queryset = queryset.filter(
@@ -971,6 +978,11 @@ class OutreachTaskOptionsView(ScopedInfluencerView):
             user_roles__role__status="active",
         ).distinct().order_by("full_name", "username")[:200]
         stores = filter_queryset(request.user, stores, self.read_permission_code)[:200]
+        scoped_tasks = filter_queryset(request.user, OutreachTask.objects.all(), self.read_permission_code)
+        dispatchers = CustomUser.objects.filter(
+            Exists(scoped_tasks.filter(dispatcher_id=OuterRef("pk"))),
+            tenant=request.user.tenant,
+        ).order_by("full_name", "username", "id")
         payload = {
             "stores": [
                 {
@@ -985,6 +997,10 @@ class OutreachTaskOptionsView(ScopedInfluencerView):
             "bd_users": [
                 {"id": user.id, "username": user.username, "full_name": user.full_name}
                 for user in bd_users
+            ],
+            "dispatchers": [
+                {"id": user.id, "name": user.full_name or user.username}
+                for user in dispatchers
             ],
         }
         if include_influencers:
