@@ -354,7 +354,9 @@ class InventorySnapshot(ValidatedWriteModel):
     def clean(self):
         super().clean()
         errors = _validate_tenant_relations(self, "warehouse", "internal_sku", "source_run")
-        errors.update(_validate_source_run(self, "inventory_snapshot", "jifeng_wms"))
+        errors.update(_validate_source_run(self, "inventory_snapshot"))
+        if self.source_run_id and self.source_run.sync_job.integration_config.platform not in {"jifeng_wms", "best_ecapi"}:
+            errors["source_run"] = "Inventory snapshots require a warehouse provider."
         errors.update(_validate_utc_fields(self, "snapshot_at_utc"))
         if self.warehouse_id and self.site_code.upper() != self.warehouse.country_code.upper():
             errors["site_code"] = "Site code must match the warehouse country code."
@@ -411,7 +413,9 @@ class InboundRecord(ValidatedWriteModel):
     def clean(self):
         super().clean()
         errors = _validate_tenant_relations(self, "warehouse", "internal_sku", "source_run")
-        errors.update(_validate_source_run(self, "inbound", "jifeng_wms"))
+        errors.update(_validate_source_run(self, "inbound"))
+        if self.source_run_id and self.source_run.sync_job.integration_config.platform not in {"jifeng_wms", "best_ecapi"}:
+            errors["source_run"] = "Inbound facts require a warehouse provider."
         errors.update(_validate_utc_fields(self, "expected_at_utc", "received_at_utc", "updated_at_utc"))
         if self.warehouse_id and self.site_code.upper() != self.warehouse.country_code.upper():
             errors["site_code"] = "Site code must match the warehouse country code."

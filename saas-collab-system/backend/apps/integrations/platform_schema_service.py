@@ -142,28 +142,22 @@ API_TYPE_OPTIONS = {
     "inventory": {"value": "inventory", "label": "库存 API"},
 }
 
-def integration_platform_key(*, platform_type="", code="", name=""):
-    """Map a platform master row to the integration contract without using its display name in the UI."""
+def integration_platform_key(
+    *, platform_type="", warehouse_connector_state=None, warehouse_connector_key="", code="", name=""
+):
+    """Map a platform row to its explicit integration contract.
+
+    ``code`` and ``name`` remain accepted for call compatibility, but warehouse
+    routing deliberately does not inspect them. Legacy aliases are migration
+    input only.
+    """
     platform_type = str(platform_type or "").strip().lower()
     if platform_type in CAPABILITY_REGISTRY:
         return platform_type
-    aliases = {
-        "lazada": "lazada",
-        "shopee": "shopee",
-        "tiktok": "tiktok",
-        "tiktokshop": "tiktok",
-        "myjf": "jifeng_wms",
-        "jifeng": "jifeng_wms",
-        "极风": "jifeng_wms",
-        "极风平台": "jifeng_wms",
-        "马来极风": "jifeng_wms",
-        "jifengwms": "jifeng_wms",
-        "极风wms": "jifeng_wms",
-    }
-    for candidate in (code, name):
-        normalized = "".join(character for character in str(candidate or "").strip().lower() if character.isalnum())
-        if normalized in aliases:
-            return aliases[normalized]
+    if platform_type in {"warehouse_owned", "warehouse_third_party", "warehouse_platform"}:
+        key = str(warehouse_connector_key or "").strip().lower()
+        if warehouse_connector_state == "selected" and key in {"jifeng_wms", "best_ecapi"}:
+            return key
     return ""
 
 

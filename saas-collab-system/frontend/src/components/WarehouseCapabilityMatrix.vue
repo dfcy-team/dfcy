@@ -2,15 +2,19 @@
   <el-alert title="仓库只读开关来自共享接入配置审批；本页检查不会刷新令牌或启用同步任务。" type="info" :closable="false" show-icon />
   <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
   <el-table v-loading="loading" :data="rows" border stripe empty-text="当前权限范围内没有仓库授权">
-    <el-table-column label="仓库" min-width="180"><template #default="{ row }">{{ row.warehouse_name || row.warehouse_code }}</template></el-table-column>
-    <el-table-column prop="external_warehouse_code" label="服务商仓库编码" min-width="150" />
+    <el-table-column label="平台" min-width="180"><template #default="{ row }">{{ row.platform_name || '未关联平台' }}<small v-if="row.platform_code">（{{ row.platform_code }}）</small></template></el-table-column>
+    <el-table-column label="仓库" min-width="180"><template #default="{ row }">{{ row.warehouse_name || '未命名' }}（{{ row.warehouse_code }}）</template></el-table-column>
+    <el-table-column prop="config_name" label="接入配置" min-width="180" />
+    <el-table-column label="授权状态" width="110"><template #default="{ row }">{{ statusLabels[row.status] || row.status }}</template></el-table-column>
+    <el-table-column label="服务商仓库编码" min-width="150"><template #default="{ row }">{{ row.external_warehouse_code || '未提供' }}</template></el-table-column>
     <el-table-column label="读取" width="120"><template #default="{ row }">{{ row.read_enabled ? '开启（配置审批）' : '关闭（配置审批）' }}</template></el-table-column>
     <el-table-column label="写入" width="90"><template #default>关闭</template></el-table-column>
     <el-table-column label="连接检查" width="130"><template #default="{ row }">{{ labels[row.validation_status] || '未检查' }}</template></el-table-column>
-    <el-table-column prop="last_verified_at" label="最近检查（UTC）" min-width="170" />
-    <el-table-column prop="oauth_expires_at" label="令牌到期（UTC）" min-width="170" />
+    <el-table-column label="最近检查（UTC）" min-width="170"><template #default="{ row }">{{ row.last_verified_at || '未检查' }}</template></el-table-column>
+    <el-table-column label="令牌到期（UTC）" min-width="170"><template #default="{ row }">{{ row.provider === 'best_ecapi' ? '签名认证，无 OAuth 到期时间' : row.oauth_expires_at || '未记录' }}</template></el-table-column>
     <el-table-column label="操作" min-width="230"><template #default="{ row }">
-      <el-button :disabled="!canCheck || !row.read_enabled || row.status !== 'active' || !row.oauth_token_available || Boolean(checking)" :loading="checking === row.id" @click="check(row)">只读检查</el-button>
+      <el-button v-if="row.provider === 'best_ecapi'" @click="router.push('/master-data/warehouses')">到仓库档案验证百世</el-button>
+      <el-button v-else :disabled="!canCheck || !row.read_enabled || row.status !== 'active' || !row.oauth_token_available || Boolean(checking)" :loading="checking === row.id" @click="check(row)">只读检查</el-button>
       <el-button @click="router.push({ path: '/integrations/configs', query: { config_id: row.integration_config_id } })">查看接入配置</el-button>
     </template></el-table-column>
   </el-table>

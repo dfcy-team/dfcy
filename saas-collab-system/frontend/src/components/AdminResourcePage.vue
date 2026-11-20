@@ -457,7 +457,7 @@ async function submitForm() {
       visibleFormFields.value.map((field) => [field.key, resourceForm[field.key]]),
     );
     const response = isEditing
-      ? await props.editHandler(editingRow.value.id, payload)
+      ? await props.editHandler(editingRow.value.id, payload, editingRow.value)
       : await props.createHandler(payload);
     if (!response?.success) {
       if (response?.code === 'VALIDATION_ERROR' || response?.code === 'BUSINESS_RULE_VIOLATION') {

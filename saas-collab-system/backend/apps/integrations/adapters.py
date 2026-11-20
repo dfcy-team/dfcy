@@ -410,7 +410,7 @@ class ProductionReadonlyAdapter(PlatformAdapter):
         elif self.config.platform == PlatformChoices.JIFENG_WMS:
             self.client = JifengWmsReadonlyClient(self.config, self.warehouse_authorization)
         elif self.config.platform == PlatformChoices.BEST_ECAPI:
-            from .best_ecapi import BestEcapiClient
+            from .best_glink import BestGlinkClient as BestEcapiClient
             self.client = BestEcapiClient(self.config, self.warehouse_authorization)
         else:
             raise ValidationError("Unsupported production readonly platform.")
@@ -1365,11 +1365,18 @@ def get_adapter_for_config(config, resource_type=None):
         return JifengInventoryAdapter(config)
     if resource_type == SyncJob.ResourceType.INVENTORY_SNAPSHOT and config.platform == PlatformChoices.BEST_ECAPI:
         return BestInventoryAdapter(config)
+    if resource_type == SyncJob.ResourceType.INBOUND and config.platform == PlatformChoices.BEST_ECAPI:
+        return BestInboundAdapter(config)
     return DisabledProductionAdapter()
 
 
 class BestInventoryAdapter(JifengInventoryAdapter):
     """Reuse inventory persistence only; BEST quantity semantics remain explicit."""
+    def fetch_page(self, sync_job, cursor_value=None):
+        run = self._require_run()
+        self.scope["snapshot_at_utc"] = run.started_at.isoformat()
+        return super().fetch_page(sync_job, cursor_value)
+
     def normalize_record(self, record):
         mapping = {"totalNum": ("decimaltotalQuantity", "totalQuantity"),
             "availableNum": ("decimalNormalQuantity", "normalQuantity"),
@@ -1388,3 +1395,41 @@ class BestInventoryAdapter(JifengInventoryAdapter):
         if "totalNum" not in converted or "availableNum" not in converted:
             raise ValidationError("百世库存数量字段缺失，不能默认为零。")
         return super().normalize_record(converted)
+
+
+class BestInboundAdapter(ProductionReadonlyAdapter):
+    """Persist only normalized, identity-checked BEST putaway facts."""
+
+    def normalize_record(self, record):
+        return dict(record)
+
+    def persist_record(self, sync_job, record):
+        from django.db import transaction
+        from django.utils.dateparse import parse_datetime
+        from apps.commerce.models import InboundRecord
+        from apps.commerce.inventory_sku_mapping import resolve_inventory_sku
+        auth = self.warehouse_authorization
+        run = self._require_run()
+        if (not auth or auth.tenant_id != sync_job.tenant_id or auth.warehouse.tenant_id != sync_job.tenant_id
+                or auth.integration_config_id != sync_job.integration_config_id):
+            raise ValidationError("百世入库事实超出当前仓库范围。")
+        sku_id, _ = resolve_inventory_sku(tenant=sync_job.tenant, warehouse=auth.warehouse,
+            source_sku=record["source_sku"], seller_sku="", snapshot_at_utc=parse_datetime(record["received_at_utc"]))
+        with transaction.atomic():
+            current = InboundRecord.objects.select_for_update().filter(tenant=sync_job.tenant,
+                warehouse=auth.warehouse, site_code=auth.warehouse.country_code,
+                external_inbound_id=record["external_inbound_id"], external_line_id=record["external_line_id"]).first()
+            if current and (current.source_run.sync_job.integration_config_id != self.config.pk
+                            or current.source_sku != record["source_sku"]):
+                raise ValidationError("百世入库行身份与已有事实不一致。")
+            created = current is None
+            values = {**record, "internal_sku_id": sku_id, "source_run": run}
+            if current:
+                for key, value in values.items():
+                    setattr(current, key, value)
+                current.save()
+            else:
+                current = InboundRecord.objects.create(tenant=sync_job.tenant, warehouse=auth.warehouse,
+                    site_code=auth.warehouse.country_code, **values)
+        return {"action": "created" if created else "updated",
+                "idempotency_key": f"{sync_job.pk}:{current.pk}"}

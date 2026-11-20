@@ -36,6 +36,7 @@ def _fixture():
         code="myjf",
         name="马来极风",
         platform_type="warehouse_third_party",
+        warehouse_connector_state="selected", warehouse_connector_key="jifeng_wms",
         status=StatusChoices.ACTIVE,
     )
     warehouse = WarehouseMaster.objects.create(

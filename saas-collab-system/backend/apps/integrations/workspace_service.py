@@ -36,6 +36,7 @@ RESOURCE_DESTINATIONS = {
     "sales_order": ("销售订单", "sales_order / sales_order_item"),
     "settlement_bill": ("财务流水", "platform_finance_transaction"),
     "advertising_report": ("Shopee 广告数据", "shopee_advertising_record"),
+    "gmv_max_report": ("TikTok GMV Max", "integrations_sharedadvertisingrawpayload"),
     "refund_return": ("退款退货", "refund_return / refund_return_item"),
     "inventory_snapshot": ("库存分析", "inventory_snapshot"),
 }
@@ -90,7 +91,7 @@ def _api_type(config, raw_config):
     value = str(raw_config.get("api_type") or config.platform_config.get("api_type") or "").strip()
     if value:
         return value
-    return "inventory" if config.platform == "jifeng_wms" else "marketplace"
+    return "inventory" if config.platform in {"jifeng_wms", "best_ecapi"} else "marketplace"
 
 
 def _masked_fingerprint(value):
@@ -323,9 +324,9 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None, context=None
             or scope.get("time_basis")
             or ("created" if str(query_scope.get("mode") or scope.get("query_mode") or "incremental") == "range" else "updated")
         ) if job.resource_type == "sales_order" else None,
-        "lookback_days": int(query_scope.get("lookback_days") or scope.get("lookback_days") or (job.integration_config.platform_config or {}).get("sync_scope", {}).get("lookback_days") or (7 if job.resource_type == "advertising_report" else 1)),
+        "lookback_days": 2 if job.resource_type == "gmv_max_report" else int(query_scope.get("lookback_days") or scope.get("lookback_days") or (job.integration_config.platform_config or {}).get("sync_scope", {}).get("lookback_days") or (7 if job.resource_type == "advertising_report" else 1)),
         "overlap_minutes": int(query_scope.get("overlap_minutes") if query_scope.get("overlap_minutes") is not None else scope.get("overlap_minutes") or 5),
-        "query_page_size": int(query_scope.get("page_size") or scope.get("query_page_size") or 50),
+        "query_page_size": 100 if job.resource_type == "gmv_max_report" else int(query_scope.get("page_size") or scope.get("query_page_size") or 50),
         "max_pages": int(query_scope.get("max_pages") or scope.get("max_pages") or 100),
         "max_records": int(query_scope.get("max_records") or scope.get("max_records") or 50000),
         "range_start_at": query_scope.get("start_at") or scope.get("range_start_at"),
@@ -523,7 +524,7 @@ def _run_rows(runs, job_rows):
                 "store_id": job.get("store_id"),
                 "region": job.get("region", ""),
                 "platform": run.sync_job.integration_config.platform,
-                "api_type": job.get("api_type", "inventory" if run.sync_job.integration_config.platform == "jifeng_wms" else "marketplace"),
+                "api_type": job.get("api_type", "inventory" if run.sync_job.integration_config.platform in {"jifeng_wms", "best_ecapi"} else "marketplace"),
                 "resource_type": run.sync_job.resource_type,
                 "data_destination": destination[0],
                 "data_table": destination[1],
@@ -810,9 +811,13 @@ def _reference_options(user):
     for platform in PlatformMaster.objects.filter(tenant=user.tenant, status="active").order_by("code"):
         integration_value = integration_platform_key(
             platform_type=platform.platform_type,
+            warehouse_connector_state=platform.warehouse_connector_state,
+            warehouse_connector_key=platform.warehouse_connector_key,
             code=platform.code,
             name=platform.name,
         )
+        if platform.platform_type in {"warehouse_owned", "warehouse_third_party", "warehouse_platform"} and not integration_value:
+            continue
         value = integration_value or platform.code
         if value in seen_platforms:
             continue

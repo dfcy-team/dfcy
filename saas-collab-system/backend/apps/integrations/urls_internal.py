@@ -27,6 +27,7 @@ urlpatterns = [
     path("lazada-authorizations/<int:pk>/operations/", lazada_api_views.operations),
     path("warehouse-api/operations/", warehouse_api_views.catalog),
     path("warehouse-api/preview/", warehouse_api_views.preview),
+    path("warehouse-authorizations/<int:pk>/best-notifications/", warehouse_api_views.best_notifications),
     path("warehouse-authorizations/<int:pk>/operations/", warehouse_api_views.execute),
     path("developer-apps/", developer_apps.collection),
     path("developer-apps/<int:pk>/", developer_apps.detail),

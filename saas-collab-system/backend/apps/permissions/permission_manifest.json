@@ -35701,6 +35701,45 @@
       "risk": "high"
     },
     {
+      "route": "api/internal/integrations/warehouse-authorizations/<int:pk>/best-notifications/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "integrations.warehouse.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsWarehouseAuthorizationViewer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/integrations/warehouse-authorizations/<int:pk>/best-notifications/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "integrations.warehouse.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsWarehouseAuthorizationViewer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/integrations/warehouse-authorizations/<int:pk>/best-notifications/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsWarehouseAuthorizationViewer"
+      ],
+      "owner": "integrations"
+    },
+    {
       "route": "api/internal/integrations/warehouse-authorizations/<int:pk>/credentials/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -36804,7 +36843,7 @@
         "IsAuthenticated"
       ],
       "owner": "flash_sales",
-      "guard_source_sha256": "5d2a793526479d152b6fc5adec4fad203169d4df973312cb9eb03ac081880247"
+      "guard_source_sha256": "99383a342147af3bfa3099522be631e33a7d05531f01f69b14608aa3a5b20469"
     },
     {
       "route": "api/internal/marketing/flash-sales/batches/<uuid:pk>/",
@@ -56244,6 +56283,15 @@
       "owner": "packing"
     },
     {
+      "route": "api/platform/best/glink/<int:config_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "function_callback_default_get",
+      "permission_classes": [],
+      "owner": "unknown"
+    },
+    {
       "route": "api/platform/health/",
       "method": "GET",
       "action": "read",
@@ -57327,5 +57375,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "13846df9a491882d6ed7dc74ed76f375be1fb054296bd2d76bf7d9ee5a1db22f"
+  "catalog_hash": "900bb2787cdbe4ba699a14c13303e73fa719d050389855fa237b777210e9e8fc"
 }

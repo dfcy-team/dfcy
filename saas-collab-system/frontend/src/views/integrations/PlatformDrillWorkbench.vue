@@ -357,7 +357,7 @@ const activeStep = computed(() => {
 });
 const blockers = computed(() => steps.value.filter((item) => item.status !== 'success').map((item) => `${item.title}：${item.description}`));
 
-const platformLabels = { lazada: 'Lazada', shopee: 'Shopee', tiktok: 'TikTok Shop', jifeng_wms: '极风 WMS' };
+const platformLabels = { lazada: 'Lazada', shopee: 'Shopee', tiktok: 'TikTok Shop', jifeng_wms: '极风 WMS', best_ecapi: '百世海外仓' };
 const environmentLabels = { sandbox: '沙箱', pilot: '试运行', production: '生产', mock: '模拟' };
 const resourceLabels = { platform_product: '平台商品', sales_order: '销售订单', refund_return: '退货退款', inventory_snapshot: '库存快照', inbound: '入库单', shipment: '出库单', settlement_bill: '财务流水' };
 const statusLabels = { active: '已启用', authorized: '已授权', configured: '已配置', verified: '已验证', disabled: '已停用', failed: '失败', running: '运行中', healthy: '健康', pending_review: '待审核' };

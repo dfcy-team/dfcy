@@ -83,6 +83,35 @@ def return_receipt(data, return_no):
     return result
 
 
+def putaway_receipt(data, authorization):
+    """Normalize an already authenticated WMS_RMA_STATUS_PUSH business payload.
+
+    This does not authenticate a callback or acknowledge it to the warehouse.
+    Receipt-stage messages must not substitute for putaway completion.
+    """
+    config = authorization.integration_config.platform_config
+    if (data.get('customerCode') != config.get('customer_code') or
+            data.get('warehouseCode') != authorization.external_warehouse_code):
+        raise ValidationError('百世退货推送客户或仓库不一致。')
+    number = text(data.get('orderCode'))
+    if data.get('feedBackStage') != 'putaway' or data.get('rmaStatus') != 'FULFILLED':
+        raise ValidationError('百世退货尚无上架完成证据，未更新成本冲回日期。')
+    finished = utc_time(data.get('wmsUpdateTime'))
+    if finished is None:
+        raise ValidationError('百世上架完成时间缺失或未确认时区，未更新成本冲回日期。')
+    products = rows(data.get('products'), 'product')
+    if not 1 <= len(products) <= 1000:
+        raise ValidationError('百世上架推送需提供1至1000条实收商品明细。')
+    lines = []
+    for item in products:
+        good, defective = count(item.get('normalQuantity')), count(item.get('defectiveQuantity'))
+        lines.append({'sku': text(item.get('itemSkuCode')), 'received_quantity': count(good + defective)})
+    # The callback's SO identifiers can denote several orders. Association stays
+    # with the reviewed warehouse return number, not a guessed platform order.
+    return {'return_no': number, 'erp_no': '', 'platform_order_no': '', 'tracking_no': '',
+            'provider_status': 'FULFILLED', 'received_at': finished, 'lines': lines}
+
+
 STATUS_LABELS = {'NEW': '待审核', 'WMS_ACCEPT': '已接单', 'EXCEPTION': '异常',
     'WMS_PRINT': '打印', 'WMS_PICK': '拣货', 'WMS_CHECK': '复核', 'WMS_PACKAGE': '打包',
     'WMS_WEIGH': '称重', 'DELIVERED': '已发货', 'CLOSED': '已关闭', 'CANCELED': '已取消'}

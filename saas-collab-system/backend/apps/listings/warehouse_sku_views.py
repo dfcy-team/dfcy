@@ -48,7 +48,7 @@ def _facts(user):
         tenant=user.tenant, warehouse__tenant=user.tenant,
         source_run__sync_job__tenant=user.tenant,
         source_run__sync_job__integration_config__tenant=user.tenant,
-        source_run__sync_job__integration_config__platform='jifeng_wms',
+        source_run__sync_job__integration_config__platform__in=['jifeng_wms', 'best_ecapi'],
         source_run__sync_job__resource_type='inventory_snapshot',
     ).filter(Q(internal_sku__isnull=True) | Q(internal_sku__tenant=user.tenant))
 
@@ -150,7 +150,7 @@ def _latest_fact_ids(user, warehouse=None):
     # MySQL flattening the small run/warehouse sets into repeated history joins.
     runs = SyncRun.objects.filter(
         sync_job__tenant=user.tenant, sync_job__integration_config__tenant=user.tenant,
-        sync_job__integration_config__platform='jifeng_wms',
+        sync_job__integration_config__platform__in=['jifeng_wms', 'best_ecapi'],
         sync_job__resource_type='inventory_snapshot',
     ).order_by().values('pk').annotate(_present=Count('pk')).filter(_present__gt=0).values('pk')
     warehouses = WarehouseMaster.objects.filter(tenant=user.tenant).order_by().values('pk').annotate(
@@ -265,7 +265,7 @@ def export_warehouse_skus(request):
     writer.writerow(['平台', '店铺/仓库', '仓库编码', '来源 SKU', '内部旧 SKU', '内部新 SKU', 'SKU 关联', '在手（件）', '快照时间（UTC）'])
     for row in _filtered_rows(request.user, request.query_params).iterator(chunk_size=1000):
         snapshot_at = row.snapshot_at_utc.astimezone(datetime_timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-        writer.writerow(['极风 WMS', _csv_text(row.warehouse.name), _csv_text(row.warehouse.code),
+        writer.writerow(['百世海外仓' if row.source_run.sync_job.integration_config.platform == 'best_ecapi' else '极风 WMS', _csv_text(row.warehouse.name), _csv_text(row.warehouse.code),
                          _csv_text(row.source_sku), _csv_text(getattr(row.internal_sku, 'legacy_sku_code', '')),
                          _csv_text(getattr(row.internal_sku, 'sku_code', '')), '已关联' if row.internal_sku_id else '未关联',
                          row.on_hand_qty, snapshot_at])

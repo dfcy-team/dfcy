@@ -49,18 +49,19 @@ def test_warehouse_platform_types_are_business_categories_not_connectors():
         assert item["platform_category"] == "WAREHOUSE_SERVICE"
         assert item["option_group"] == "仓储服务分类"
         assert item["connector_status"] == "UNMAPPED"
-        assert "具体服务商" in item["connector_hint"]
+        assert "明确选择连接器" in item["connector_hint"]
 
 
 def test_myjf_warehouse_row_resolves_to_the_explicit_jifeng_connector():
     resolution = resolve_platform_connector(
-        platform_type="warehouse_third_party", code="myjf", name="马来极风"
+        platform_type="warehouse_third_party", warehouse_connector_state="selected",
+        warehouse_connector_key="jifeng_wms", code="myjf", name="马来极风"
     )
     assert resolution == {
         "connector_key": "jifeng_wms",
         "connector_name": "极风 WMS",
         "connector_status": "ACTIVE",
-        "connector_hint": "已按平台编码或名称识别为极风 WMS，支持库存 API 接入。",
+        "connector_hint": "已选择极风 WMS 连接器，支持库存 API 接入。",
     }
 
 
@@ -69,9 +70,9 @@ def test_unknown_warehouse_provider_fails_closed_as_unmapped():
         platform_type="warehouse_third_party", code="unknown-3pl", name="未知三方仓"
     )
     assert resolution["connector_key"] == ""
-    assert resolution["connector_name"] == "待识别服务商"
-    assert resolution["connector_status"] == "UNMAPPED"
-    assert "不是单一连接器" in resolution["connector_hint"]
+    assert resolution["connector_name"] == "待确认连接器"
+    assert resolution["connector_status"] == "PENDING"
+    assert "尚未人工确认" in resolution["connector_hint"]
 
 
 @pytest.mark.django_db
@@ -83,6 +84,7 @@ def test_platform_serializer_exposes_record_level_connector_identity():
     )
     platform = PlatformMaster.objects.create(
         tenant=tenant, code="myjf", name="马来极风", platform_type="warehouse_third_party",
+        warehouse_connector_state="selected", warehouse_connector_key="jifeng_wms",
     )
     data = PlatformMasterSerializer(platform, context={"request": SimpleNamespace(user=user)}).data
     assert data["connector_key"] == "jifeng_wms"
@@ -94,8 +96,8 @@ def test_platform_serializer_exposes_record_level_connector_identity():
         tenant=tenant, code="unknown-3pl", name="未知三方仓", platform_type="warehouse_third_party",
     )
     unknown_data = PlatformMasterSerializer(unknown, context={"request": SimpleNamespace(user=user)}).data
-    assert unknown_data["connector_status"] == "UNMAPPED"
-    assert unknown_data["connector_name"] == "待识别服务商"
+    assert unknown_data["connector_status"] == "PENDING"
+    assert unknown_data["connector_name"] == "待确认连接器"
 
 
 @pytest.mark.django_db

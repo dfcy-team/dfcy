@@ -205,7 +205,7 @@ def validate_manual_sync_job(sync_job, *, live_only=False):
                           or getattr(authorization, "oauth_expires_at", None))
             if expires_at and expires_at <= timezone.now():
                 raise ValidationError("主体授权已过期，请先到店铺或仓库 API 接入刷新授权。")
-            if not authorization.token_id:
+            if not authorization.token_id and getattr(authorization, "provider", "") != "best_ecapi":
                 raise ValidationError("主体授权缺少 Token 托管引用，请先完成授权。")
         require_sync_read_capability(sync_job, mode)
     adapter.validate_configuration(sync_job)
