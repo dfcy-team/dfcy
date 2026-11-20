@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "cpuset": "1",
+  "cpu_shares": 256,
+  "containers": [
+    "production-celery-1",
+    "production-celery-history-1",
+    "production-celery-background-1",
+    "production-celery-video-v447-v3-1",
+    "production-celery-finance-summary-1",
+    "production-celery-flash-1",
+    "production-celery-warehouse-orders-1"
+  ]
+}
