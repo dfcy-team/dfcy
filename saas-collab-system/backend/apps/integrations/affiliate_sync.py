@@ -392,6 +392,11 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
         if page["day"] in plan["new_days"]:
             SyncCursor.objects.update_or_create(tenant_id=sync_job.tenant_id, sync_job=sync_job,
                 cursor_key="affiliate-next-new-day", defaults={"cursor_value": (_day(page["day"]) + timedelta(days=1)).isoformat()})
+        SyncCursor.objects.update_or_create(
+            tenant_id=sync_job.tenant_id, sync_job=sync_job,
+            cursor_key=f"affiliate-covered:{plan['store_id']}:{page['day']}",
+            defaults={"cursor_value": plan["timezone"]},
+        )
         changed = [item["order_snapshot_id"] for item in results if item["action"] in {"created", "updated"}]
         if changed:
             bound = self._require_run()

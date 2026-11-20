@@ -1083,6 +1083,33 @@ def filtered_order_records(request, queryset=None):
     if queryset is None:
         queryset = _scoped_orders(request, "sales_management.orders.view")
     scoped_orders = queryset
+    sample = request.query_params.get("tk_sample_kind")
+    affiliation = request.query_params.get("tk_affiliation")
+    if sample or affiliation:
+        queryset = queryset.filter(platform__platform_type="tiktok")
+    if sample:
+        if sample not in {"free", "refundable", "none", "unknown"}:
+            raise ValidationError({"tk_sample_kind": "无效的样品类型"})
+        if sample == "unknown":
+            queryset = queryset.filter(source_details__tk_sample_kind__isnull=True)
+        else:
+            queryset = queryset.filter(source_details__tk_sample_kind=sample)
+    if affiliation:
+        from django.db.models import CharField, Value
+        from django.db.models.functions import Cast, Concat
+        from apps.influencers.models import AffiliateOrderSnapshot
+        from apps.integrations.models import SyncCursor
+        if affiliation not in {"yes", "no", "unknown"}:
+            raise ValidationError({"tk_affiliation": "无效的联盟归属"})
+        matches = AffiliateOrderSnapshot.objects.filter(tenant_id=request.user.tenant_id,
+            store_id=OuterRef("store_id"), order_id=OuterRef("external_order_id"))
+        queryset = queryset.filter(Exists(matches) if affiliation == "yes" else ~Exists(matches))
+        if affiliation != "yes":
+            key = Concat(Value("affiliate-covered:"), Cast(OuterRef("store_id"), CharField()),
+                Value(":"), Cast(OuterRef("business_date"), CharField()), output_field=CharField())
+            covered = SyncCursor.objects.filter(tenant_id=request.user.tenant_id, cursor_key=key,
+                sync_job__resource_type="affiliate_order", cursor_value=OuterRef("store__timezone"))
+            queryset = queryset.filter(Exists(covered) if affiliation == "no" else ~Exists(covered))
     internal_sku_id = request.query_params.get("internal_sku_id")
     if internal_sku_id is not None:
         if (len(request.query_params.getlist("internal_sku_id")) != 1
