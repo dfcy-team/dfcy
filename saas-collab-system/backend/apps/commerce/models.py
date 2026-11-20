@@ -16,6 +16,7 @@ class NormalizedOrderStatus(models.TextChoices):
     CONFIRMED = "confirmed", "Confirmed"
     FULFILLED = "fulfilled", "Fulfilled"
     COMPLETED = "completed", "Completed"
+    CANCELLATION_PENDING = "cancellation_pending", "Cancellation pending"
     CANCELLED = "cancelled", "Cancelled"
 
 

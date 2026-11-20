@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatField, formatMetric, trendSeries, statusLabel } from '../src/views/sales-management/display';
+import { formatField, formatMetric, trendSeries, statusLabel, statusType } from '../src/views/sales-management/display';
 import { salesPageContracts } from '../src/views/sales-management/pageContracts';
 
 describe('销售字段展示', () => {
@@ -23,6 +23,8 @@ describe('销售字段展示', () => {
     expect(statusLabel('mapped')).toBe('已关联');
     expect(statusLabel('unmapped')).toBe('未关联');
     expect(statusLabel('cancelled')).toBe('已取消');
+    expect(statusLabel('cancellation_pending')).toBe('取消处理中');
+    expect(statusType('cancellation_pending')).toBe('warning');
     expect(statusLabel('accepted')).toBe('已接受');
     expect(statusLabel('NEW_PROVIDER_STATUS')).toBe('NEW_PROVIDER_STATUS');
     expect(formatField('tiktok', { format: 'platform' })).toBe('TikTok Shop');

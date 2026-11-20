@@ -170,7 +170,9 @@ def _boolean(value):
 
 def _normalized_order_status(raw_status):
     status = str(raw_status or "").upper()
-    if "CANCEL" in status:
+    if status == "IN_CANCEL":
+        return "cancellation_pending"
+    if status in {"CANCELLED", "CANCELED"}:
         return "cancelled"
     if status == "COMPLETED":
         return "completed"
