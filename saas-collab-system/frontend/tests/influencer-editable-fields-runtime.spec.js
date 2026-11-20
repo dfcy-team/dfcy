@@ -57,6 +57,73 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('offers pause and resume without allowing new samples while paused', async () => {
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    expect(wrapper.vm.nextTaskStatuses({ status: 'in_progress' })).toContain('paused');
+    expect(wrapper.vm.nextTaskStatuses({ status: 'paused' })).toEqual(['in_progress', 'cancelled']);
+    expect(wrapper.vm.taskStatusActionLabel('in_progress', { status: 'paused' })).toBe('恢复任务');
+    expect(wrapper.vm.OUTREACH_STATUS_LABELS.paused).toBe('已暂停');
+    const before = request.mock.calls.length;
+    await wrapper.vm.openSampleCreate({ ...task, status: 'paused' });
+    expect(request.mock.calls.length).toBe(before);
+    wrapper.unmount();
+  });
+
+  it('sends a status-only patch when pausing from the edit dialog', async () => {
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    await wrapper.vm.openEdit(task);
+    wrapper.vm.form.status = 'paused';
+    await wrapper.vm.submitEdit();
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0].data).toEqual({ status: 'paused' });
+    expect(messages.success).toHaveBeenCalledWith('任务已修改');
+    wrapper.unmount();
+  });
+
+  it('offers blacklist filtering and links the status-only action to the archive', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    await flushPromises();
+    expect(wrapper.vm.editableStatusOptions.blacklisted).toBe('已拉黑');
+    expect(wrapper.vm.FULFILLMENT_FILTER_STATUS_LABELS.blacklisted).toBe('已拉黑');
+    expect(wrapper.get('.sku-header').text()).toContain('明细商品 ID');
+    expect(wrapper.find('.sku-row select').exists()).toBe(true);
+    const selector = wrapper.get('[data-label="状态"] select');
+    expect(selector.findAll('option').some((option) => option.element.value === 'blacklisted')).toBe(true);
+    wrapper.vm.form.status = 'blacklisted';
+    wrapper.vm.form.notes = 'unsaved changes';
+    wrapper.vm.items = [{ requested_sku: 'UNKNOWN', warehouse: null, quantity: 1 }];
+    await wrapper.vm.submitEdit();
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0].data).toEqual({ status: 'blacklisted', confirm_terminal: true });
+    expect(messages.success).toHaveBeenCalledWith('送样及达人档案已同步拉黑');
+    wrapper.unmount();
+  });
+
+  it('does not offer archive blacklisting without both manage permissions', async () => {
+    permissions.check = (code) => code !== 'influencers.manage';
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    expect(wrapper.vm.editableStatusOptions.blacklisted).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('cancelling blacklist confirmation sends no write', async () => {
+    const { ElMessageBox } = await import('element-plus');
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    wrapper.vm.form.status = 'blacklisted';
+    ElMessageBox.confirm.mockRejectedValueOnce('cancel');
+    await wrapper.vm.submitEdit();
+    expect(writes()).toHaveLength(0);
+    wrapper.unmount();
+  });
+
   it.each(['task', 'standalone'])('passes the selected store for country-scoped nickname creation (%s)', async (kind) => {
     const wrapper = render(kind === 'task' ? OutreachTaskList : SampleFulfillmentList);
     await flushPromises();
@@ -354,6 +421,15 @@ describe('editable task number and sample type', () => {
     wrapper.unmount();
   });
 
+  it('inherits the bound store country when adding the first SKU to a legacy sample', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    expect(wrapper.vm.items[0].site_code).toBe('PH');
+    expect(serverSample.items).toEqual([]);
+    wrapper.unmount();
+  });
+
   it('keeps SKU items inside the fresh detail object', async () => {
     serverSample = { ...sample, version: 9, items: [{ id: 901, requested_sku: 'SKU-A', quantity: 2 }] };
     const wrapper = render(SampleFulfillmentList);
@@ -365,6 +441,57 @@ describe('editable task number and sample type', () => {
     await wrapper.vm.openEdit(sample);
     expect(wrapper.vm.editingSample.id).toBe(sample.id);
     expect(wrapper.vm.items).toEqual(serverSample.items);
+    wrapper.unmount();
+  });
+
+  it.each([false, true])('edits multiple item products without changing the task product (linked: %s)', async (linked) => {
+    serverSample = { ...sample, outreach_task: linked ? sample.outreach_task : null,
+      external_product_id: linked ? 'PRODUCT-A' : 'PRODUCT-A,PRODUCT-B' };
+    const baseRequest = request.getMockImplementation();
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
+      ? { success: true, data: { store: { id: 3, country_code: 'PH' },
+        warehouses: [{ id: 81, country_code: 'PH' }],
+        product: config.params.product_id === 'PRODUCT-B' ? { skus: ['SKU-B'] } : null } }
+      : baseRequest(config));
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    expect(wrapper.vm.formProductIds).toEqual(linked ? ['PRODUCT-A'] : ['PRODUCT-A', 'PRODUCT-B']);
+    expect(wrapper.get('[data-label="产品 ID"] input').element.readOnly).toBe(true);
+    expect(wrapper.text()).toContain('明细商品 ID');
+    expect(wrapper.vm.items[0].external_product_id).toBe('');
+    await wrapper.vm.addSkuItem();
+    Object.assign(wrapper.vm.items[0], { external_product_id: 'PRODUCT-A', requested_sku: 'SKU-A', warehouse: 81 });
+    Object.assign(wrapper.vm.items[1], { external_product_id: 'PRODUCT-B', requested_sku: 'SKU-B' });
+    await wrapper.vm.loadItemProduct(wrapper.vm.items[1]);
+    expect(wrapper.vm.itemSkuOptions(wrapper.vm.items[1])).toEqual(['SKU-B']);
+    await wrapper.vm.submitEdit();
+    expect(writes()[0].data.items.map(({ external_product_id, requested_sku }) => [external_product_id, requested_sku]))
+      .toEqual([['PRODUCT-A', 'SKU-A'], ['PRODUCT-B', 'SKU-B']]);
+    expect(writes()[0].data).not.toHaveProperty('external_product_id');
+    expect(writes()[0].data).not.toHaveProperty('outreach_task');
+    wrapper.unmount();
+  });
+
+  it('allows filling a missing product on a standalone sample without resubmitting SKU lines', async () => {
+    serverSample = { ...sample, outreach_task: null, external_product_id: '' };
+    const baseRequest = request.getMockImplementation();
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
+      ? { success: true, data: { store: { id: 3, country_code: 'PH' },
+        product: config.params.product_id === 'VERIFIED' ? { skus: ['SKU'] } : null } }
+      : baseRequest(config));
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    const input = wrapper.get('[data-label="产品 ID"] input');
+    expect(input.element.readOnly).toBe(false);
+    await input.setValue('WRONG');
+    await wrapper.vm.submitEdit();
+    expect(writes()).toHaveLength(0);
+    await input.setValue('VERIFIED');
+    await wrapper.vm.submitEdit();
+    expect(writes()[0].data).toEqual({ external_product_id: 'VERIFIED' });
+    expect(request.mock.calls.some(([c]) => c.params?.store === 3 && c.params?.product_id === 'VERIFIED')).toBe(true);
     wrapper.unmount();
   });
 

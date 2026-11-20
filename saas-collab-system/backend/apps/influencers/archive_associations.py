@@ -29,7 +29,7 @@ from .serializers import (
 
 
 def archive_group_data(influencer, *, user=None, permission_code="influencers.view"):
-    """Called only after a purpose guard, inside the tenant-locked read/write transaction."""
+    """Read scoped summaries; form/write callers retain the tenant lock."""
     membership = InfluenceArchiveMembership.objects.filter(
         tenant_id=influencer.tenant_id, influencer_id=influencer.pk,
         group__tenant_id=influencer.tenant_id,
@@ -55,7 +55,9 @@ def get_related_archives(*, user, influencer_id, for_form=False):
         require_influencer_form_access(user)
     else:
         require_influencer_nickname_access(user)
-    Tenant.objects.select_for_update().get(pk=user.tenant_id)
+    # Display-only reads must not queue behind unrelated tenant writes.
+    if for_form:
+        Tenant.objects.select_for_update().get(pk=user.tenant_id)
     influencer = get_object_or_404(Influencer.objects, tenant_id=user.tenant_id, pk=influencer_id)
     code = "influencers.manage" if for_form else "influencers.view"
     require_object(user, influencer, code)

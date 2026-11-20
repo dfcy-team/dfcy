@@ -515,6 +515,12 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(minute=0, hour=18),
         "args": (),
     },
+    "nightly-sample-video-completion": {
+        "task": "influencers.dispatch_nightly_sample_video_reconciliation",
+        # 17:00 UTC is 01:00 Asia/Shanghai, before the overdue sweep.
+        "schedule": crontab(minute=0, hour=17),
+        "args": (),
+    },
     "dispatch-due-readonly-sync-jobs": {
         "task": "apps.integrations.tasks.dispatch_due_readonly_sync_jobs",
         "schedule": 45.0,

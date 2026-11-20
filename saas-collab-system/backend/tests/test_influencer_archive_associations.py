@@ -94,6 +94,24 @@ def _group(record):
     return InfluenceArchiveGroup.objects.create(tenant=record.tenant, created_by=record.user, updated_by=record.user)
 
 
+@pytest.mark.parametrize('for_form', [False, True])
+def test_display_related_read_avoids_tenant_write_lock_but_form_retains_it(monkeypatch, for_form):
+    record = _records()
+    locks = []
+    original = QuerySet.select_for_update
+
+    def lock(queryset, *args, **kwargs):
+        locks.append(queryset.model)
+        return original(queryset, *args, **kwargs)
+
+    monkeypatch.setattr(QuerySet, 'select_for_update', lock)
+    before = _snapshot()
+    result = associations.get_related_archives(user=record.user, influencer_id=record.source.pk, for_form=for_form)
+    assert result['related_archives'][0]['id'] == record.source.pk
+    assert (Tenant in locks) is for_form
+    assert _snapshot() == before
+
+
 def test_0031_adds_only_two_tables_without_backfill_or_parent_fields():
     migration = import_module("apps.influencers.migrations.0031_influence_archive_associations").Migration
     assert ("influencers", "0029_primary_identity_indexes") in migration.dependencies

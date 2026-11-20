@@ -245,7 +245,7 @@
               v-if="!row.is_deleted"
               link
               type="primary"
-              :disabled="!canCreateFulfillment || isCancelled(activeTask)"
+              :disabled="!canCreateFulfillment || isCancelled(activeTask) || activeTask?.status === 'paused'"
               @click="openSampleFulfillment(row)"
             >创建送样</el-button>
             <el-button
@@ -342,7 +342,7 @@
               type="primary"
               :disabled="!canManage"
               @click="changeStatus(detailTask, nextStatus)"
-            >{{ taskStatusActionLabel(nextStatus) }}</el-button>
+            >{{ taskStatusActionLabel(nextStatus, detailTask) }}</el-button>
           </div>
 
           <section class="detail-section">
@@ -381,7 +381,7 @@
                 <el-tag>{{ detailSamples.length }}</el-tag>
                 <el-button
                   type="primary"
-                  :disabled="!canCreateFulfillment || isCancelled(detailTask)"
+                  :disabled="!canCreateFulfillment || isCancelled(detailTask) || detailTask?.status === 'paused'"
                   @click="createSampleFromDetail"
                 >创建送样</el-button>
               </div>
@@ -587,11 +587,12 @@ const progressLabel = (row) => sampleProgressLabel(row);
 const priorityTagType = (priority) => ({ urgent: 'danger', high: 'warning', low: 'info', normal: 'success' }[priority] || 'info');
 const taskStatusTransitions = {
   pending: ['in_progress', 'cancelled'],
-  in_progress: ['completed', 'cancelled'],
+  in_progress: ['paused', 'completed', 'cancelled'],
+  paused: ['in_progress', 'cancelled'],
   completed: [],
   cancelled: []
 };
-const taskStatusActionLabel = (status) => ({ in_progress: '开始任务', completed: '完成任务', cancelled: '取消任务' }[status] || statusLabel(OUTREACH_STATUS_LABELS, status));
+const taskStatusActionLabel = (status, row) => ({ in_progress: row?.status === 'paused' ? '恢复任务' : '开始任务', paused: '暂停任务', completed: '完成任务', cancelled: '取消任务' }[status] || statusLabel(OUTREACH_STATUS_LABELS, status));
 const nextTaskStatuses = (row) => taskStatusTransitions[row?.status] || [];
 const editableTaskStatuses = computed(() => {
   const current = editingTask.value?.status || 'pending';
@@ -799,7 +800,7 @@ async function submitEdit() {
     }
   }
   saving.value = true;
-  const payload = editingTaskTerminal.value ? { task_no: form.task_no.trim() } : {
+  let payload = editingTaskTerminal.value ? { task_no: form.task_no.trim() } : {
     task_no: form.task_no.trim(),
     task_name: form.task_name,
     priority: form.priority,
@@ -810,6 +811,23 @@ async function submitEdit() {
     owners: form.owners,
     status: form.status
   };
+  if (!editingTaskTerminal.value) {
+    const row = editingTask.value;
+    const original = {
+      task_no: (row.task_no || '').trim(), task_name: row.task_name || '',
+      priority: row.priority || 'normal', store: row.store ?? null,
+      external_product_id: row.external_product_id || '', sku_prefix: row.sku_prefix || '',
+      target_count: row.target_count ?? 0,
+      owners: row.owners?.length ? row.owners : (hasValue(row.owner) ? [row.owner] : []),
+      status: row.status || 'pending'
+    };
+    payload = Object.fromEntries(Object.entries(payload).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(original[key])));
+    if (!Object.keys(payload).length) {
+      saving.value = false;
+      createVisible.value = false;
+      return;
+    }
+  }
   const r = await updateOutreachTask(editingTask.value.id, payload, editingTask.value.version);
   saving.value = false;
   if (!r.success) {
@@ -1020,7 +1038,7 @@ function filterSampleInfluencers(query) {
 }
 
 async function openSampleCreate(task, target = null) {
-  if (!task?.id || !canCreateFulfillment.value || isCancelled(task)) return;
+  if (!task?.id || !canCreateFulfillment.value || isCancelled(task) || task.status === 'paused') return;
   if (target && (!target.id || target.is_deleted)) return;
   if (!await loadTaskOptions(true, false)) return;
   const store = storeOptions.value.find((item) => String(item.id) === String(task.store));
