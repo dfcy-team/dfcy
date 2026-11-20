@@ -1,6 +1,5 @@
 import pytest
 from apps.integrations.order_field_mapping import enrich_order_fields
-from apps.integrations.models import SyncCursor
 from tests.test_sales_management import client_for, create_order, create_scope, grant, user_for
 
 
@@ -16,7 +15,7 @@ def test_sample_evidence(platform, flags, expected):
 
 
 @pytest.mark.django_db
-def test_only_verified_days_are_negative():
+def test_order_type_is_optional_and_needs_positive_evidence():
     tenant, platform, store, _ = create_scope("tk-filter")
     order = create_order(tenant, store, "tk-filter-order")
     platform.platform_type = "tiktok"
@@ -28,12 +27,8 @@ def test_only_verified_days_are_negative():
         result = api.get("/api/internal/commerce/orders/", {"include_summary": "false", **filters})
         assert result.status_code == 200, result.data
         return result.json()["data"]["count"]
-    assert count(tk_sample_kind="unknown", tk_affiliation="unknown") == 1
-    assert count(tk_affiliation="no") == 0
-    job = order.source_run.sync_job
-    job.resource_type = "affiliate_order"
-    job.save(update_fields=["resource_type"])
-    SyncCursor.objects.create(tenant=tenant, sync_job=job,
-        cursor_key=f"affiliate-covered:{store.pk}:{order.business_date}", cursor_value=store.timezone)
-    assert count(tk_affiliation="no") == 1
-    assert count(tk_affiliation="unknown") == 0
+    assert count() == 1
+    assert count(tk_order_type="sample") == count(tk_order_type="affiliate") == 0
+    order.source_details = {"tk_sample_kind": "refundable"}
+    order.save(update_fields=["source_details"])
+    assert count(tk_order_type="sample") == 1
