@@ -34,7 +34,7 @@
     "tenants.0003_payment_approval"
   ],
   "runtime_parent_sha": "a51ed631963adf93b907af4af252b519fd73f89a",
-  "baseline_file_sha256": "86f92c4a13f70f69b087cd7cee44985a9e6f9b5c5b189abc6836944fbaf771c7",
+  "baseline_file_sha256": "1ad3eb76709de8fb73e3ed2729c0d9e962c3a8a9897d0c5dd5ef4966440aefd5",
   "migration_rehearsal": {
     "status": "PASS",
     "tables_before": 411,
@@ -99,7 +99,7 @@
     },
     "old_columns_unchanged": true,
     "protected_tables": 408,
-    "protected_rows": 3489796,
+    "protected_rows": 3502330,
     "applied_nodes_sha256": "8b535e24d6f115df78c23bb46490398ac381a91ea12aba4878aca398953cc66f",
     "column_metadata_verified": true,
     "backward_compatible_sql_defaults": true,
@@ -109,19 +109,19 @@
     "real_mysql_composite_orm_tests": 10,
     "source_tree_sha": "0dd5a9a3abde81017264e522ba10ab58d195426f",
     "local_candidate_commit": "1c50330300db6fcf7452df8b6dd8e4d18bc4871b",
-    "backup_sha256": "3e5f394c4f5c804f13f00f8e4b16926e8836dae197f70337d20f4a417a175f32",
+    "backup_sha256": "76582f287566125aada9c65342f22c45973ecd045ab98bda14f0fe3ddc89352e",
     "network": "none",
     "isolation_cleanup": {
       "status": "PASS",
       "db_network": "none",
-      "probe_network": "container:ec9a3daea04789f48f8ad3d7dfabd4e345279aafd1947a28f0c84a618e18c7ec",
+      "probe_network": "container:62c0c18e054a3ccd9d88a47c667c6e8fd23d1f412bcbc67eb3fa98e130d26c44",
       "containers_removed": true
     },
     "candidate_source_sha": "9728c548cce4c21d9cbc99aea7407298b4056fc7",
     "parent_sha": "a51ed631963adf93b907af4af252b519fd73f89a",
     "generated_only_paths": [],
     "migration_sha256": "a3fdcb1f2b2cad59531601087530a94d485d7d066d3df4ef336dca16f0a1a642",
-    "receipt_sha256": "444273c04e2850ef412ddb58659c57fd78305f33262f109b6bfb097782511197"
+    "receipt_sha256": "b2747adb54def1030c82e4d5ed1c811547530610b0a3a024255cc39f3fe0b4d4"
   },
   "files": {
     "saas-collab-system/backend/Dockerfile": "b92f7dd3bf68f4b4f1c3604c4bce4e82cd18b57fc497160dd5ad61a33018b231",
