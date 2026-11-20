@@ -3,22 +3,29 @@
     <input ref="billInput" class="bill-file-input" type="file" accept=".xlsx" aria-label="选择原始账单文件" :disabled="busy || active || pendingEdit" @change="upload" />
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon role="alert" />
     <el-alert v-if="feedback" :title="feedback" type="success" :closable="false" show-icon role="status" />
-    <p v-if="uploadPercent !== null" role="status">上传中 {{ uploadPercent }}% · 上传完成后自动开始解析</p>
-    <section v-if="!job" class="file-chooser" aria-label="等待选择账单">
-      <h2>选择原始仓库账单</h2>
-      <p>选择 Z:\处理费 中的原始 xlsx 文件，自动解析仓库处理费和其他处理费。</p>
+    <p v-if="uploadPercent !== null" role="status">上传中 {{ uploadPercent }}% · {{ uploadIntent === 'format' ? '上传完成后配置取数逻辑' : '上传完成后在本页填写国家和月份' }}</p>
+    <section v-if="!job && !formatStart" class="file-chooser" aria-label="等待选择账单">
+      <h2>原始仓库账单</h2>
+      <p>选择并上传 Excel 后，在账单页面填写国家和月份，再解析预览。</p>
       <p class="muted">每份最多 128MB，金额按原数字 CNY 记录。上传和解析只生成预览，不会自动登记费用。</p>
-      <div class="upload-line"><el-button type="primary" :loading="busy" @click="chooseFile(false)">选择原始账单并解析</el-button><el-button :disabled="busy" @click="chooseFile(true)">新格式／已保存格式规则</el-button></div>
+      <div class="upload-line">
+        <el-button type="primary" :loading="busy" @click="chooseFile('parse')">直接解析</el-button>
+        <el-button :disabled="busy" @click="formatStart = true">新增取数逻辑 / 修改已保存逻辑</el-button>
+      </div>
       <label class="history-label">继续核对已上传文件
         <el-select v-model="historyId" placeholder="选择最近上传的账单" aria-label="最近上传的原账单" :disabled="busy" @change="selectHistory">
           <el-option v-for="item in history" :key="item.id" :value="item.id" :label="`${item.file_name} · ${states[item.status] || item.status}`" />
         </el-select>
       </label>
-      <p class="muted">新格式或已有格式规则：上传后进入“格式配置”，选择规则或配置工作表，再重新预览。</p>
+      <p class="muted">已上传文件可以继续核对，无需重复上传。解析预览和保存规则均不会自动登记费用。</p>
     </section>
-    <section v-else-if="formatVisible && filePolicy" aria-label="账单格式配置" class="format-workspace">
-      <div class="job-state"><h2>格式配置</h2><span>{{ job.file_name }}</span><el-button :disabled="busy" @click="closeFormat">返回批量核对</el-button></div>
-      <WarehouseBillFormat ref="formatEditor" :job="job" :options="options" :disabled="busy" @preview="applyFormat" />
+    <section v-else-if="formatStart || (formatVisible && filePolicy)" aria-label="账单取数逻辑配置" class="format-workspace">
+      <div class="job-state"><h2>取数逻辑配置</h2><span v-if="job">{{ job.file_name }}</span>
+        <el-button type="primary" :disabled="busy || active || pendingEdit" @click="chooseFormatFile">{{ job ? '更换 Excel 文件' : '选择 Excel 文件' }}</el-button>
+        <el-button :disabled="busy" @click="closeFormat">返回批量核对</el-button>
+      </div>
+      <p v-if="!job" class="muted">请选择原始 Excel 文件，读取后可从空白新增取数逻辑、修改已保存逻辑或另存为新逻辑。不会自动登记费用。</p>
+      <WarehouseBillFormat :key="job?.id || 'no-file'" ref="formatEditor" :job="job || undefined" :initial-selection="formatSelection" @selection="formatSelection = $event" :options="options" :disabled="busy" @preview="applyFormat" />
     </section>
     <p v-if="job && !job.status" role="status">正在读取账单预览…</p>
     <template v-if="job?.status && !formatVisible">
@@ -26,11 +33,33 @@
         <nav v-if="filePolicy" class="review-queue" aria-label="核对队列"><h3>核对队列</h3><el-button v-for="(label, value) in { all: '全部', valid: '可登记', error: '待核对', existing: '已存在' }" :key="value" :type="rowStatus === (value === 'all' ? '' : value) ? 'primary' : 'default'" :disabled="busy || pendingEdit" @click="rowStatus = value === 'all' ? '' : value; query()">{{ label }}{{ value === 'all' ? '' : `（${job.counts?.[value] || 0}）` }}</el-button></nav>
       <div class="preview-main">
       <div class="workbench-toolbar"><strong>{{ job.file_name }}</strong><el-button :disabled="busy || active || pendingEdit" @click="changeFile">更换文件</el-button></div>
+      <div v-if="job.summary?.awaiting_parse" aria-label="账单解析信息">
+      <el-form v-if="previewContextVisible" inline label-position="top">
+        <el-form-item label="国家" required><el-select v-model="settings.country" aria-label="账单国家"><el-option v-for="c in options.countries" :key="c.code" :value="c.code" :label="c.name" /></el-select></el-form-item>
+        <el-form-item label="账单月份" required><el-date-picker v-model="settings.bill_month" type="month" value-format="YYYY-MM" aria-label="账单月份" /></el-form-item>
+      </el-form>
+        <el-button type="primary" :loading="busy" @click="beginPreview">{{ previewContextVisible ? '确认并解析' : '解析预览' }}</el-button>
+        <el-button :disabled="busy" @click="formatVisible = true">新增取数逻辑 / 修改已保存逻辑</el-button>
+        <p class="muted">文件已上传，点击解析预览时填写国家和账单月份。不会自动登记费用。</p>
+      </div>
       <p v-if="!cnyOriginal" class="muted">此批次为历史上传，继续沿用原登记规则；重新上传同一文件不会改变历史金额或币种。</p>
       <p v-else-if="!filePolicy" class="muted">本批金额统一为 CNY。确认登记明细时自动生成结算差额费用；更正或作废已登记明细时同步重算。仅上传或编辑预览不会登记费用。</p>
-      <div class="job-state" role="status"><span>{{ job.summary?.country || '国家识别中' }} · {{ job.summary?.bill_month || '月份识别中' }} · {{ states[job.status] || job.status }}</span><span v-if="active">{{ progressText }}</span><el-button link type="primary" :loading="busy" :disabled="pendingEdit" @click="refresh">刷新状态</el-button>
+      <el-alert v-if="job.summary?.mixed_warehouses" type="warning" :closable="false" show-icon :title="job.summary?.difference_state === 'confirmation_required' && !job.summary?.difference_allocation ? '混仓账单：明细按各自仓库登记；整单正差额保留待分配，不自动挂到任一仓库。' : '混仓账单：订单按 SaaS 已确认仓库归属，其他费用须逐项核对仓库；整单总额只核对一次。'" />
+      <section v-if="filePolicy && job.summary?.mixed_warehouses && job.summary?.difference_state === 'confirmation_required'" aria-label="混仓差额分配">
+        <p v-if="job.summary.difference_allocation">处理费差额已分配登记。<span v-for="item in job.summary.difference_allocation.allocations" :key="item.warehouse_id">{{ archiveLabel('warehouses', item.warehouse_id) }}：{{ item.amount }} CNY；</span></p>
+        <template v-else>
+          <p>请先登记全部明细，再按实际归属分配整单差额 {{ job.summary.processing_difference }} CNY。分配合计必须与差额一致。</p>
+          <template v-if="auth.hasPermission('finance.warehouse_fees.register')">
+            <label v-for="id in job.summary.warehouse_ids" :key="id">{{ archiveLabel('warehouses', id) }}<el-input v-model="allocationAmounts[id]" :aria-label="`仓库${id}差额金额`" placeholder="填写分配金额，不分配可留空" :disabled="busy || active || pendingEdit" /></label>
+            <el-input v-model="allocationReason" aria-label="差额分配依据" placeholder="分配依据（必填）" maxlength="500" :disabled="busy || active || pendingEdit" />
+            <el-checkbox v-model="allocationConfirmed" :disabled="busy || active || pendingEdit">已核对全部工作表、明细和差额归属</el-checkbox>
+            <el-button :disabled="!allocationConfirmed || !allocationReason.trim() || busy || active || pendingEdit" @click="confirmAllocation">确认分配并登记差额</el-button>
+          </template>
+        </template>
+      </section>
+      <div v-if="!job.summary?.awaiting_parse" class="job-state" role="status"><span>{{ job.summary?.country || '国家识别中' }} · {{ job.summary?.bill_month || '月份识别中' }} · {{ states[job.status] || job.status }}</span><span v-if="active">{{ progressText }}</span><el-button link type="primary" :loading="busy" :disabled="pendingEdit" @click="refresh">刷新状态</el-button>
       <el-button v-if="!active && !hasImported && ['ready', 'failed'].includes(job.status)" link type="primary" :disabled="busy || pendingEdit" aria-label="重新匹配本地订单" @click="reparse">重新解析并匹配本地订单</el-button>
-      <el-button v-if="filePolicy && !hasImported" link type="primary" :disabled="busy || active || pendingEdit" @click="formatVisible = true">配置／选择原文件格式</el-button></div>
+      <el-button v-if="filePolicy && !hasImported" link type="primary" :disabled="busy || active || pendingEdit" @click="formatVisible = true">新增取数逻辑 / 修改已保存逻辑</el-button></div>
       <el-alert v-if="job.error" :title="job.error" type="warning" :closable="false" show-icon />
       <el-alert v-if="job.summary?.settlement_summary_only" title="已读取业务结算清单，订单明细尚未重新解析；未分配金额已保留为待核对差额，不代表明细已全部核对。" type="info" :closable="false" show-icon />
       <p v-if="job.status === 'queued'" class="muted">等待后台解析，不占用页面。可关闭窗口，稍后从“最近上传”继续查看。</p>
@@ -52,7 +81,7 @@
       <section v-if="filePolicy" aria-label="原文件结算核对" class="file-contract">
         <p>采用规则：{{ job.summary?.applied_rule?.name || '待解析' }} · {{ job.summary?.bill_month || '月份待确认' }} · 金额按原数字 CNY 登记</p>
         <div class="file-formula" aria-label="处理费差额核对"><template v-for="(label, key, index) in { file_total: '结算总额', effective_order_total: '订单明细合计', effective_other_total: '其他费用（不含差额）', processing_difference: '处理费差额' }" :key="key"><span v-if="index">{{ index === 3 ? '=' : '−' }}</span><div><small>{{ label }}</small><strong :title="`原精度：${job.summary?.[key] ?? '缺失'}`">{{ money(job.summary?.[key]) }}</strong></div></template></div>
-        <p class="muted">原表处理费小计 {{ money(job.summary?.file_order_total) }} CNY，仅作核对参考。正处理费差额将在确认登记时自动计入其他处理费，名称为“处理费差额”；仅预览不登记。不按所选行或已登记金额计算，负差额保留待核对。</p>
+        <p class="muted">原表处理费小计 {{ money(job.summary?.file_order_total) }} CNY，仅作核对参考。单仓正处理费差额在确认登记时自动计入其他处理费；混仓差额须单独分配登记，名称为“处理费差额”；仅预览不登记。不按所选行或已登记金额计算，负差额保留待核对。</p>
         <el-alert v-for="item in (job.summary?.validation?.items || []).filter(i => i.level !== 'row')" :key="item.code" :title="item.message" :type="item.level === 'batch' ? 'error' : 'warning'" :closable="false" show-icon />
         <el-alert v-if="job.summary?.corrected_totals" title="预览金额已更正，处理费差额已按全部明细重算；原文件总额保留。" type="warning" :closable="false" />
         <el-collapse><el-collapse-item title="工作表覆盖与全部异常" name="coverage"><el-table :data="job.summary?.coverage || []"><el-table-column prop="sheet" label="工作表" min-width="150" /><el-table-column prop="kind" label="用途" width="110" /><el-table-column prop="count" label="提取" width="80" /><el-table-column prop="skipped" label="跳过" width="80" /><el-table-column prop="outside" label="范围外" width="90" /><el-table-column prop="reason" label="依据／说明" min-width="200" /></el-table><p>共 {{ job.summary?.validation?.count || 0 }} 项原文件异常；完整清单保留全部来源行。</p><el-button :disabled="busy" @click="downloadErrors">下载完整核对清单</el-button></el-collapse-item></el-collapse>
@@ -204,7 +233,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { ElMessageBox } from 'element-plus';
 import { requestApi, downloadApiFile } from '../api/request';
 import { useAuthStore } from '../stores/auth';
@@ -239,16 +268,19 @@ const feedback = ref(''), billInput = ref(null), previewTable = ref(null), editR
 const selectedRows = ref([]), batchField = ref('warehouse_id'), batchValue = ref(''), batchReason = ref(''), auditRows = reactive({});
 const filePolicy = computed(() => job.value?.overrides?.registration_mode === 'file_settlement_v2');
 const cnyOriginal = computed(() => filePolicy.value || job.value?.overrides?.registration_mode === 'cny_original_v1');
+const previewContextVisible = ref(false);
+const uploadIntent = ref('parse'), formatStart = ref(false), formatSelection = ref({});
 const formatVisible = ref(false), coverageConfirmed = ref(false), differenceConfirmed = ref(false), focusedRow = ref(null);
-const openFormatAfterParse = ref(false);
 const formatEditor = ref(null);
+const allocationAmounts = reactive({}), allocationReason = ref(''), allocationConfirmed = ref(false);
+watch(() => job.value?.id, () => { for (const key of Object.keys(allocationAmounts)) delete allocationAmounts[key]; allocationReason.value = ''; allocationConfirmed.value = false; });
 const selectedAmount = computed(() => warehouseMoneyTotal(selectedRows.value.map(row => row.data.amount)));
 const blocking = computed(() => Boolean(job.value?.summary?.validation?.blocking));
 const requiresDifference = computed(() => job.value?.summary?.difference_state === 'confirmation_required');
 const selectedValid = computed(() => selectedRows.value.length && selectedRows.value.every(r => ['valid', 'created', 'existing'].includes(r.status)));
 const canConfirmFile = computed(() => filePolicy.value && !active.value && !busy.value && !pendingEdit.value && !blocking.value && coverageConfirmed.value && (!requiresDifference.value || differenceConfirmed.value) && selectedValid.value && auth.hasPermission('finance.warehouse_fees.register'));
 const canSaveDrafts = computed(() => filePolicy.value && !active.value && !busy.value && !pendingEdit.value && selectedValid.value && !job.value?.summary?.correction_warning && canImport());
-const settings = reactive({ country: '', bill_month: '', currency: '', warehouses: {}, stores: {}, format_config: null, format_rule_id: null, warehouse_id: null });
+const settings = reactive({ country: '', bill_month: '', currency: '', order_warehouse:false, warehouses: {}, stores: {}, format_config: null, format_rule_id: null, format_rule_version:null, warehouse_id: null });
 const active = computed(() => ['queued', 'parsing', 'import_queued', 'importing'].includes(job.value?.status));
 const hasImported = computed(() => Boolean(job.value?.counts?.created || job.value?.counts?.existing));
 const hasMappings = computed(() => (filePolicy.value ? ['warehouses'] : ['warehouses', 'stores']).some(group => job.value?.summary?.unresolved?.[group]?.length));
@@ -322,13 +354,14 @@ async function loadAudit(row) {
 }
 async function canLeave() {
   if (busy.value) return false;
-  if (formatVisible.value && formatEditor.value && !await formatEditor.value.canLeave()) return false;
+  if ((formatVisible.value || formatStart.value) && formatEditor.value && !await formatEditor.value.canLeave()) return false;
   if (!formatVisible.value && dirty.value) {
     try { await ElMessageBox.confirm('本账单有未保存的修正，是否放弃修改？已保存修正不受影响。', '未保存的修改'); } catch { return false; }
   }
   cancelEdit(); clearSelection(); return true;
 }
-async function closeFormat() { if (!busy.value && (!formatEditor.value?.canLeave || await formatEditor.value.canLeave())) formatVisible.value = false; }
+async function closeFormat() { if (!busy.value && (!formatEditor.value?.canLeave || await formatEditor.value.canLeave())) { formatVisible.value = false; formatStart.value = false; } }
+async function chooseFormatFile() { if (!active.value && await canLeave()) chooseFile('format'); }
 function beforeUnload(event) { if (dirty.value) { event.preventDefault(); event.returnValue = ''; } }
 defineExpose({ canLeave });
 async function api(config) {
@@ -347,10 +380,10 @@ function schedule() {
   if (!disposed && active.value) timer = setTimeout(refresh, 2500);
 }
 function setSettings(value = {}) {
-  Object.assign(settings, { country: value.country || '', bill_month: value.bill_month || '', currency: value.currency || '', warehouses: { ...value.warehouses }, stores: { ...value.stores }, format_config:value.format_config || null, format_rule_id:value.format_rule_id || null, warehouse_id:value.warehouse_id || null });
+  Object.assign(settings, { order_warehouse:Boolean(value.order_warehouse), country: value.country || '', bill_month: value.bill_month || '', currency: value.currency || '', warehouses: { ...value.warehouses }, stores: { ...value.stores }, format_config:value.format_config || null, format_rule_id:value.format_rule_id || null, format_rule_version:value.format_rule_version || null, warehouse_id:value.warehouse_id || null });
 }
 function supplied() {
-  return { ...Object.fromEntries(['country', 'bill_month', 'currency', 'format_config', 'format_rule_id', 'warehouse_id'].filter(k => settings[k]).map(k => [k, settings[k]])),
+  return { ...Object.fromEntries(['order_warehouse', 'country', 'bill_month', 'currency', 'format_config', 'format_rule_id', 'format_rule_version', 'warehouse_id'].filter(k => settings[k]).map(k => [k, settings[k]])),
     warehouses: Object.fromEntries(Object.entries(settings.warehouses).filter(([, v]) => v)), stores: Object.fromEntries(Object.entries(settings.stores).filter(([, v]) => v)) };
 }
 function mappingOptions(group) { return (props.options[group] || []).filter(x => !job.value?.summary?.country || x.country === job.value.summary.country); }
@@ -363,9 +396,6 @@ async function readCurrent() {
   const finished = result.status === 'completed' && job.value.status !== 'completed';
   job.value = result;
   focusedRow.value = result.results?.find(row => row.number === focusedRow.value?.number) || result.results?.find(row => row.status === 'error') || result.results?.[0] || null;
-  if (openFormatAfterParse.value && filePolicy.value && ['ready', 'failed'].includes(result.status)) {
-    formatVisible.value = true; openFormatAfterParse.value = false;
-  }
   history.value = history.value.map(item => item.id === result.id ? { ...item, status: result.status } : item);
   if (finished) emit('imported');
 }
@@ -376,24 +406,32 @@ async function upload(event) {
   if (!file || busy.value || active.value || pendingEdit.value || !canImport()) return;
   if (!file.name.toLowerCase().endsWith('.xlsx') || file.size > 128 * 1024 * 1024) { error.value = '请选择不超过128MB的原始xlsx账单。'; return; }
   await run(async () => {
-    const data = new FormData(); data.append('file', file); data.append('options', JSON.stringify({ registration_mode: 'file_settlement_v2' }));
+    const data = new FormData(); data.append('file', file); data.append('defer_parse', 'true'); data.append('options', JSON.stringify({ registration_mode: 'file_settlement_v2', saved_rules_only: true, order_warehouse:true }));
+    previewContextVisible.value = false;
     uploadPercent.value = 0;
     job.value = await api({ method: 'post', url: BASE, data, timeout: 300000, onUploadProgress: p => { if (p.total) uploadPercent.value = Math.round(p.loaded / p.total * 100); } });
     coverageConfirmed.value = false; differenceConfirmed.value = false; formatVisible.value = false; focusedRow.value = null;
     historyId.value = job.value.id; page.value = 1; rowStatus.value = ''; rowKind.value = ''; validOnly.value = false;
-    setSettings(job.value.overrides); await readCurrent(); await loadHistory();
+    setSettings(job.value.overrides);
+    await readCurrent(); await loadHistory();
+    if (!active.value && !hasImported.value) {
+      job.value = {...job.value, summary:{...job.value.summary, awaiting_parse:true}, overrides:{...job.value.overrides, order_warehouse:true, country:'', bill_month:''}};
+      setSettings(job.value.overrides);
+    }
+    formatStart.value = false;
+    formatVisible.value = uploadIntent.value === 'format' && filePolicy.value && !active.value && !hasImported.value;
   });
   event.target.value = '';
 }
 function focusRow(row) { if (!busy.value && !pendingEdit.value) focusedRow.value = row; }
-function chooseFile(configure) { openFormatAfterParse.value = configure; billInput.value?.click(); }
+function chooseFile(intent = 'parse') { uploadIntent.value = intent; billInput.value?.click(); }
 async function changeFile() {
   if (active.value || !await canLeave()) return;
-  ++requestId; clearTimeout(timer); job.value = null; focusedRow.value = null; historyId.value = ''; error.value = ''; feedback.value = ''; openFormatAfterParse.value = false;
+  ++requestId; clearTimeout(timer); formatStart.value = false; formatVisible.value = false; formatSelection.value = {}; job.value = null; focusedRow.value = null; historyId.value = ''; error.value = ''; feedback.value = '';
 }
 async function selectHistory(id) {
   if (pendingEdit.value) return;
-  openFormatAfterParse.value = false;
+
   await run(async () => {
     coverageConfirmed.value = false; differenceConfirmed.value = false; formatVisible.value = false; focusedRow.value = null;
     ++requestId; job.value = { id }; page.value = 1; validOnly.value = false; rowStatus.value = ''; rowKind.value = '';
@@ -401,8 +439,13 @@ async function selectHistory(id) {
     feedback.value = ''; await readCurrent(); setSettings(job.value.overrides);
   });
 }
+async function beginPreview() {
+  if (!previewContextVisible.value) { previewContextVisible.value = true; return; }
+  await reparse();
+}
 async function reparse() {
   if (!job.value || active.value || hasImported.value || pendingEdit.value) return;
+  if (settings.order_warehouse && (!settings.country || !settings.bill_month)) { error.value = '请先填写国家和账单月份。'; return; }
   await run(async () => {
     job.value = await api({ method: 'post', url: BASE + job.value.id + '/', data: { operation: 'parse', version: job.value.version, options: supplied() } });
     page.value = 1; validOnly.value = false; rowStatus.value = ''; await readCurrent();
@@ -417,16 +460,26 @@ async function applyFormat(options) {
   if (busy.value || active.value || hasImported.value || pendingEdit.value) return;
   await run(async () => {
     job.value = await api({ method:'post', url:BASE + job.value.id + '/', data:{ operation:'parse', version:job.value.version, options } });
+    setSettings(job.value.overrides);
     coverageConfirmed.value = false; differenceConfirmed.value = false; formatVisible.value = false; page.value = 1; await readCurrent();
   });
 }
 async function confirmFile() {
   if (!canConfirmFile.value) return;
   const numbers = selectedRows.value.map(r => r.number);
-  try { await ElMessageBox.confirm(`仅登记所选 ${numbers.length} 行${requiresDifference.value ? '，并生成一条“处理费差额”其他处理费' : ''}。不会登记未选择行，也不会发起付款。`, '确认原文件费用'); } catch { return; }
+  try { await ElMessageBox.confirm(`仅登记所选 ${numbers.length} 行${requiresDifference.value ? (job.value.summary.mixed_warehouses ? '，混仓差额须另行分配登记' : '，并生成一条“处理费差额”其他处理费') : ''}。不会登记未选择行，也不会发起付款。`, '确认原文件费用'); } catch { return; }
   await run(async () => {
     job.value = { ...job.value, ...await api({ method:'post', url:BASE + job.value.id + '/', data:{ operation:'register', version:job.value.version, rows:numbers, coverage_confirmed:coverageConfirmed.value, difference_confirmed:differenceConfirmed.value } }) };
     clearSelection(); await readCurrent(); emit('imported'); feedback.value = '所选费用已登记，补差按文件唯一标识核对。';
+  });
+}
+async function confirmAllocation() {
+  if (!allocationConfirmed.value || !allocationReason.value.trim() || !auth.hasPermission('finance.warehouse_fees.register') || busy.value || active.value || pendingEdit.value) return;
+  const allocations = (job.value.summary.warehouse_ids || []).filter(id => String(allocationAmounts[id] || '').trim() && Number(allocationAmounts[id]) !== 0).map(id => ({ warehouse_id:id, amount:String(allocationAmounts[id]).trim() }));
+  try { await ElMessageBox.confirm(`将登记整单处理费差额 ${job.value.summary.processing_difference} CNY，请确认仓库分配和依据。`, '确认混仓差额'); } catch { return; }
+  await run(async () => {
+    await api({ method:'post', url:BASE + job.value.id + '/', data:{ operation:'allocate_difference', version:job.value.version, allocations, reason:allocationReason.value, coverage_confirmed:true, difference_confirmed:true } });
+    allocationConfirmed.value = false; await readCurrent(); emit('imported'); feedback.value = '混仓处理费差额已按确认分配登记。';
   });
 }
 async function saveSelectedDrafts() {
