@@ -476,6 +476,21 @@ def test_outreach_task_list_returns_existing_rows():
     assert [row["id"] for row in payload["results"]] == [task.id]
 
 
+def test_list_page_sizes_allow_200_without_raising_the_target_list_limit():
+    tenant = Tenant.objects.create(name="Page sizes", code="influencer-page-sizes")
+    user, client = user_with_permissions(
+        tenant, "page-size-viewer", "influencers.view",
+        "influencers.outreach.view", "influencers.fulfillment.view",
+    )
+    _, _, task = base_records(tenant, user, "page-size")
+    root = "/api/internal/influencers/"
+    for url in (root, root + "outreach-tasks/", root + "sample-fulfillments/"):
+        for page_size in (20, 50, 100, 200):
+            assert client.get(url, {"page_size": page_size}).status_code == 200
+        assert client.get(url, {"page_size": 201}).status_code == 400
+    assert client.get(root + f"outreach-tasks/{task.pk}/targets/", {"page_size": 200}).status_code == 400
+
+
 def test_outreach_multiselect_intersection_before_pagination():
     tenant = Tenant.objects.create(name="Multi", code="task-multi")
     user, client = user_with_permissions(tenant, "multi-viewer", "influencers.outreach.view")

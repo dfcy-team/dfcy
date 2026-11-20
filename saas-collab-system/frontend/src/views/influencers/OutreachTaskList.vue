@@ -129,9 +129,11 @@
         v-if="visibleTotal"
         v-model:current-page="page"
         v-model:page-size="pageSize"
+        :page-sizes="[20, 50, 100, 200]"
         :total="visibleTotal"
-        layout="total, prev, pager, next"
+        layout="total, sizes, prev, pager, next"
         @current-change="load"
+        @size-change="applyFilters"
       />
     </el-card>
 

@@ -136,13 +136,13 @@ def _require_blacklist_scope(user):
         require_all_scope(user, permission_code)
 
 
-def _pagination(request):
+def _pagination(request, *, max_page_size=100):
     try:
         page = int(request.query_params.get("page", 1))
         page_size = int(request.query_params.get("page_size", 20))
     except ValueError as exc:
         raise ValidationError("Pagination values must be integers.") from exc
-    if page < 1 or page_size < 1 or page_size > 100:
+    if page < 1 or page_size < 1 or page_size > max_page_size:
         raise ValidationError("Invalid pagination range.")
     return page, page_size
 
@@ -387,7 +387,7 @@ class InfluencerCollectionView(ScopedInfluencerView):
             raise ValidationError({"ordering": "Unsupported ordering field."})
         queryset = queryset.order_by(ordering, "-id")
         queryset = filter_queryset(request.user, queryset, self.read_permission_code)
-        page, page_size = _pagination(request)
+        page, page_size = _pagination(request, max_page_size=200)
         return success_response(paginated_data(
             request,
             queryset,
@@ -936,7 +936,7 @@ class OutreachTaskCollectionView(ScopedInfluencerView):
             ordering = "-_priority_rank" if ordering.startswith("-") else "_priority_rank"
         queryset = queryset.order_by(ordering, "-id")
         queryset = filter_queryset(request.user, queryset, self.read_permission_code)
-        page, page_size = _pagination(request)
+        page, page_size = _pagination(request, max_page_size=200)
         return success_response(paginated_data(request, queryset, OutreachTaskSerializer, page=page, page_size=page_size, serializer_context={"request": request}))
 
     def post(self, request):
@@ -1514,7 +1514,7 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
                 fields = ("_without_task", *fields)
             queryset = queryset.order_by(*fields)
         queryset = filter_queryset(request.user, queryset, self.read_permission_code)
-        page, page_size = _pagination(request)
+        page, page_size = _pagination(request, max_page_size=200)
         return success_response(paginated_data(request, queryset, SampleFulfillmentSerializer, page=page, page_size=page_size))
 
     def post(self, request):

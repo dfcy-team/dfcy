@@ -126,7 +126,7 @@
           </template>
         </el-table-column>
       </el-table>
-      <el-pagination v-if="total" v-model:current-page="page" v-model:page-size="pageSize" :total="total" layout="total, prev, pager, next" @current-change="load" />
+      <el-pagination v-if="total" v-model:current-page="page" v-model:page-size="pageSize" :page-sizes="[20, 50, 100, 200]" :total="total" layout="total, sizes, prev, pager, next" @current-change="load" @size-change="applyFilters" />
     </el-card>
 
     <el-dialog v-model="visible" class="sample-dialog" width="min(900px, 94vw)" @closed="discardDraft">
