@@ -43,6 +43,7 @@ def test_batch_waits_then_sends_one_clear_summary_per_recipient(shop):
         platform_id='old', status='failed', absence_evidence={'absent': True})
     Intent.objects.create(tenant=user.tenant, task=tasks[0], store=tasks[0].store, slot_id='1',
         platform_id='new', status='succeeded', target={'start_time': 1794888000, 'end_time': 1794895200},
+        items=[{'item_id': '1'}, {'item_id': '2'}],
         result={'execution_attempt': 1, 'specifications': [{'state': 'enabled'}, {'state': 'rejected'}]})
     Intent.objects.create(tenant=user.tenant, task=tasks[1], store=tasks[1].store, slot_id='2',
         platform_id='failed', status='failed', absence_evidence={'absent': True},
@@ -67,7 +68,7 @@ def test_batch_waits_then_sends_one_clear_summary_per_recipient(shop):
     assert 'Summary shop 2' not in text and 'Summary shop 3' not in text
     assert '第 1 次重试成功' in text and '重建重试：3 次' in text
     assert '失败活动已全部清理' in text and '活动价高于近七天最低价' in text
-    assert '活动时段：' in text and '规格结果：已参加 1，平台拒绝 1' in text
+    assert '活动时段：' in text and '规格结果：目标 2，已确认参加 1，平台拒绝 1' in text
     assert f'&batch={batch.id}' in text
     assert 'Summary shop 2' in messages[f'synthetic-{other.id}']
     assert 'Summary shop 0' not in messages[f'synthetic-{other.id}']

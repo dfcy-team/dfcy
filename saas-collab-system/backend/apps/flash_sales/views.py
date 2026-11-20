@@ -90,6 +90,7 @@ def batch_data(batch, store_ids, *, include_intents=True):
             "date_from": task.snapshot.get("date_from"), "date_to": task.snapshot.get("date_to"),
             "status": task.status, "message": task.message, "requested": task.requested, "completed": task.completed,
             "started_at": task.started_at, "finished_at": task.finished_at, "retry_count": task.retry_count,
+            "recovery_pending": bool(task.state.get("recovery_pending")),
             "retry_paused": bool(task.state.get("retry_paused")), "no_progress_count": task.state.get("no_progress_count", 0),
             "retry_pause_reason": task.state.get("retry_pause_reason", ""),
             "next_attempt_at": task.next_attempt_at, **task_timing(task, now), "waiting_ms": task.waiting_ms,
@@ -266,11 +267,35 @@ class BatchDetail(FlashView):
 
     def post(self, request, pk):
         batch = get_object_or_404(Batch, pk=pk, tenant=request.user.tenant)
-        require_stores(request.user, list(batch.tasks.values_list("store_id", flat=True)), "execute")
+        action = request.data.get("action")
+        selected_task = None
+        if action in {"resume", "reconcile", "recover"} and "task_id" in request.data:
+            if type(request.data["task_id"]) is not int:
+                raise ValidationError("请选择有效的原任务。")
+            selected_task = get_object_or_404(StoreTask, pk=request.data["task_id"], batch=batch, tenant=request.user.tenant)
+            require_stores(request.user, [selected_task.store_id], "execute")
+        else:
+            require_stores(request.user, list(batch.tasks.values_list("store_id", flat=True)), "execute")
+        if action == "recover":
+            if selected_task is None:
+                raise ValidationError("请选择需要按异常流程处理的店铺记录。")
+            from .engine import recover_failed
+            recovered = recover_failed(selected_task.id)
+            audit(request.user, "flash_exception_recovery_requested", recovered)
+            return success_response({"id": str(recovered.batch_id), "task_id": recovered.id})
         if request.data.get("action") == "stop":
             request_stop(batch)
             audit(request.user, "flash_stop_requested", batch)
         elif request.data.get("action") == "reconcile":
+            if selected_task and selected_task.status == "failed" and selected_task.state.get("recovery_pending"):
+                from .engine import reconcile_failed
+                from .provider import Deferred
+                try:
+                    reconcile_failed(selected_task.id)
+                except Deferred as exc:
+                    raise ValidationError(f"只读核对尚未完成：{exc}；请在等待期后重试，原保护保留。") from exc
+                audit(request.user, "flash_failed_readonly_reconcile", selected_task)
+                return success_response({"id": str(batch.id)})
             tasks = StoreTask.objects.filter(batch=batch, status__in={"waiting", "confirming"})
             if "task_id" in request.data:
                 if type(request.data["task_id"]) is not int:

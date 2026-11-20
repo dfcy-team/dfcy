@@ -347,3 +347,9 @@ it('saves a time point before selecting shops and displays plan dimensions', asy
   expect(bodies).toHaveLength(1);expect(bodies[0].store_ids).toEqual([]);
   expect(w.text()).toContain('执行店铺');expect(w.text()).toContain('下次执行');
 });
+it('offers read-only cleanup verification on a failed protected store task', async () => {
+  api.flashRequest.mockResolvedValue({id:'protected',operation:'run',tasks:[{id:42,store_name:'店一',status:'failed',recovery_pending:true}],notifications:[]});
+  const w=render(FlashBatchDialog,{batchId:'protected',canExecute:true});await flushPromises();
+  await button(w,'只读核对清理结果');
+  expect(api.flashRequest).toHaveBeenCalledWith('batches/protected/','post',{action:'reconcile',task_id:42});
+});

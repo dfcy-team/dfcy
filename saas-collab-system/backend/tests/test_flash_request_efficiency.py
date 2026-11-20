@@ -122,10 +122,12 @@ def test_pacing_uses_four_seconds_and_eight_after_cooldown(shop):
     with patch('apps.flash_sales.provider.timezone.now', return_value=now), patch('apps.flash_sales.provider.time.sleep'):
         adapter._pace('synthetic', shop='11', endpoint='get_shop_flash_sale_list')
         assert AppPacer.objects.get(pk=key).next_request_at == now + timedelta(seconds=4)
-        AppPacer.objects.filter(pk=key).update(next_request_at=now)
+        AppPacer.objects.all().update(next_request_at=now)
         AppPacer.objects.create(key=scope, next_request_at=now-timedelta(seconds=1))
         adapter._pace('synthetic', shop='11', endpoint='get_shop_flash_sale_list')
-        assert AppPacer.objects.get(pk=key).next_request_at == now + timedelta(seconds=8)
+        assert AppPacer.objects.get(pk=key).next_request_at == now + timedelta(seconds=4)
+        local = hashlib.sha256(b'shopee:pace:synthetic:11:get_shop_flash_sale_list').hexdigest()
+        assert AppPacer.objects.get(pk=local).next_request_at == now + timedelta(seconds=8)
     later = now + timedelta(seconds=121)
     with patch('apps.flash_sales.provider.timezone.now', return_value=later):
         adapter._pace('synthetic', shop='11', endpoint='get_shop_flash_sale_list')

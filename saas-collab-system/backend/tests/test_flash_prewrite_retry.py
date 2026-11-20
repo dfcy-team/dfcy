@@ -64,7 +64,7 @@ def test_shared_cooldown_does_not_consume_prewrite_retries(shop, monkeypatch):
     assert task.retry_count == 0 and not task.state.get('prewrite_read_failures')
 
 
-def test_submitted_write_is_never_failed_or_unlocked_as_a_read_failure(shop, monkeypatch):
+def test_submitted_write_finishes_failed_but_keeps_unknown_write_protection(shop, monkeypatch):
     user, store, _ = shop
     configured(shop)
     task = submit(user, request_id='prewrite-uncertain', store_ids=[store.id]).tasks.get()
@@ -73,9 +73,10 @@ def test_submitted_write_is_never_failed_or_unlocked_as_a_read_failure(shop, mon
     def limited(*args):
         raise Deferred('读取核对限流', retry_after=300)
     monkeypatch.setattr(engine, 'step', limited)
-    for _ in range(3):
+    for _ in range(4):
         run_due(task)
-    assert task.state['retry_paused'] and not task.finished_at
+    assert task.status == 'failed' and task.finished_at and task.state['recovery_pending']
+    assert not task.state.get('prewrite_read_failures')
     assert StoreLock.objects.get(store=store).task_id == task.id
     intent.refresh_from_db()
     assert intent.reservation_key == 'uncertain'

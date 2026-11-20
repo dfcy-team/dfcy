@@ -56,6 +56,10 @@ def test_stop_preserves_tasks_requiring_reconciliation(shop, protection):
     assert response.status_code == 200
     task.refresh_from_db()
     batch.refresh_from_db()
+    if protection == "retry_paused":
+        assert task.status == "stopped" and task.finished_at
+        assert batch.finished_at and not StoreLock.objects.filter(task=task).exists()
+        return
     assert task.status == "queued" and task.finished_at is None
     assert batch.stop_requested and batch.finished_at is None
     assert StoreLock.objects.filter(task=task).exists()

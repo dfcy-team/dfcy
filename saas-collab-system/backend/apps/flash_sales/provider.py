@@ -16,7 +16,7 @@ from apps.integrations.net_guard import PlatformHttpClient
 from apps.integrations.oauth_errors import OAuthFlowError, OAUTH_RATE_LIMITED
 from apps.integrations.production_settings import get_runtime_platform_config
 from apps.integrations.security import sanitize_text
-from .domain import normalize_items
+from .domain import digest, normalize_items
 from .models import AppPacer, StoreTask, TenantControl
 from .services import authorized_store
 
@@ -67,17 +67,43 @@ class ShopeeAdapter:
         cooldown = AppPacer.objects.filter(pk__in=scopes, next_request_at__gt=now).order_by("-next_request_at").first()
         if cooldown:
             raise SharedCooldown(scopes[cooldown.pk], retry_after=int((cooldown.next_request_at - now).total_seconds()) + 1)
-        # Resume conservatively for two minutes after this scope's cooldown.
-        interval = 8 if AppPacer.objects.filter(pk__in=scopes, next_request_at__gt=now - timedelta(seconds=120)).exists() else 4
+        # Retain the existing conservative application ceiling; a shop cooldown
+        # slows only that shop/endpoint, not every caller sharing the partner.
+        app_cooldown = hashlib.sha256(f"shopee:cooldown:{partner}:app".encode()).hexdigest()
+        recent = set(AppPacer.objects.filter(pk__in=scopes,
+            next_request_at__gt=now-timedelta(seconds=120)).values_list("pk", flat=True))
+        app_interval = 8 if app_cooldown in recent else 4
+        interval = 8 if recent else 4
         key = hashlib.sha256(f"shopee:pace:{partner}".encode()).hexdigest()
-        AppPacer.objects.get_or_create(key=key, defaults={"next_request_at": now})
+        shop_key = hashlib.sha256(f"shopee:pace:{partner}:{shop}:{endpoint}".encode()).hexdigest() if shop is not None and endpoint is not None else key
+        for value in sorted({key, shop_key}):
+            AppPacer.objects.get_or_create(key=value, defaults={"next_request_at": now})
+        local_wait = 0
         with transaction.atomic():
-            pacer = AppPacer.objects.select_for_update().get(pk=key)
-            delay = max(0, (pacer.next_request_at - now).total_seconds())
-            if delay > 8:
-                raise SharedCooldown("应用请求排队等待", retry_after=int(delay) + 1)
-            pacer.next_request_at = max(now, pacer.next_request_at) + timedelta(seconds=interval)
-            pacer.save(update_fields=["next_request_at"])
+            rows = {row.pk: row for row in AppPacer.objects.select_for_update().filter(pk__in={key, shop_key}).order_by("pk")}
+            pacer, local = rows[key], rows[shop_key]
+            delay = max(0, (pacer.next_request_at-now).total_seconds())
+            local_delay = max(0, (local.next_request_at-now).total_seconds())
+            if shop_key != key and local_delay > delay:
+                if local_delay > 8:
+                    raise SharedCooldown("该店铺此接口请求排队等待", retry_after=int(local_delay)+1)
+                local_wait = local_delay
+            else:
+                if delay > 8:
+                    raise SharedCooldown("应用请求排队等待", retry_after=int(delay)+1)
+                scheduled = max(now, pacer.next_request_at)
+                pacer.next_request_at = scheduled + timedelta(seconds=app_interval)
+                pacer.save(update_fields=["next_request_at"])
+                if shop_key != key:
+                    local.next_request_at = scheduled + timedelta(seconds=interval)
+                    local.save(update_fields=["next_request_at"])
+        if local_wait:
+            # Release database locks and leave app capacity available to other shops.
+            # Keep the caller's current page instead of restarting its whole read.
+            time.sleep(local_wait)
+            if self.guard:
+                self.guard()
+            return self._pace(partner, shop=shop, endpoint=endpoint)
         if delay:
             time.sleep(delay)
 
@@ -171,6 +197,41 @@ class ShopeeAdapter:
             raise (UnknownWrite if write else Deferred)("平台响应缺少结果")
         return payload["response"]
 
+    def _read_page(self, endpoint, query):
+        # Only sync jobs attach this checkpoint. Write verification always reads fresh.
+        checkpoint = getattr(self, "read_checkpoint", None)
+        if checkpoint is None:
+            return self.call(endpoint, query=query)
+        scope = digest({"endpoint": endpoint, **{key: value for key, value in query.items() if key != "offset"}})
+        state = checkpoint.setdefault(scope, {"pages": {}, "saved_at": time.time()})
+        if time.time() - state["saved_at"] > 600:
+            state.update(pages={}, saved_at=time.time())
+        offset = str(query["offset"])
+        if offset != "0" and offset in state["pages"]:
+            return state["pages"][offset]
+        data = self.call(endpoint, query=query)
+        # Re-read the first page on every resumed pass; changed data invalidates its pages.
+        if offset == "0" and state["pages"].get("0") != data:
+            state.update(pages={}, saved_at=time.time())
+        field = "flash_sale_list" if endpoint == "get_shop_flash_sale_list" else "item_info"
+        page, total = data.get(field), data.get("total_count")
+        if page is None and field == "flash_sale_list" and total == 0:
+            page = []
+        if isinstance(page, list) and type(total) is int and total >= 0 and query["offset"] + len(page) <= total:
+            state["pages"][offset] = data
+            self.save_read_checkpoint()
+        else:
+            self._clear_read_checkpoint()
+        return data
+
+    def _clear_read_checkpoint(self, scope=None):
+        if getattr(self, "read_checkpoint", None):
+            if scope is None:
+                self.read_checkpoint.clear()
+            else:
+                self.read_checkpoint.pop(scope, None)
+            self.save_read_checkpoint()
+
     def activities(self, *, window=None, kinds=(1, 2, 3)):
         seen, pages = set(), 0
         def collect(kind, window=None):
@@ -181,13 +242,14 @@ class ShopeeAdapter:
             rows, expected = {}, None
             offset = 0
             while True:
-                data = self.call("get_shop_flash_sale_list", query={**query, "offset": offset})
+                data = self._read_page("get_shop_flash_sale_list", {**query, "offset": offset})
                 page = data.get("flash_sale_list")
                 total = data.get("total_count")
                 if page is None and total == 0:
                     page = []
                 if (not isinstance(page, list) or type(total) is not int or total < 0
                         or offset + len(page) > total or (expected is not None and total != expected)):
+                    self._clear_read_checkpoint()
                     raise Deferred("活动分页结果不完整，保留原缓存")
                 expected = total
                 for row in page:
@@ -195,10 +257,11 @@ class ShopeeAdapter:
                     seen.add(str(row["flash_sale_id"]))
                 pages += 1
                 if getattr(self, "progress", None):
-                    self.progress(f"正在读取活动列表：本轮已读取 {len(seen)} 条活动，完成 {pages} 次分页请求")
+                    self.progress(f"正在读取活动列表：本轮已核对 {len(seen)} 条活动，处理 {pages} 页")
                 offset += len(page)
                 if offset == total:
                     if len(rows) != total:
+                        self._clear_read_checkpoint()
                         raise Deferred("活动分页存在重复或缺失，保留原缓存")
                     return rows
                 if not page:
@@ -219,12 +282,14 @@ class ShopeeAdapter:
                         rows = collect(kind, (start, middle))
                         rows.update(collect(kind, (middle, end)))
                     if len(rows) != total:
+                        self._clear_read_checkpoint()
                         raise Deferred("活动分页时间区间核对不一致，保留原缓存")
                     return rows
 
         rows = {}
         for kind in kinds:
             rows.update(collect(kind, window))
+        self._clear_read_checkpoint()
         return list(rows.values())
 
     def candidate_activities(self, checkpoint, save):
@@ -273,16 +338,23 @@ class ShopeeAdapter:
 
     def items(self, activity_id):
         rows, models, offset = [], [], 0
+        expected = None
         while True:
-            data = self.call("get_shop_flash_sale_items", query={"flash_sale_id": int(activity_id), "offset": offset, "limit": 100})
+            data = self._read_page("get_shop_flash_sale_items", {"flash_sale_id": int(activity_id), "offset": offset, "limit": 100})
             page, total = data.get("item_info"), data.get("total_count")
-            if not isinstance(page, list) or type(total) is not int or offset + len(page) > total:
+            if (not isinstance(page, list) or type(total) is not int or offset + len(page) > total
+                    or (expected is not None and total != expected)):
+                self._clear_read_checkpoint()
                 raise Deferred("活动商品分页结果不完整")
+            expected = total
             rows.extend(page)
             models.extend(data.get("models") or [])
             offset += len(page)
             if offset == total:
-                return normalize_items(rows, models)
+                result = normalize_items(rows, models)
+                self._clear_read_checkpoint(digest({"endpoint": "get_shop_flash_sale_items",
+                    "flash_sale_id": int(activity_id), "limit": 100}))
+                return result
             if not page or offset > 100000:
                 raise Deferred("活动商品分页未完成")
 
@@ -292,7 +364,10 @@ class ShopeeAdapter:
 
     def detail(self, activity_id):
         try:
-            return self.call("get_shop_flash_sale", query={"flash_sale_id": int(activity_id)})
+            detail = self.call("get_shop_flash_sale", query={"flash_sale_id": int(activity_id)})
+            if not isinstance(detail, dict) or any(key not in detail for key in ("timeslot_id", "start_time", "end_time", "status")):
+                raise UnknownWrite("活动详情不完整，不能据此确认不存在或清理成功")
+            return detail
         except Rejected as exc:
             if exc.code == "shop_flash_sale_not_exist":
                 return None
