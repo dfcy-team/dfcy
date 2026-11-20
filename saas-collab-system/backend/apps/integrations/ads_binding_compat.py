@@ -13,6 +13,21 @@ from .production_settings import (
 )
 from .models import marketplace_authorization_api_type
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+
+_read_proofs = ContextVar("workspace_ads_digest_proofs", default=None)
+
+
+@contextmanager
+def workspace_digest_scope():
+    token = _read_proofs.set({})
+    try:
+        yield
+    finally:
+        _read_proofs.reset(token)
+
+
 UNRELATED_PLATFORM_FIELDS = frozenset({
     "creator_query_bindings", "affiliate_seller_creator_scope",
     "affiliate_seller_creator_read_approved", "auto_refresh_bindings",
@@ -59,6 +74,16 @@ def _historical_platform(version):
 
 def accepts_bound_session_digest(config, stored_digest):
     """Accept an exact current digest, or prove a narrowly compatible Ads-era digest."""
+    cache = _read_proofs.get()
+    if cache is None:
+        return _check_digest(config, stored_digest)
+    key = (config.tenant_id, config.pk, stored_digest)
+    if key not in cache:
+        cache[key] = _check_digest(config, stored_digest)
+    return cache[key]
+
+
+def _check_digest(config, stored_digest):
     try:
         current_version = get_effective_runtime_version()
         if not runtime_snapshot().get("valid"):

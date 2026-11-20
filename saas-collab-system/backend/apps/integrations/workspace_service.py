@@ -91,7 +91,7 @@ def _api_type(config, raw_config):
     value = str(raw_config.get("api_type") or config.platform_config.get("api_type") or "").strip()
     if value:
         return value
-    return "inventory" if config.platform == "jifeng_wms" else "marketplace"
+    return "inventory" if config.platform in {"jifeng_wms", "best_ecapi"} else "marketplace"
 
 
 def _masked_fingerprint(value):
@@ -397,7 +397,7 @@ def _last_success_by_job(runs):
     return {job_id: item[1] for job_id, item in selected.items()}
 
 
-def _workspace_rows(user):
+def _workspace_rows(user, *, run_list_only=False):
     all_configs = list(
         filter_integration_configs(
             user,
@@ -427,7 +427,6 @@ def _workspace_rows(user):
         )
     )
     job_ids = [job.id for job in jobs]
-    checkpoints = _checkpoint_map(job_ids)
     stores, warehouse_auth, warehouse_master = _subject_maps(jobs, config_ids)
     runs = filter_sync_runs(
             user,
@@ -436,6 +435,21 @@ def _workspace_rows(user):
             ),
             "integrations.view",
         )
+    if run_list_only:
+        job_rows = {}
+        for job in jobs:
+            subject = _subject(job, stores, warehouse_auth, warehouse_master)
+            job_rows[job.id] = {
+                **subject,
+                "subject_key": f'{subject["subject_type"]}:{subject.get("store_id") or subject.get("warehouse_id") or job.id}',
+                "integration_config_id": job.integration_config_id,
+                "environment": job.integration_config.environment,
+                "platform": job.integration_config.platform,
+                "resource_type": job.resource_type,
+                "api_type": _api_type(job.integration_config, config_raw.get(job.integration_config_id, {})),
+            }
+        return configs, config_raw, jobs, job_rows, runs, warehouse_auth
+    checkpoints = _checkpoint_map(job_ids)
     # Sort only narrow run identities. JSON-filtered successful rows must not
     # enter a MySQL filesort: even a scalar projection can carry the JSON addon.
     run_refs = list(SyncJob.objects.filter(pk__in=job_ids).order_by().annotate(
@@ -525,7 +539,7 @@ def _run_rows(runs, job_rows):
                 "store_id": job.get("store_id"),
                 "region": job.get("region", ""),
                 "platform": run.sync_job.integration_config.platform,
-                "api_type": job.get("api_type", "inventory" if run.sync_job.integration_config.platform == "jifeng_wms" else "marketplace"),
+                "api_type": job.get("api_type", "inventory" if run.sync_job.integration_config.platform in {"jifeng_wms", "best_ecapi"} else "marketplace"),
                 "resource_type": run.sync_job.resource_type,
                 "data_destination": destination[0],
                 "data_table": destination[1],
@@ -812,9 +826,13 @@ def _reference_options(user):
     for platform in PlatformMaster.objects.filter(tenant=user.tenant, status="active").order_by("code"):
         integration_value = integration_platform_key(
             platform_type=platform.platform_type,
+            warehouse_connector_state=platform.warehouse_connector_state,
+            warehouse_connector_key=platform.warehouse_connector_key,
             code=platform.code,
             name=platform.name,
         )
+        if platform.platform_type in {"warehouse_owned", "warehouse_third_party", "warehouse_platform"} and not integration_value:
+            continue
         value = integration_value or platform.code
         if value in seen_platforms:
             continue
@@ -963,4 +981,9 @@ def integration_workspace(user, mode, params):
         from .collection_records import collection_records
         return collection_records(user, params)
     with runtime_snapshot_scope():
+        if mode == "sync-runs" and params.get("projection") == "list":
+            _, _, _, jobs, runs, _ = _workspace_rows(user, run_list_only=True)
+            rows, pagination, options = _run_page(user, runs, jobs, params)
+            return {"mode": mode, "source_status": "ready", "results": rows,
+                    "pagination": pagination, "options": options}
         return _integration_workspace(user, mode, params)

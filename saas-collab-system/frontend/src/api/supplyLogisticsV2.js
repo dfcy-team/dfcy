@@ -21,7 +21,7 @@ export const updateDispatchExpectedWarehouseDate = (id, data, key) => write('pos
 export const generateInbound = (id, data, key) => write('post', `${BASE}dispatch-batches/${enc(id)}/inbound/`, data, key);
 export const fetchInboundOrders = (params = {}) => requestApi({ method: 'get', url: `${BASE}inbound-orders/`, params });
 export const fetchInboundOrder = (id) => requestApi({ method: 'get', url: `${BASE}inbound-orders/${enc(id)}/` });
-export const fetchInboundExtraSkus = (id, search = '') => requestApi({ method: 'get', url: `${BASE}inbound-orders/${enc(id)}/extra-skus/`, params: { search } });
+export const fetchInboundExtraSkus = (id, search = '', exact = false) => requestApi({ method: 'get', url: `${BASE}inbound-orders/${enc(id)}/extra-skus/`, params: { search, ...(exact ? { exact: 1 } : {}) } });
 export const updateInboundOrder = (id, data, key) => write('patch', `${BASE}inbound-orders/${enc(id)}/`, data, key);
 export const confirmInboundOrder = (id, data, key) => write('post', `${BASE}inbound-orders/${enc(id)}/confirm/`, data, key);
 export const cancelInboundOrder = (id, data, key) => write('post', `${BASE}inbound-orders/${enc(id)}/cancel/`, data, key);
@@ -34,3 +34,5 @@ export const downloadBatchBigSeller = (id,number,skuMode='legacy') => downloadAp
 
 export const downloadInboundBigSeller = (id,number,skuMode='legacy') => downloadApiFile(`${BASE}inbound-orders/${enc(id)}/bigseller/?sku_mode=${encodeURIComponent(skuMode)}`, `${number}-bigseller.xlsx`);
 export const downloadInboundReconciliation = (id, number) => downloadApiFile(`${BASE}inbound-orders/${enc(id)}/export/`, `${number}-入库核对.xlsx`);
+export const fetchWmsInboundDocuments = (params) => requestApi({ method: 'get', url: `${BASE}wms-inbound-documents/`, params });
+export const fetchWmsInboundDocument = (id) => requestApi({ method: 'get', url: `${BASE}wms-inbound-documents/${enc(id)}/` });

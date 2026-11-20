@@ -34,6 +34,7 @@
         </template>
       </el-table-column>
       <el-table-column prop="available_stock" label="可售库存" width="105" />
+      <el-table-column label="日均销量" width="110"><template #default="{ row }">{{ formatDailySales(row.daily_sales) }}</template></el-table-column>
       <el-table-column label="预警" min-width="150">
         <template #default="{ row }">{{ (row.warning?.warnings || []).map(code => labels[code] || code).join('、') || '—' }}</template>
       </el-table-column>
@@ -45,6 +46,12 @@
 <script setup>
 import { onMounted, onBeforeUnmount, reactive, ref } from 'vue';
 import { fetchInventoryWarnings } from '../../api/alerts';
+
+function formatDailySales(value) {
+  if (value == null || String(value).trim() === '') return '—';
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(2) : '—';
+}
 
 const labels = {
   forecast_stockout: '预计缺货', key_variant_shortage: '关键规格缺货',

@@ -10,6 +10,8 @@ class Tenant(models.Model):
     name = models.CharField(max_length=100)
     code = models.SlugField(max_length=50, unique=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    payment_approval_required = models.BooleanField(default=True, db_default=True)
+    payment_approval_version = models.PositiveIntegerField(default=0, db_default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

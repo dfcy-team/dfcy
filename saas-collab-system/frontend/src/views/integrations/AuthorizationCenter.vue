@@ -26,7 +26,7 @@ const canMaintain = computed(() => auth.hasPermission('integrations.view') && au
 const canCreate = computed(() => canMaintain.value && auth.hasPermission(kind.value === 'store' ? 'integrations.store.authorize' : 'integrations.warehouse.authorize'));
 let listSequence = 0, detailSequence = 0;
 const labels: Record<string, string> = { active: '已授权', expired: '已过期', revoked: '已撤销', pending: '待授权', error: '异常', failed: '失败', unknown: '状态未知' };
-const platforms = computed(() => kind.value === 'store' ? ['shopee', 'lazada', 'tiktok'] : ['jifeng_wms']);
+const platforms = computed(() => kind.value === 'store' ? ['shopee', 'lazada', 'tiktok'] : ['jifeng_wms', 'best_ecapi']);
 function time(value: string) { return value ? `${value.replace('T', ' ')}` : '未提供'; }
 async function load() {
   const seq = ++listSequence;

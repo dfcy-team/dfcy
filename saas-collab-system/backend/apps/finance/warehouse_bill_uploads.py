@@ -33,8 +33,11 @@ def require_original(user):
 
 
 class ParseOptions(serializers.Serializer):
+    order_warehouse = serializers.BooleanField(required=False)
+    saved_rules_only = serializers.BooleanField(required=False)
     registration_mode = serializers.ChoiceField(choices=[CNY_ORIGINAL, FILE_POLICY], required=False)
     format_rule_id = serializers.IntegerField(min_value=1, required=False)
+    format_rule_version = serializers.IntegerField(min_value=1, required=False)
     warehouse_id = serializers.IntegerField(min_value=1, required=False)
     format_config = serializers.JSONField(required=False)
     country = serializers.ChoiceField(choices=['PH', 'TH', 'MY'], required=False)
@@ -44,6 +47,8 @@ class ParseOptions(serializers.Serializer):
     stores = serializers.DictField(child=serializers.IntegerField(min_value=1), required=False, default=dict)
 
     def validate(self, value):
+        if value.get('format_rule_version') and not value.get('format_rule_id'):
+            raise ValidationError('规则版本须与已保存规则一起指定。')
         if value.get("format_rule_id") and value.get("format_config"):
             raise ValidationError("只能选择已有规则或本批格式配置之一。")
         if "format_config" in value:
@@ -83,7 +88,7 @@ def enqueue(job, operation):
             status='failed', error='后台解析队列不可用，请启动warehouse-fees工作队列后重试。', updated_at=timezone.now())
 
 
-def upload_bill(user, uploaded, supplied=None):
+def upload_bill(user, uploaded, supplied=None, *, defer_parse=False):
     require_original(user)
     parsed_options = options(supplied or {})
     if not uploaded or not uploaded.name.lower().endswith('.xlsx'):
@@ -109,7 +114,11 @@ def upload_bill(user, uploaded, supplied=None):
                 file_hash=digest.hexdigest(), defaults={'file_name': file_name, 'overrides': parsed_options})
             if created:
                 temporary.replace(source_path(job))
-                transaction.on_commit(lambda: enqueue(job, 'parse'))
+                if defer_parse:
+                    job.status, job.summary = 'ready', {'awaiting_parse': True}
+                    job.save(update_fields=['status', 'summary'])
+                else:
+                    transaction.on_commit(lambda: enqueue(job, 'parse'))
             else:
                 job = WarehouseBillUpload.objects.select_for_update().get(pk=job.pk)
                 if job.summary.get('settlement_active') and job.file_name != file_name:
@@ -123,7 +132,7 @@ def upload_bill(user, uploaded, supplied=None):
                 else:
                     updated_options.pop('registration_mode', None)
                 changed = job.file_name != file_name or job.overrides != updated_options
-                if (job.status in {'ready', 'failed'} and (changed or job.status == 'failed')
+                if (not defer_parse and job.status in {'ready', 'failed'} and (changed or job.status == 'failed')
                         and not job.rows.filter(status__in=['created', 'existing']).exists()):
                     job.file_name, job.overrides = file_name, updated_options
                     retained = {k: v for k, v in job.summary.items() if k in {
@@ -171,6 +180,11 @@ def request_operation(user, pk, data):
         from .warehouse_bill_edits import edit_rows
         return edit_rows(user, pk, data)
     job = owned_job(user, pk)
+    if data.get('operation') == 'allocate_difference' and job.overrides.get('registration_mode') == FILE_POLICY:
+        if set(data) - {'operation','version','allocations','reason','coverage_confirmed','difference_confirmed'}:
+            raise ValidationError('包含不支持的分配字段。')
+        from .warehouse_file_registration import allocate_difference
+        return allocate_difference(user, job, data)
     if data.get('operation') in {'register', 'save_drafts'} and job.overrides.get('registration_mode') == FILE_POLICY:
         allowed = {'operation', 'version', 'rows'}
         if data['operation'] == 'register': allowed |= {'coverage_confirmed', 'difference_confirmed'}
@@ -203,11 +217,17 @@ def request_operation(user, pk, data):
             if job.rows.filter(status__in=['created', 'existing']).exists():
                 raise ValidationError('此账单已有导入结果，不能更改归属后再次导入。')
             corrections = job.overrides.get('_row_edits')
+            saved_rules_only = job.overrides.get('saved_rules_only', False)
+            order_warehouse = job.overrides.get('order_warehouse', False)
             mode = job.overrides.get('registration_mode')
             job.overrides = options(data.get('options', {}))
             job.overrides.pop('registration_mode', None)
             if mode:
                 job.overrides['registration_mode'] = mode
+            if order_warehouse:
+                job.overrides['order_warehouse'] = True
+            if saved_rules_only:
+                job.overrides['saved_rules_only'] = True
             if corrections:
                 job.overrides['_row_edits'] = corrections
             job.summary = {k: v for k, v in job.summary.items() if k in {
@@ -246,7 +266,7 @@ def normalize_rows(user, facts, overrides, file_name, file_hash, settlement=None
     for warehouse in warehouses:
         for alias in {warehouse.code, warehouse.name, *(warehouse.legacy_codes or [])} - {''}:
             warehouse_aliases[warehouse.country_code, text(alias)].add(warehouse.pk)
-    lookup = LocalOrderLookup(user, [(f, {**f, 'original_order_id': f['external_order_id'], 'lookup_numbers': cny_original}) for f in facts])
+    lookup = LocalOrderLookup(user, [(f, {**f, 'order_warehouse':bool(overrides.get('order_warehouse')), 'original_order_id': f['external_order_id'], 'lookup_numbers': cny_original}) for f in facts])
     unresolved = {'stores': Counter(), 'warehouses': Counter()}
     seen = set()
 
@@ -281,8 +301,9 @@ def normalize_rows(user, facts, overrides, file_name, file_hash, settlement=None
         country, raw_store, raw_wh = fact['country'], fact['raw_store'], fact['raw_warehouse']
         if country not in countries:
             errors.append('当前租户缺少对应国家站点档案')
-        warehouse = resolve('warehouses', fact.get('raw_warehouses') or [raw_wh], country)
-        if not warehouse:
+        use_order_warehouse = overrides.get('order_warehouse') and fact['kind'] == 'order'
+        warehouse = None if use_order_warehouse else resolve('warehouses', fact.get('raw_warehouses') or [raw_wh], country)
+        if not warehouse and not use_order_warehouse:
             errors.append('仓库未唯一匹配或多仓归属冲突，请核对本账单映射')
         store = None
         data = {key: fact[key] for key in ['kind', 'country', 'bill_number', 'bill_month', 'fee_item', 'reference', 'external_order_id', 'amount', 'currency', 'occurred_on']}
@@ -299,7 +320,7 @@ def normalize_rows(user, facts, overrides, file_name, file_hash, settlement=None
                 errors = [issue for issue in errors if issue != '额外结算项目需确认分类及是否与明细重复']
         data.update(warehouse_id=warehouse.pk if warehouse else None, store_id=store.pk if store else None,
                     note=f'原账单：{file_name}；工作表：{fact["sheet"]}；行：{fact["row"]}')
-        matching_source = {**fact, 'original_order_id': fact['external_order_id'], 'lookup_numbers': cny_original}
+        matching_source = {**fact, 'order_warehouse':bool(overrides.get('order_warehouse')), 'original_order_id': fact['external_order_id'], 'lookup_numbers': cny_original}
         match_error = apply_match(lookup, data, matching_source)
         if not file_policy and fact['kind'] == 'order' and matching_source.get('order_unlinked') and not data['store_id']:
             platform = next((p for p in ['shopee', 'tiktok', 'lazada'] if p in fact.get('raw_platform', '').lower()), '')
@@ -317,7 +338,7 @@ def normalize_rows(user, facts, overrides, file_name, file_hash, settlement=None
         seen.add(identity)
         source = {'type': 'warehouse_original_xlsx', 'file_name': file_name, 'sha256': file_hash,
                   **{k: fact[k] for k in ['sheet', 'row', 'source_rows', 'raw_store', 'raw_stores', 'raw_warehouse', 'raw_warehouses', 'raw_platform', 'raw_amount']}}
-        source.update(original_data=dict(data), parser_issues=list(fact['issues']))
+        source.update(order_warehouse=bool(overrides.get('order_warehouse')), original_data=dict(data), parser_issues=list(fact['issues']))
         if cny_original:
             source.update(registration_mode=overrides['registration_mode'], lookup_numbers=True, registration_original_amount=fact['amount'])
         if file_policy:
@@ -412,6 +433,8 @@ def process_job(pk, version, operation):
             summary.update(counts=dict(counts), totals=[{'currency': k, 'amount': str(v)} for k, v in sorted(sums.items())])
             if job.overrides.get('registration_mode') in {CNY_ORIGINAL, FILE_POLICY}:
                 summary['settlement_warehouse_id'] = next(iter(mapped_warehouses)) if len(mapped_warehouses) == 1 else None
+                summary['warehouse_ids'] = sorted(pk for pk in mapped_warehouses if pk is not None)
+                summary['mixed_warehouses'] = len(summary['warehouse_ids']) > 1
             with transaction.atomic():
                 current = WarehouseBillUpload.objects.select_for_update().get(pk=pk)
                 if current.version != version or current.status != running:
@@ -424,6 +447,13 @@ def process_job(pk, version, operation):
                     WarehouseBillRow.objects.bulk_update(rows, ['data', 'source', 'status', 'error'], batch_size=500)
                 current.status, current.processed, current.error = 'ready', len(facts), ''
                 current.save(update_fields=['summary', 'status', 'processed', 'error', 'updated_at'])
+                applied = summary.get('applied_rule') or {}
+                if applied.get('id'):
+                    from .models import FinanceAuditLog
+                    FinanceAuditLog.objects.create(tenant_id=current.tenant_id, actor_id=current.uploaded_by_id,
+                        object_type='warehouse_bill_format', object_id=str(applied['id']), action='parse_success',
+                        masked_detail={'file_name':current.file_name, 'job_id':str(current.pk),
+                            'rule_version':applied.get('record_version')})
         else:
             effective_rows = list(job.rows.filter(status='valid').only('data', 'source'))
             import_lookup = LocalOrderLookup(job.uploaded_by, [(r.data, r.source) for r in effective_rows])

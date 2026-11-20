@@ -9,7 +9,7 @@
     :columns="columns"
     :form-fields="formFields"
     :create-handler="(payload) => createMasterData('platforms', payload)"
-    :edit-handler="(id, payload) => updateMasterData('platforms', id, payload)"
+    :edit-handler="(id, payload, row) => updateMasterData('platforms', id, { ...payload, version: row.version })"
     :delete-handler="(id) => deleteMasterData('platforms', id)"
     :status-handler="(row, status) => updateMasterDataStatus('platforms', row.id, status)"
     create-permission="masterdata.manage"
@@ -28,8 +28,8 @@ import { createMasterData, deleteMasterData, fetchPlatformCatalog, fetchPlatform
 
 const WAREHOUSE_TYPES = new Set(['warehouse_owned', 'warehouse_third_party', 'warehouse_platform']);
 const GROUP_ORDER = ['销售渠道/独立站', '仓储服务分类', 'ERP/其他'];
-const GROUP_LABELS = { '仓储服务分类': '仓储服务分类（连接器按服务商识别）' };
-const WAREHOUSE_HELP = '这是仓储业务分类，不是具体连接器。请先选择仓储类型，再填写具体服务商的平台编码与名称；已支持极风 WMS，编码 myjf 可识别；其他服务商可先建档，但 API 接入需对应连接器。';
+const GROUP_LABELS = { '仓储服务分类': '仓储服务分类（需选择库存连接器）' };
+const WAREHOUSE_HELP = '选择库存连接器后，该平台才会出现在接入配置中。支持百世仓配和极风 WMS；保存选择不会启用真实 API 调用。';
 
 const platformTypes = ref([
   { label: 'Lazada', value: 'lazada' }, { label: 'Shopee', value: 'shopee' },
@@ -60,6 +60,8 @@ function connectorStatusLabel(value) {
   return {
     ACTIVE: '已支持',
     TESTING: '联调中',
+    PENDING: '待确认',
+    NONE: '暂不接入',
     NOT_IMPLEMENTED: '暂未实现',
     UNMAPPED: '待识别服务商'
   }[value] || value || '-';
@@ -91,7 +93,7 @@ function groupCatalogItems(items) {
 const columns = [
   { prop: 'code', label: '平台编码', width: 140 }, { prop: 'name', label: '平台名称', width: 160, format: platformLabel },
   { prop: 'platform_type', label: '平台类型', width: 190, options: () => platformTypes.value, format: platformTypeLabel },
-  { prop: 'connector_status', label: '连接器识别', width: 190, format: connectorDisplay },
+  { prop: 'connector_status', label: '库存连接器', width: 190, format: connectorDisplay },
   { prop: 'status', label: '状态', type: 'status', width: 90, format: statusLabel }
 ];
 function statusLabel(value) {
@@ -104,6 +106,14 @@ const formFields = computed(() => [
     options: () => platformTypeGroups.value,
     helpText: (form) => WAREHOUSE_TYPES.has(form.platform_type) ? WAREHOUSE_HELP : ''
   },
+  { key: 'warehouse_connector_state', label: '库存 API 接入', type: 'select', required: true, default: 'pending',
+    visible: form => WAREHOUSE_TYPES.has(form.platform_type), options: [
+      { label: '待确认', value: 'pending' }, { label: '选择连接器', value: 'selected' }, { label: '暂不接入', value: 'none' }
+    ] },
+  { key: 'warehouse_connector_key', label: '库存连接器', type: 'select', required: true,
+    visible: form => WAREHOUSE_TYPES.has(form.platform_type) && form.warehouse_connector_state === 'selected', options: [
+      { label: '百世仓配 API (2.0)', value: 'best_ecapi' }, { label: '极风 WMS', value: 'jifeng_wms' }
+    ] },
   { key: 'status', label: '状态', type: 'select', required: true, default: 'active', options: [
     { label: '启用', value: 'active' }, { label: '停用', value: 'inactive' }
   ] }

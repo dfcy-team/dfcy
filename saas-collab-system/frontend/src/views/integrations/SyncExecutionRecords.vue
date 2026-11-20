@@ -115,7 +115,7 @@ async function load() {
   loading.value = true; error.value = '';
   rows.value = []; options.value = {}; total.value = 0;
   try {
-    const response = await fetchIntegrationWorkspace('sync-runs', { ...filters, resource_type: filters.resource_type === 'video_evidence' ? 'video_metrics' : filters.resource_type, record_source: recordSource.value, run_pk: recordSource.value ? '' : props.detailId || route.query.detail || '', started_from: dates.value?.[0] || '', started_to: dates.value?.[1] || '', page: page.value, page_size: 50 });
+    const response = await fetchIntegrationWorkspace('sync-runs', { ...filters, projection: 'list', resource_type: filters.resource_type === 'video_evidence' ? 'video_metrics' : filters.resource_type, record_source: recordSource.value, run_pk: recordSource.value ? '' : props.detailId || route.query.detail || '', started_from: dates.value?.[0] || '', started_to: dates.value?.[1] || '', page: page.value, page_size: 50 });
     if (requestSequence !== workspaceLoadSequence) return;
     if (!response.success) throw new Error(response.message);
     rows.value = response.data.results || []; options.value = response.data.options || {};

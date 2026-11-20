@@ -3,6 +3,7 @@ import { filterLabels } from './reportPresentation';
 export const clone = (value) => JSON.parse(JSON.stringify(value));
 export function datasetFilters(dataset) {
   if (!dataset) return [];
+  if (dataset.id === "sales_abc") return dataset.filters || [];
   const skuAliasFilters = ['sales', 'sales_skus', 'refunds', 'inventory', 'inventory_value'].includes(dataset.id) ? ['sku_mode', 'mapping_as_of'] : [];
   return [...new Set([...(dataset.filters || []), ...skuAliasFilters, ...(dataset.id.startsWith('inventory') ? ['include_virtual'] : ['platforms', 'store_ids'])])];
 }

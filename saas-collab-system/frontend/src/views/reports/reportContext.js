@@ -6,9 +6,9 @@ import { completedDateRange } from '../sales-management/overviewTrend';
 export function defaultReportFilters(dataset, now = new Date()) {
   const supported = datasetFilters(dataset);
   let defaults = {};
-  if (['sales', 'sales_skus', 'refunds', 'advertising'].includes(dataset?.id)) {
+  if (['sales', 'sales_skus', 'sales_abc', 'refunds', 'advertising'].includes(dataset?.id)) {
     const [date_from, date_to] = completedDateRange(30, now);
-    defaults = { date_from, date_to };
+    defaults = { date_from, date_to, ...(dataset.id === 'sales_abc' ? { demand_mode: 'non_cancelled' } : {}) };
   } else if (dataset?.id === 'finance') {
     const date_to = now.toISOString().slice(0, 10);
     defaults = { date_from: `${date_to.slice(0, 7)}-01`, date_to };
@@ -34,16 +34,17 @@ export function queryScope(config, dimensionLabels = {}) {
     const identity = labels && ['store_id', 'store_ids', 'warehouse_id'].includes(key)
       ? (Array.isArray(value) ? value : String(value).split(',')).map(id => labels[String(id)] ? `${labels[String(id)]}（${id}）` : String(id)).join('、') : null;
     const isBooleanFilter = ['exclude_cancelled', 'sku_exact', 'order_exact'].includes(key);
-    const rendered = identity ?? (['sku_mode', 'fee_category', 'match_status', 'cost_status', 'inventory_type', 'status'].includes(key)
+    const rendered = identity ?? (key === 'demand_mode' ? filterChoices.demand_mode.find(item => item.value === value)?.label || String(value) : ['sku_mode', 'fee_category', 'match_status', 'cost_status', 'inventory_type', 'status'].includes(key)
       ? displayReportValue(value, key) : isBooleanFilter && (value === true || value === 'true') ? '是' : isBooleanFilter && (value === false || value === 'false') ? '否' : Array.isArray(value) ? value.join('、') : String(value));
     parts.push(`${filterLabels[key] || '业务条件'}：${rendered}`);
   }
   if (config?.dataset?.startsWith('inventory')) parts.push(filters.include_virtual === true || filters.include_virtual === 'true' ? '包含虚拟商品' : '排除虚拟商品');
-  parts.push(config?.dataset === 'inventory' ? '库存数量：件；商品数：个' : config?.dataset === 'inventory_value' ? '金额按成本币种分组' : '金额按来源币种分组');
+  parts.push(config?.dataset === 'sales_abc' ? '需求与售后数量：件；累计占比：%' : config?.dataset === 'inventory' ? '库存数量：件；商品数：个' : config?.dataset === 'inventory_value' ? '金额按成本币种分组' : '金额按来源币种分组');
   return parts;
 }
 
 export function reportScopeNote(dataset) {
+  if (dataset === 'sales_abc') return '按订单日期统计需求，退款与取消单独展示；切换查询范围后重新计算 ABC 分档。';
   if (dataset?.startsWith('inventory')) return '快照日期按协调世界时；不是收发存流水。';
   if (['sales', 'sales_skus', 'refunds'].includes(dataset)) return '按门店当地业务日期；退款按申请日期归日。';
   if (dataset === 'advertising') return '按来源广告报表日期查询；归因窗口以平台口径为准。直接与广泛归因成交金额分别展示，不可相加。';
@@ -64,6 +65,11 @@ export function reportResponseError(response, fallback = '读取失败，请重�
 
 // Summaries use only the returned, scoped aggregate. Missing or truncated groups must not become complete totals.
 export function reportQuality(result, dataset) {
+  if (result && dataset === 'sales_abc') return [
+    { label: '未关联商品需求', value: result.unmapped_units ?? '未提供', note: '件 · 排除在商品 ABC 排名外' },
+    { label: '未关联商品退款', value: result.unlinked_refund_units ?? '未提供', note: '件 · 不分摊到具体 SKU' },
+    { label: '退货入库记录', value: result.return_receipts_available ? '可读取' : '未提供', note: result.return_receipts_available ? '仅展示有权限的已收货记录' : '无读取权限时保留未知，不计为零' }
+  ];
   if (!result || result.truncated || !['finance', 'inventory_value'].includes(dataset)) return [];
   const keys = new Set(result.config?.metrics || []);
   const sum = key => {

@@ -19,6 +19,7 @@ from .monthly_payables import MonthlyPayables
 from .payment_reminders import PaymentReminders
 from . import notification_api as na
 from . import numbering_api as nua
+from .payment_approval_api import PaymentApprovalMode
 from . import purchase_contracts as pc
 from . import payment_items_api as pia
 from .supplier_accounts import SupplierContacts, SupplierContactDetail
@@ -46,6 +47,7 @@ urlpatterns = [
     path('inbound-orders/<int:pk>/notifications/', InboundNotifyStatus.as_view()),
     path('monthly-payables/shipment-drilldown/', MonthlyShipmentDrilldown.as_view()),
     path("count-difference-choices/", CountDifferenceChoices.as_view(), name="sc2-count-difference-choices"),
+    path('payment-batches/approval-mode/', PaymentApprovalMode.as_view()),
     path('payment-batches/candidates/', BatchCandidates.as_view()),
     path('payment-batches/', BatchCollection.as_view()),
     path('payment-batches/<int:pk>/', BatchDetail.as_view()),
@@ -189,9 +191,12 @@ urlpatterns = [
     path("inbound-orders/<int:pk>/bigseller/", la.InboundBigSeller.as_view(), name="sc2-inbound-bigseller"),
     path("inbound-orders/<int:pk>/skus/<int:sku_id>/image/", InternalInboundProductImage.as_view(), name="sc2-inbound-image"),
     path("inbound-orders/<int:pk>/extra-skus/", la.InboundExtraSkuOptions.as_view(), name="sc2-inbound-extra-skus"),
-    path("inbound-orders/<int:pk>/confirm/", la.ConfirmInbound.as_view(), name="sc2-inbound-confirm"),
     path("inbound-orders/<int:pk>/cancel/", la.CancelInbound.as_view(), name="sc2-inbound-cancel"),
+    path("inbound-orders/<int:pk>/confirm/", la.ConfirmInbound.as_view(), name="sc2-inbound-confirm"),
+    path("wms-inbound-documents/", la.WmsInboundDocuments.as_view(), name="sc2-wms-inbound-documents"),
+    path("wms-inbound-documents/<int:pk>/", la.WmsInboundDocument.as_view(), name="sc2-wms-inbound-document"),
     path("inbound-orders/<int:pk>/wms-reconciliation/", la.WmsReconciliation.as_view(), name="sc2-wms-reconciliation"),
+    path("wms-inbound-movements/", la.WmsInboundMovements.as_view(), name="sc2-wms-inbound-movements"),
     path("inbound-orders/<int:pk>/wms-candidates/", la.WmsCandidates.as_view(), name="sc2-wms-candidates"),
     path("inbound-orders/<int:pk>/wms-allocations/", la.WmsAllocations.as_view(), name="sc2-wms-allocations"),
     path("inbound-orders/<int:pk>/wms-allocations/<int:allocation_id>/deactivate/", la.WmsAllocationDeactivate.as_view(), name="sc2-wms-allocation-deactivate"),

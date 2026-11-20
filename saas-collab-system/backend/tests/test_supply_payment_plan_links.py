@@ -46,6 +46,11 @@ def test_batch_line_can_link_plan_line(world, monkeypatch):
     assert plan_response.status_code == 200, plan_response.data
     plan = plan_response.data['data']
     line = plan['lines'][0]
+    second_plan = write(client, f'costs/shipment/{second.pk}/payment-plans/', {
+        'expected_source_version': second.version, 'expected_version': 0,
+        'currency': 'CNY', 'reason': '同币种批次来源',
+        'lines': [{'nature': 'corporate', 'amount': '0.2500'}]}, 'linked-batch-second-plan')
+    assert second_plan.status_code == 200, second_plan.data
     created = write(client, 'payment-batches/', {'payee_account_id': account['id'], 'currency': 'CNY', 'reason': '链接计划的批次',
         'lines': [{'kind': 'shipment', 'source_id': shipment.pk, 'amount': '0.2500',
                    'plan_line_id': line['line_id'], 'plan_version': plan['version']},

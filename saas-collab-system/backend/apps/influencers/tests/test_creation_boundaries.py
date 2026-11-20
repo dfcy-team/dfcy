@@ -1142,6 +1142,45 @@ def test_sample_edit_can_mark_pending_record_completed_atomically():
     assert fulfillment.finalized_at is not None
 
 
+def test_sample_time_edit_preserves_shipment_deadline_and_cost(monkeypatch):
+    tenant, user, store, influencer = _records("sample-edit-time")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    _grant_all_scope(role, "influencers.fulfillment.view")
+    fulfillment, _ = create_sample_fulfillment(
+        user=user, request_key="sample-edit-time",
+        validated_data={"influencer": influencer, "store": store, "link_type": "YYJL",
+                        "external_product_id": "TIME-PRODUCT", "sample_order_no": "TIME-ORDER"},
+        item_payloads=[],
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+    url = f"/api/internal/influencers/sample-fulfillments/{fulfillment.pk}/"
+    fields = ("created_at", "shipped_at", "video_deadline_at", "status", "calculated_cost")
+    before = {field: getattr(fulfillment, field) for field in fields}
+    original_version = fulfillment.version
+    sent_at = (fulfillment.sample_sent_at - timedelta(days=1)).replace(microsecond=0)
+
+    def save(value, version):
+        return client.patch(url, {"sample_sent_at": value}, format="json", HTTP_IF_MATCH=f'"{version}"')
+
+    def unexpected_refresh(**kwargs):
+        pytest.fail("Time-only edit should not refresh costs.")
+
+    monkeypatch.setattr(influencer_services, "_refresh_existing_sample_costs", unexpected_refresh)
+    response = save(sent_at.isoformat(), original_version)
+    assert response.status_code == 200, response.data
+    fulfillment.refresh_from_db()
+    assert fulfillment.sample_sent_at == sent_at
+    assert {field: getattr(fulfillment, field) for field in fields} == before
+    assert fulfillment.version == original_version + 1
+    assert save(sent_at.isoformat(), original_version).status_code == 409
+    assert save("2026-11-19", fulfillment.version).status_code == 400
+    assert save((timezone.now() + timedelta(days=1)).isoformat(), fulfillment.version).status_code == 400
+    fulfillment.refresh_from_db()
+    assert fulfillment.sample_sent_at == sent_at
+
+
 def test_sample_edit_rejects_manual_intermediate_status():
     tenant, user, store, influencer = _records("sample-edit-intermediate-status")
     role = Role.objects.get(tenant=tenant, code="bd")
@@ -1943,6 +1982,14 @@ def test_fulfillment_option_owners_use_exists_and_keep_tenant_visibility_scope(m
         username="owner-exists-hidden", tenant=tenant,
         user_type=CustomUser.UserType.INTERNAL,
     )
+    historical_store = StoreMaster.objects.create(
+        tenant=tenant, platform=store.platform, code="owner-exists-historical",
+        name="Historical store", country_code="PH", currency="PHP",
+    )
+    hidden_store = StoreMaster.objects.create(
+        tenant=tenant, platform=store.platform, code="owner-exists-hidden",
+        name="Hidden store", country_code="PH", currency="PHP",
+    )
     for index in range(2):
         SampleFulfillment.objects.create(
             tenant=tenant,
@@ -1956,12 +2003,12 @@ def test_fulfillment_option_owners_use_exists_and_keep_tenant_visibility_scope(m
     hidden_sample = SampleFulfillment.objects.create(
         tenant=tenant, fulfillment_no="OWNER-EXISTS-HIDDEN",
         request_key="owner-exists-hidden", request_hash="owner-hidden-hash",
-        influencer=influencer, store=store, owner=hidden_owner,
+        influencer=influencer, store=hidden_store, owner=hidden_owner,
     )
     deleted_sample = SampleFulfillment.objects.create(
         tenant=tenant, fulfillment_no="OWNER-EXISTS-DELETED",
         request_key="owner-exists-deleted", request_hash="owner-deleted-hash",
-        influencer=influencer, store=store, owner=outsider,
+        influencer=influencer, store=historical_store, owner=outsider,
     )
     QuerySet.update(
         SampleFulfillment.objects.filter(pk=deleted_sample.pk), is_deleted=True,
@@ -1994,12 +2041,23 @@ def test_fulfillment_option_owners_use_exists_and_keep_tenant_visibility_scope(m
     assert response.json()["data"]["owners"] == [{
         "id": user.id, "username": user.username, "full_name": user.full_name,
     }]
+    assert "stores" not in response.json()["data"]
     owner_sql = next(
         query["sql"] for query in queries.captured_queries
         if re.search(r"FROM\s+[`\"]?accounts_customuser[`\"]?", query["sql"], re.I)
         and re.search(r"[`\"]?influencers_samplefulfillment[`\"]?", query["sql"], re.I)
     )
     assert owner_sql.upper().count("EXISTS") >= 2
+
+    response = client.get("/api/internal/influencers/sample-fulfillment-options/?filters_only=true")
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "owners": [{"id": user.id, "username": user.username, "full_name": user.full_name}],
+        "stores": [
+            {"id": store.id, "name": store.name, "country_code": "PH"},
+            {"id": historical_store.id, "name": historical_store.name, "country_code": "PH"},
+        ],
+    }
 
 
 def test_fulfillment_options_do_not_scan_influencers():

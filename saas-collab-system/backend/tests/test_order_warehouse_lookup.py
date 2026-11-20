@@ -2,13 +2,13 @@ from datetime import timedelta
 from unittest.mock import Mock, patch
 
 import pytest
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.test import APIClient
 
 from apps.integrations.models import PlatformIntegrationConfig, WarehouseAuthorization
-from apps.masterdata.models import WarehouseMaster
+from apps.masterdata.models import CountrySiteMaster, WarehouseMaster
 from apps.sales_management.warehouse_order_models import OrderWarehouseLookup
 from apps.sales_management.warehouse_orders import request_lookup, synchronize, fetch_packages, lookup_data
 from tests.test_sales_management import create_scope, create_order
@@ -20,6 +20,7 @@ pytestmark = pytest.mark.django_db
 def setup_order(settings):
     settings.SALES_ORDER_WAREHOUSE_SYNC_ENABLED = False
     tenant, _, store, warehouse = create_scope('warehouse-lookup')
+    CountrySiteMaster.objects.create(tenant=tenant, code='ph', name='Philippines', country_code='PH')
     order = create_order(tenant, store, 'lookup')
     actor = order.authorization.created_by
     actor.is_superuser = True
@@ -57,6 +58,126 @@ def run(order, actor):
     return state, row
 
 
+def test_outbound_projection_replacement_and_export(setup_order):
+    from apps.sales_management.outbound_movements import replace_shipment_lines
+    from apps.sales_management.warehouse_orders import jifeng_package
+
+    order, actor, warehouse = setup_order
+    warehouse.country_code = 'PH'
+    warehouse.save(update_fields=['country_code'])
+    row = OrderWarehouseLookup.objects.create(order=order, warehouse=warehouse)
+    shipped = jifeng_package(package(order))
+    with transaction.atomic():
+        replace_shipment_lines(row.pk, order.tenant_id, warehouse.pk, [shipped], site_code='PH')
+        replace_shipment_lines(row.pk, order.tenant_id, warehouse.pk, [shipped], site_code='PH')
+    warehouse.country_code = 'TH'
+    warehouse.save(update_fields=['country_code'])
+    api = APIClient()
+    api.force_authenticate(actor)
+    url = '/api/internal/supply-chain/v2/wms-inbound-movements/'
+    filters = {'direction': 'outbound', 'site_code': 'PH', 'start_date': '2026-09-11', 'end_date': '2026-09-11'}
+    result = api.get(url, filters)
+    assert result.status_code == 200, result.data
+    assert result.data['data']['total'] == 1
+    assert result.data['data']['quantity'] == 2
+    assert api.get(url, {**filters, 'site_code': 'TH'}).data['data']['total'] == 0
+    trace = {'direction': 'outbound', 'site_code': 'PH', 'document': 'WHORDER-1', 'warehouse_id': warehouse.pk}
+    assert api.get(url, trace).data['data']['quantity'] == 2
+    assert api.get(url, {**trace, 'document': 'WHORDER'}).data['data']['total'] == 0
+    export = api.get(url, {**filters, 'export': 'csv'})
+    assert export.status_code == 200
+    assert 'WHORDER-1' in export.content.decode('utf-8-sig')
+    from tests.test_supply_chain_v2_foundation import internal_user
+    from tests.test_supply_chain_v2_wms_reconciliation import grant_sales_view
+
+    scoped = internal_user({'tenant': order.tenant}, username='outbound-reader')
+    allowed = WarehouseMaster.objects.create(tenant=order.tenant, code='outbound-other', name='Other', country_code='PH')
+    grant_sales_view(scoped, warehouse_ids=[allowed.pk])
+    scoped_api = APIClient()
+    scoped_api.force_authenticate(scoped)
+    scoped_result = scoped_api.get(url, filters)
+    assert scoped_result.status_code == 200, scoped_result.data
+    assert scoped_result.data['data']['total'] == 0
+    scoped_export = scoped_api.get(url, {**filters, 'export': 'csv'})
+    assert scoped_export.status_code == 200
+    assert 'WHORDER-1' not in scoped_export.content.decode('utf-8-sig')
+    other_order = create_order(order.tenant, order.store, 'lookup-duplicate')
+    duplicate = OrderWarehouseLookup.objects.get_or_create(order=other_order, defaults={'warehouse': warehouse})[0]
+    with transaction.atomic():
+        replace_shipment_lines(duplicate.pk, order.tenant_id, warehouse.pk, [shipped], site_code='PH')
+    assert api.get(url, filters).data['data']['total'] == 0
+    duplicate.delete()
+    assert api.get(url, filters).data['data']['total'] == 1
+    with transaction.atomic():
+        replace_shipment_lines(row.pk, order.tenant_id, warehouse.pk, [{**shipped, 'status': 9}], site_code='PH')
+    assert api.get(url, filters).data['data']['total'] == 0
+
+
+def test_projection_quarantines_unrepresentable_rows_and_keeps_delivered():
+    from apps.sales_management.outbound_movements import shipment_projection
+    base = {'warehouse_order_no': 'DOC-A', 'status': 'DELIVERED',
+            'shipped_at_utc': '2026-09-11T03:00:00+00:00',
+            'items': [{'warehouse_sku': 'SKU-A', 'sku': 'SKU-A', 'quantity': '1'}]}
+    lines, reasons = shipment_projection([
+        {**base, 'warehouse_order_no': 'D' * 192},
+        {**base, 'warehouse_order_no': 'LONG-WHSKU', 'items': [
+            {'warehouse_sku': 'S' * 192, 'sku': 'S', 'quantity': '1'}]},
+        {**base, 'warehouse_order_no': 'LONG-SOURCE-SKU', 'items': [
+            {'warehouse_sku': 'S', 'sku': 'S' * 192, 'quantity': '1'}]},
+        {**base, 'warehouse_order_no': 'OVERFLOW', 'items': [
+            *[{'warehouse_sku': 'S', 'sku': 'S', 'quantity': '900000000000000000'} for _ in range(11)] ]},
+        {**base, 'warehouse_order_no': 'YEAR-0999', 'shipped_at_utc': '0999-01-01T00:00:00+00:00'},
+        base,
+    ], site_code='PH')
+    assert [line[0] for line in lines] == ['DOC-A']
+    assert reasons == {'document_too_long': 1, 'sku_too_long': 2,
+                       'quantity_overflow': 1, 'shipped_at_out_of_range': 1}
+
+
+def test_projection_identity_hashes_preserve_case_and_site_fact(setup_order):
+    from apps.sales_management.outbound_movements import replace_shipment_lines
+    from apps.sales_management.warehouse_order_models import WarehouseOutboundLine
+    order, _, warehouse = setup_order
+    lookup = OrderWarehouseLookup.objects.create(order=order, warehouse=warehouse)
+    packages = [
+        {'warehouse_order_no': 'DOC-A', 'status': 'SHIPPED', 'shipped_at_utc': '2026-01-01T00:00:00+00:00',
+         'items': [{'warehouse_sku': 'SKU-A', 'sku': 'SKU-A', 'quantity': '1'}]},
+        {'warehouse_order_no': 'doc-a', 'status': 'DELIVERED', 'shipped_at_utc': '2026-01-01T00:00:00+00:00',
+         'items': [{'warehouse_sku': 'sku-a', 'sku': 'sku-a', 'quantity': '1'}]},
+    ]
+    replace_shipment_lines(lookup.pk, order.tenant_id, warehouse.pk, packages, site_code='PH')
+    lines = list(WarehouseOutboundLine.objects.filter(lookup=lookup).order_by('document'))
+    assert len(lines) == 2 and {line.site_code for line in lines} == {'PH'}
+    assert lines[0].document_key != lines[1].document_key
+    assert lines[0].identity_key != lines[1].identity_key
+
+
+def test_outbound_backfill_dry_run_and_idempotency(setup_order):
+    from io import StringIO
+
+    from django.core.management import call_command
+    from apps.sales_management.warehouse_order_models import WarehouseOutboundLine
+    from apps.sales_management.warehouse_orders import jifeng_package
+
+    order, _, warehouse = setup_order
+    lookup = OrderWarehouseLookup.objects.create(
+        order=order, warehouse=warehouse, snapshot_at=timezone.now(),
+        snapshot={'packages': [jifeng_package(package(order))]},
+    )
+    output = StringIO()
+    call_command('backfill_warehouse_outbound', tenant_id=order.tenant_id, stdout=output)
+    assert "missing_snapshot_site_code" in output.getvalue() and 'lines=0' in output.getvalue()
+    lookup.snapshot['site_code'] = 'PH'
+    lookup.save(update_fields=['snapshot'])
+    output = StringIO()
+    call_command('backfill_warehouse_outbound', tenant_id=order.tenant_id, stdout=output)
+    assert 'dry-run lookups=1 lines=1 pieces=2' in output.getvalue()
+    assert not WarehouseOutboundLine.objects.exists()
+    for _ in range(2):
+        call_command('backfill_warehouse_outbound', tenant_id=order.tenant_id, apply=True, stdout=StringIO())
+        assert list(lookup.outbound_lines.values_list('quantity', flat=True)) == [2]
+
+
 def test_first_sync_and_status_changes_only(settings, django_capture_on_commit_callbacks):
     settings.SALES_ORDER_WAREHOUSE_SYNC_ENABLED = True
     tenant, _, store, _ = create_scope('event-test')
@@ -88,6 +209,44 @@ def test_rollback_does_not_publish(setup_order, django_capture_on_commit_callbac
                 raise RuntimeError('rollback')
         assert not publish.called
     assert not OrderWarehouseLookup.objects.filter(order=order).exists()
+
+
+def test_tiktok_cancel_signal_closes_lookup_without_changing_items(
+        setup_order, django_capture_on_commit_callbacks):
+    order, _, _ = setup_order
+    type(order.platform).objects.filter(pk=order.platform_id).update(platform_type='tiktok')
+    previous_items = list(order.items.values('id', 'seller_sku', 'internal_sku_id'))
+    row = request_lookup(order.pk)
+    revision = row.revision
+    with patch('apps.sales_management.warehouse_orders.publish_lookup') as publish:
+        with django_capture_on_commit_callbacks(execute=True):
+            order.raw_status = 'CANCELLED'
+            order.normalized_status = 'cancelled'
+            order.save(update_fields=['raw_status', 'normalized_status'])
+    row.refresh_from_db()
+    assert row.status == 'cancelled'
+    assert row.revision != revision
+    assert row.next_query_at is row.polling_until is row.lease_until is None
+    assert not row.snapshot and row.warehouse_id is None
+    assert lookup_data(order)['status_label'] == '订单已取消'
+    assert list(order.items.values('id', 'seller_sku', 'internal_sku_id')) == previous_items
+    assert not publish.called
+
+
+def test_tiktok_cancelled_pending_worker_preserves_prior_evidence(setup_order):
+    order, _, _ = setup_order
+    type(order.platform).objects.filter(pk=order.platform_id).update(platform_type='tiktok')
+    row = request_lookup(order.pk)
+    evidence = {'packages': [{'tracking_no': 'TEST-TRACKING'}]}
+    OrderWarehouseLookup.objects.filter(pk=row.pk).update(snapshot=evidence)
+    models.QuerySet.update(type(order).objects.filter(pk=order.pk),
+                           raw_status='CANCELLED', normalized_status='cancelled')
+    with patch('apps.sales_management.warehouse_orders.fetch_packages') as query:
+        assert synchronize(row.pk, str(row.revision)) == 'cancelled'
+    row.refresh_from_db()
+    assert row.snapshot == evidence
+    assert row.status == 'cancelled'
+    assert not query.called
 
 
 def test_lookup_database_failure_does_not_rollback_order(setup_order, caplog):

@@ -19,10 +19,16 @@ const stubs = {
   'el-select': { template: '<select><slot /></select>' },
   'el-option': { props: ['label', 'value'], template: '<option :value="value">{{ label }}</option>' },
   'el-date-picker': true, 'el-progress': true, 'el-pagination': true,
+  'el-drawer': { props: ['modelValue', 'title'], template: '<aside v-if="modelValue">{{ title }}<slot /></aside>' },
+  'el-image': { props: ['src', 'alt'], template: '<img :src="src" :alt="alt">' },
   'el-alert': { props: ['title'], template: '<p>{{ title }}</p>' },
   'el-tag': { template: '<span><slot /></span>' },
   'el-table': { props: ['data'], provide() { return { rows: computed(() => this.data) }; }, template: '<div><slot /></div>' },
-  'el-table-column': { props: ['prop', 'label', 'sortable'], inject: ['rows'], template: '<section>{{ label }}<slot v-for="row in rows" :row="row" /></section>' },
+  'el-table-column': {
+    props: ['prop', 'label', 'sortable', 'type'], inject: ['rows'],
+    data: () => ({ expanded: null }),
+    template: '<section>{{ label }}<template v-for="row in rows"><button v-if="type === &quot;expand&quot;" class="expand" @click="expanded = row.group_key">展开</button><slot v-if="type !== &quot;expand&quot; || expanded === row.group_key" :row="row" /></template></section>'
+  },
   'el-empty': { props: ['description'], template: '<p>{{ description }}</p>' },
 };
 
@@ -31,10 +37,18 @@ describe('库存分析真实页面', () => {
     inventoryRoute.query = {};
     setActivePinia(createPinia());
     fetchInventoryAnalysis.mockReset();
-    fetchInventoryAnalysis.mockResolvedValue(normalizeInventoryAnalysisResponse({ success: true, data: {
-      api_status: 'connected', count: 965, warehouse_options: [{ value: 11, label: '测试仓（THCS）' }],
+    fetchInventoryAnalysis.mockImplementation(async params => normalizeInventoryAnalysisResponse({ success: true, data: params.group_key ? {
+      detail_view: 'sku', count: 25,
+      results: [{ id: 1, source_sku: 'FAKE-SKU-001', internal_sku_id: 8, internal_sku: 'NEW-SKU-001',
+        legacy_sku_code: 'OLD-SKU-001', warehouse_name: '测试仓', image_url: '/media/sku.jpg' }],
+    } : {
+      api_status: 'connected', detail_view: 'spu', count: 965, warehouse_options: [{ value: 11, label: '测试仓（THCS）' }],
       quality: { score: 0, total_count: 965, mapped_count: 0, metric_version: 'inventory_snapshot.v1' },
-      results: [{ source_sku: 'FAKE-SKU-001', warehouse_code: 'THCS', warehouse_name: '测试仓', on_hand_qty: 12, available_qty: 10, reserved_qty: 2, in_transit_qty: 0, risk_label: '正常' }],
+      results: [
+        { group_key: 'spu:5', spu_code: 'NEW-SPU-001', legacy_spu_code: 'OLD-SPU-001', product_name: '商品测试', image_url: '/media/spu.jpg',
+          on_hand_qty: 12, available_qty: 10, reserved_qty: 2, in_transit_qty: 0 },
+        { group_key: 'source:FAKE-SKU-001', unmapped_source: 'FAKE-SKU-001' },
+      ],
       trend: [{ date: '2026-09-11', total: 12 }],
     } }));
   });
@@ -49,6 +63,33 @@ describe('库存分析真实页面', () => {
     expect(wrapper.text()).toContain('仅有 1 天');
     expect(wrapper.text()).not.toContain('演示');
     expect(wrapper.findAll('option').map(option => option.text())).toContain('测试仓（THCS）');
+    wrapper.unmount();
+  });
+
+  it('loads ordered SKU details only after expansion and opens the historical drawer', async () => {
+    inventoryRoute.query = { include_virtual: 'true' };
+    const wrapper = mount(InventoryAnalysis, { global: { stubs } });
+    await flushPromises();
+    expect(fetchInventoryAnalysis).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain('NEW-SPU-001');
+    expect(wrapper.text()).toContain('OLD-SPU-001');
+    expect(wrapper.find('img[alt="NEW-SPU-001"]').attributes('src')).toBe('/media/spu.jpg');
+    await wrapper.find('.expand').trigger('click');
+    await flushPromises();
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({
+      detail_view: 'spu', group_key: 'spu:5', include_virtual: true, page: 1, page_size: 20
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(wrapper.text()).toContain('NEW-SKU-001');
+    expect(wrapper.text()).toContain('OLD-SKU-001');
+    expect(wrapper.find('img[alt="NEW-SKU-001"]').attributes('src')).toBe('/media/sku.jpg');
+    const childTable = wrapper.findAllComponents(stubs['el-table'])[1];
+    childTable.vm.$emit('sort-change', { prop: 'source_sku', order: 'descending' });
+    await flushPromises();
+    expect(fetchInventoryAnalysis.mock.lastCall[0].ordering).toBe('-source_sku');
+    childTable.vm.$emit('row-click', childTable.props('data')[0]);
+    await flushPromises();
+    expect(wrapper.find('aside').text()).toContain('库存历史快照');
+    expect(wrapper.find('aside').text()).toContain('OLD-SKU-001');
     wrapper.unmount();
   });
 
@@ -109,8 +150,8 @@ describe('库存分析真实页面', () => {
     await flushPromises();
     const page = wrapper.findComponent(Phase3AnalyticsPage);
     const columns = wrapper.findAllComponents(stubs['el-table-column']);
-    expect(columns.filter(c => !['product_name', 'color_code', 'specification'].includes(c.props('prop'))).every(c => c.props('sortable') === 'custom')).toBe(true);
-    expect(columns.filter(c => ['product_name', 'color_code', 'specification'].includes(c.props('prop'))).every(c => c.props('sortable') === false)).toBe(true);
+    expect(columns.filter(c => c.props('sortable') === 'custom').map(c => c.props('prop')))
+      .toEqual(['spu_code', 'legacy_spu_code', 'on_hand_qty', 'available_qty', 'reserved_qty', 'in_transit_qty']);
     page.vm.currentPage = 7;
     page.vm.query.risk = 'low';
     wrapper.findComponent(stubs['el-table']).vm.$emit('sort-change', { prop: 'on_hand_qty', order: 'descending' });
@@ -125,7 +166,7 @@ describe('库存分析真实页面', () => {
     page.vm.changeSort({ prop: 'on_hand_qty', order: null });
     await flushPromises();
     expect(fetchInventoryAnalysis.mock.lastCall[0]).not.toHaveProperty('ordering');
-    page.vm.changeSort({ prop: 'source_sku', order: 'ascending' });
+    page.vm.changeSort({ prop: 'spu_code', order: 'ascending' });
     await flushPromises();
     page.vm.resetFilters();
     await flushPromises();

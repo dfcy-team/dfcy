@@ -44,7 +44,8 @@
     <el-alert v-if="result?.truncated" :title="`分组结果超过 ${result.limit} 条，仅展示部分结果；请缩小范围后导出。`" type="warning" :closable="false" />
     <div v-if="result" v-loading="loading" class="report-results">
       <div class="result-meta"><h2>查询结果 <small>{{ result.count }} 个分组</small></h2><span>{{ result.cached ? '复用已授权结果' : '已更新' }} · 来源时间 {{ reportTimestamp(result.refreshed_at) }}（协调世界时）</span></div>
-      <p class="note">点击分组查看有权限的业务明细。{{ selected?.note }}</p>
+      <p class="note"><template v-if="applied?.dataset !== 'sales_abc'">点击分组查看有权限的业务明细。</template>{{ selected?.note }}</p>
+      <p v-if="applied?.dataset === 'sales_abc'" class="note">展开 SPU 查看 SKU。编码列依次展示 SPU／SKU 的新编码和旧编码，SPU 与 SKU 分别按需求件数分档。</p>
       <ReportResult :result="result" :config="applied" :dataset="selected" :can-investigate="canInvestigate && !dirty && !error && !loading" @drill="drill" @investigate="openInvestigation" />
     </div>
     <el-empty v-else-if="!loading && !error" :description="selected ? '设置条件后点击查询。' : '当前角色没有可用报表，请核对业务权限和数据范围。'" />
@@ -61,7 +62,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
 import { canAccessPath } from '../../router/menu';
-import { fetchReportDatasets, fetchReportStoreOptions, queryReport, saveReportView } from '../../api/reporting';
+import { fetchReportDatasets, fetchReportStoreOptions, fetchSalesAbcOptions, queryReport, saveReportView } from '../../api/reporting';
 import { createReportExportJob as createReportExport } from '../../api/reportExports';
 import { filterLabels, drillQuery } from './reportPresentation';
 import { datasetFilters, fieldLayout } from './biLayout';
@@ -151,11 +152,21 @@ const canExport = computed(
 const dirty = computed(() => applied.value && JSON.stringify(config) !== JSON.stringify(applied.value));
 const availableFilters = computed(() => datasetFilters(selected.value));
 const visibleFilters = computed(() => config.field_layout?.filters || availableFilters.value);
-const primaryKeys = ['date_from', 'date_to', 'sku', 'sku_mode', 'store_id', 'warehouse_id', 'site_code', 'currency'];
-const commonFilters = computed(() => primaryKeys.filter(key => visibleFilters.value.includes(key)));
-const advancedFilters = computed(() => visibleFilters.value.filter(key => !primaryKeys.includes(key) && key !== 'include_virtual'));
+const primaryKeys = computed(() => [...(config.dataset === 'sales_abc' ? ['country', 'platform', 'demand_mode'] : []), 'date_from', 'date_to', 'sku', 'sku_mode', 'store_id', 'warehouse_id', 'site_code', 'currency']);
+const commonFilters = computed(() => primaryKeys.value.filter(key => visibleFilters.value.includes(key)));
+const advancedFilters = computed(() => visibleFilters.value.filter(key => !primaryKeys.value.includes(key) && key !== 'include_virtual'));
 const advancedActive = computed(() => [...advancedFilters.value, 'include_virtual'].filter(key => config.filters[key] !== '' && config.filters[key] != null && config.filters[key] !== false).length);
-const filterOptions = key => Object.entries(result.value?.dimension_labels?.[key] || {}).map(([value, name]) => ({ value, label: `${name}（${value}）` }));
+const abcOptions = ref(null);
+watch(() => [config.filters.country, config.filters.platform], () => {
+  if (config.dataset !== 'sales_abc') return;
+  const selectedStore = abcOptions.value?.options.find(option => String(option.value) === String(config.filters.store_id));
+  if (selectedStore && ((config.filters.country && selectedStore.country !== config.filters.country)
+    || (config.filters.platform && selectedStore.platform !== config.filters.platform))) config.filters.store_id = '';
+  requestStoreOptions();
+});
+const filterOptions = key => config.dataset === "sales_abc" && ["country", "platform"].includes(key)
+  ? (abcOptions.value?.[key === "country" ? "countries" : "platforms"] || []).map(value => ({ value, label: value }))
+  : Object.entries(result.value?.dimension_labels?.[key] || {}).map(([value, name]) => ({ value, label: `${name}（${value}）` }));
 function requestStoreOptions(search = '', delay = 0) {
   storeOptionsSearch = search;
   clearTimeout(storeOptionsTimer);
@@ -169,7 +180,18 @@ function requestStoreOptions(search = '', delay = 0) {
     const requestController = new AbortController();
     storeOptionsController = requestController;
     try {
-      const response = await fetchReportStoreOptions(config.dataset, search, requestController.signal);
+      let response;
+      if (config.dataset === "sales_abc") {
+        if (!abcOptions.value) {
+          const choices = await fetchSalesAbcOptions(requestController.signal);
+          if (!choices.success) throw reportResponseError(choices);
+          abcOptions.value = choices.data;
+        }
+        response = { success: true, data: { options: abcOptions.value.options.filter(option =>
+          (!config.filters.country || option.country === config.filters.country)
+          && (!config.filters.platform || option.platform === config.filters.platform)
+          && option.label.toLowerCase().includes(search.toLowerCase())) } };
+      } else response = await fetchReportStoreOptions(config.dataset, search, requestController.signal);
       if (current !== storeOptionsSequence) return;
       if (!response?.success) throw reportResponseError(response);
       const nextOptions = response.data?.options || [];
@@ -242,6 +264,7 @@ function chooseDataset() {
   config.field_layout = fieldLayout({ ...config, field_layout: undefined }, selected.value);
   result.value = null;
   applied.value = null;
+  if (config.dataset === "sales_abc") requestStoreOptions();
 }
 async function run() {
   const current = ++sequence;
@@ -274,6 +297,7 @@ async function run() {
 }
 function drill(row) {
   if (!applied.value || loading.value || dirty.value || error.value) return;
+  if (config.dataset === 'sales_abc') return;
   if (config.dataset === 'inventory_value' && !applied.value.dimensions.includes('sku')) {
     const filters = { ...applied.value.filters };
     for (const key of ['warehouse_id', 'site_code', 'currency']) if (row[key] != null) filters[key] = row[key];
@@ -356,7 +380,7 @@ async function initialize() {
     }
     else for (const key of availableFilters.value) if (route.query[key]) config.filters[key] = String(route.query[key]);
     if (availableFilters.value.includes('store_id') && config.filters.store_id) requestStoreOptions(String(config.filters.store_id));
-    if (selected.value) await run();
+    if (selected.value && (config.dataset !== "sales_abc" || config.filters.store_id || config.filters.country || config.filters.platform)) await run();
   } catch (failure) {
     error.value = reportError(failure.message);
   }

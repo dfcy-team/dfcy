@@ -4,6 +4,7 @@ Missing source fields remain unknown. WMS transit is observational and is never
 added to the supply-chain projection. All monetary totals retain their currency.
 """
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone as dt_timezone
 from decimal import Decimal, ROUND_CEILING
 from fractions import Fraction
@@ -12,14 +13,14 @@ from math import ceil
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.core.exceptions import ValidationError
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Exists, OuterRef, Q, Sum, Value
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, NotFound
 
 from apps.masterdata.models import CountrySiteMaster, StoreMaster, WarehouseMaster
 from apps.products.models import ProductSKU
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
-from apps.sales_management.scopes import filter_inventory_queryset, filter_sales_queryset, _custom_scope_configs
+from apps.sales_management.scopes import filter_sales_queryset, _custom_scope_configs, _stores_for_config
 from apps.supply_chain.dates import business_date
 from apps.supply_chain.supplier_products import product_details
 from apps.integrations.models import HistorySyncSegment, SyncJob, SyncRun
@@ -29,6 +30,9 @@ from .inventory_operations import operating_assessment
 
 INVENTORY = 'sales_management.view'
 SALES = 'sales_management.skus.view'
+JIFENG = 'jifeng_wms'
+BEST = 'best_ecapi'
+DECISION_PROVIDERS = (JIFENG, BEST)
 NOTICE = ('可用库存来自仓库 API 最新快照，已锁数量不再次扣减。销量为店铺当地已完成自然日的已付款有效订单商品件数；'
           '组合商品按订单不可变组成快照折算为组件需求件数；金额与退款金额只按原订单商品行统计，不向组合组件分摊。'
           '已采集的已完成退款按申请日单列，不扣减销量；退款采集覆盖可能与销量不同。WMS 在途仅观察，不与供应阶段相加。'
@@ -57,89 +61,163 @@ def require_metrics(actor, permission_cache=None):
             raise PermissionDenied('缺少经营数据范围授权。')
 
 
-def _config_countries(actor, config):
-    codes = None
-    if config.get('regions'):
-        codes = {str(value).upper() for value in config['regions']}
-    if config.get('store_ids'):
-        values = [str(value) for value in config['store_ids']]
-        stores = StoreMaster.objects.filter(tenant_id=actor.tenant_id).filter(
-            Q(pk__in=[int(v) for v in values if v.isdigit()]) | Q(code__in=values))
-        selected = {code.upper() for code in stores.values_list('country_code', flat=True)}
+@dataclass(frozen=True)
+class _InventoryBranch:
+    providers: frozenset
+    warehouse_ids: frozenset = frozenset()
+    site_codes: frozenset | None = None
+    sku_ids: frozenset = frozenset()
+    spu_ids: frozenset = frozenset()
+    provider_restricted: bool = False
+
+    @property
+    def product_restricted(self):
+        return bool(self.sku_ids or self.spu_ids)
+
+    def allows_product(self, sku):
+        return ((not self.sku_ids or sku.pk in self.sku_ids)
+                and (not self.spu_ids or sku.spu_id in self.spu_ids))
+
+    def allows_source(self, warehouse_id, provider, site_code):
+        return (provider in self.providers
+                and (not self.warehouse_ids or warehouse_id in self.warehouse_ids)
+                and (self.site_codes is None or site_code in self.site_codes))
+
+    def source_filter(self):
+        query = Q()
+        if self.warehouse_ids:
+            query &= Q(warehouse_id__in=self.warehouse_ids)
+        if self.site_codes is not None:
+            query &= Q(site_code__in=self.site_codes)
+        return query
+
+    def product_filter(self, *, inventory=False):
+        query = Q()
+        if self.sku_ids:
+            query &= Q(**{('internal_sku_id' if inventory else 'pk') + '__in': self.sku_ids})
+        if self.spu_ids:
+            query &= Q(**{('internal_sku__spu_id' if inventory else 'spu_id') + '__in': self.spu_ids})
+        return query
+
+
+def _inventory_branches(actor, permission_cache, *, include_best):
+    providers = frozenset(DECISION_PROVIDERS if include_best else (JIFENG,))
+    configs = _custom_scope_configs(actor, INVENTORY, permission_cache, resource_code='commerce.inventory')
+    if configs is None:
+        return (_InventoryBranch(providers),)
+    branches = []
+    identity_keys = {'warehouse_ids', 'sku_ids', 'spu_ids'}
+    supported = identity_keys | {'regions', 'store_ids', 'platforms'}
+    for config in configs:
+        if not config or set(config) - supported:
+            continue
+        for key in identity_keys & config.keys():
+            values = config[key]
+            if not isinstance(values, list) or not values or any(type(v) is not int or v <= 0 for v in values):
+                raise PermissionDenied('库存商品或仓库范围配置无效。')
+        if any(not isinstance(config[key], list) or not config[key]
+               for key in (supported - identity_keys) & config.keys()):
+            continue
+        platforms = config.get('platforms')
+        selected = providers.intersection(str(value) for value in platforms) if platforms else providers
+        if not selected:
+            continue
+        sites = None
+        if config.get('store_ids'):
+            sites = frozenset(_stores_for_config(actor, config).values_list('country_code', flat=True))
+        elif config.get('regions'):
+            sites = frozenset(str(value) for value in config['regions'])
+        branches.append(_InventoryBranch(selected,
+            warehouse_ids=frozenset(config.get('warehouse_ids', ())), site_codes=sites,
+            sku_ids=frozenset(config.get('sku_ids', ())), spu_ids=frozenset(config.get('spu_ids', ())),
+            provider_restricted=bool(platforms)))
+    return frozenset(branches)
+
+
+def _connected_inventory_jobs(actor, providers):
+    return SyncJob.objects.filter(tenant_id=actor.tenant_id, resource_type='inventory_snapshot',
+        integration_config__tenant_id=actor.tenant_id, integration_config__platform__in=providers,
+        warehouse_authorization__tenant_id=actor.tenant_id)
+
+
+def _provider_facts(actor, providers):
+    return InventorySnapshot.objects.filter(tenant_id=actor.tenant_id,
+        source_run__tenant_id=actor.tenant_id, source_run__sync_job__tenant_id=actor.tenant_id,
+        source_run__sync_job__integration_config__tenant_id=actor.tenant_id,
+        source_run__sync_job__resource_type='inventory_snapshot',
+        source_run__sync_job__integration_config__platform__in=providers)
+
+
+def _config_countries(actor, branch, *, require_provider_evidence=False):
+    codes = {site.upper() for site in branch.site_codes} if branch.site_codes is not None else None
+    warehouses = WarehouseMaster.objects.filter(tenant_id=actor.tenant_id)
+    if branch.warehouse_ids:
+        warehouses = warehouses.filter(pk__in=branch.warehouse_ids)
+        selected = {code.upper() for code in warehouses.values_list('country_code', flat=True)}
         codes = selected if codes is None else codes & selected
-    if config.get('warehouse_ids'):
-        selected = {code.upper() for code in WarehouseMaster.objects.filter(tenant_id=actor.tenant_id,
-            pk__in=config['warehouse_ids']).values_list('country_code', flat=True)}
-        codes = selected if codes is None else codes & selected
-    if config.get('platforms') and 'jifeng_wms' not in config['platforms']:
-        return set()
+    if branch.provider_restricted and require_provider_evidence:
+        # A provider-specific role can enumerate only countries with evidence
+        # for that provider and its own warehouse and site constraints.
+        warehouses = warehouses.filter(status='active')
+        if codes is not None:
+            warehouses = warehouses.filter(country_code__in=codes)
+        jobs = _connected_inventory_jobs(actor, branch.providers).filter(
+            warehouse_authorization__warehouse_id=OuterRef('pk'))
+        now = timezone.now()
+        provider_facts = _provider_facts(actor, branch.providers).filter(snapshot_at_utc__lte=now)
+        facts = provider_facts.filter(
+            branch.source_filter(), branch.product_filter(inventory=True), warehouse_id=OuterRef('pk'),
+            site_code=OuterRef('country_code'),
+        )
+        if branch.product_restricted:
+            provider_field = 'source_run__sync_job__integration_config__platform'
+            superseding = provider_facts.filter(
+                Q(snapshot_at_utc__gt=OuterRef('snapshot_at_utc'))
+                | Q(snapshot_at_utc=OuterRef('snapshot_at_utc'), pk__gt=OuterRef('pk')),
+                warehouse_id=OuterRef('warehouse_id'), site_code=OuterRef('site_code'),
+                source_sku=OuterRef('source_sku'), **{provider_field: OuterRef(provider_field)},
+            )
+            facts = facts.filter(~Exists(superseding))
+        selected = warehouses.filter(Q(Exists(jobs)) | Q(Exists(facts))).order_by().values_list(
+            'country_code', flat=True).distinct()
+        return {code.upper() for code in selected}
     return codes
 
 
-def countries_for(actor, permission_cache=None):
+def countries_for(actor, permission_cache=None, *, include_best=False):
     require_metrics(actor, permission_cache)
     rows = CountrySiteMaster.objects.filter(tenant_id=actor.tenant_id, status='active')
-    configs = _custom_scope_configs(actor, INVENTORY, permission_cache, resource_code='commerce.inventory')
-    if configs is not None:
-        codes = set()
-        for config in configs:
-            values = _config_countries(actor, config)
-            if values is None and set(config) & {'sku_ids', 'spu_ids'}:
-                return rows
-            codes.update(values or [])
-        rows = rows.filter(country_code__in=codes)
-    return rows.order_by('country_code', 'pk')
+    branches = _inventory_branches(actor, permission_cache, include_best=include_best)
+    codes = set()
+    for branch in branches:
+        values = _config_countries(actor, branch, require_provider_evidence=include_best)
+        if values is None and (branch.product_restricted or not branch.provider_restricted):
+            return rows.order_by('country_code', 'pk')
+        codes.update(values or ())
+    return rows.filter(country_code__in=codes).order_by('country_code', 'pk')
 
 
-def country_for(actor, pk, permission_cache=None):
-    country = countries_for(actor, permission_cache).filter(pk=pk).first()
+def country_for(actor, pk, permission_cache=None, *, include_best=False):
+    country = countries_for(actor, permission_cache, include_best=include_best).filter(pk=pk).first()
     if not country:
         raise NotFound('国家不存在或不在库存数据授权范围内。')
     return country
 
 
-def skus_for(actor, country, permission_cache=None):
+def skus_for(actor, country, permission_cache=None, *, include_best=False):
     rows = ProductSKU.objects.filter(tenant_id=actor.tenant_id, is_active=True).exclude(inventory_type='virtual')
-    configs = _custom_scope_configs(actor, INVENTORY, permission_cache, resource_code='commerce.inventory')
-    if configs is None:
-        return rows
     allowed = Q(pk__in=[])
-    for config in configs:
-        codes = _config_countries(actor, config)
-        if codes is not None and country.country_code.upper() not in codes:
+    for branch in _inventory_branches(actor, permission_cache, include_best=include_best):
+        codes = _config_countries(actor, branch, require_provider_evidence=include_best)
+        if codes is None:
+            if branch.provider_restricted and not branch.product_restricted:
+                continue
+        elif country.country_code.upper() not in codes:
             continue
-        branch = Q(tenant_id=actor.tenant_id)
-        constrained = False
-        for key, field in (('sku_ids', 'pk'), ('spu_ids', 'spu_id')):
-            if key in config:
-                values = config[key]
-                if not isinstance(values, list) or not values or any(type(v) is not int or v <= 0 for v in values):
-                    raise PermissionDenied('库存商品范围配置无效。')
-                branch &= Q(**{field + '__in': values})
-                constrained = True
-        if constrained or codes is not None:
-            allowed |= branch
+        if not branch.product_restricted:
+            return rows
+        allowed |= branch.product_filter()
     return rows.filter(allowed)
-
-
-def _warehouse_ids(actor, country, sku, *, branches):
-    """None means all warehouses; a set preserves branch-wise product/warehouse scope."""
-    if branches is None:
-        return None
-    ids = set()
-    for config, codes in branches:
-        if codes is not None and country.country_code.upper() not in codes:
-            continue
-        if 'sku_ids' in config and sku.pk not in config['sku_ids']:
-            continue
-        if 'spu_ids' in config and sku.spu_id not in config['spu_ids']:
-            continue
-        if not config.get('warehouse_ids'):
-            if set(config) & {'sku_ids', 'spu_ids', 'regions', 'store_ids'}:
-                return None
-            continue
-        ids.update(config['warehouse_ids'])
-    return ids
 
 
 def suggestion_quantity(sales, ratio, available, incoming=0, reserved_demand=0, *, target_days=None, window_days=None):
@@ -297,30 +375,132 @@ def sales_platform_options(actor, country):
             for platform_type, platform_names in sorted(names.items())]
 
 
-def inventory_context_for(actor, country):
-    """One scoped immutable inventory read per background country calculation."""
+def _inventory_identity(actor, country):
+    return actor.tenant_id, actor.pk, getattr(actor, '_active_membership_id', None), country.pk
+
+
+def inventory_context_for(actor, country, *, include_best=False, permission_cache=None, sku_ids=None, now=None):
+    """Read each provider's latest identities before checking product mappings."""
     from apps.sales_management.inventory_queries import latest_country_inventory
-    require_metrics(actor)
-    raw=latest_country_inventory(_country_inventory_source(actor,country,timezone.now()))
-    scoped=filter_inventory_queryset(actor,INVENTORY,raw)
-    by_sku=defaultdict(list)
-    for record in scoped.select_related('source_run').only('id','tenant_id','internal_sku_id','warehouse_id','source_sku','seller_sku','available_qty','on_hand_qty','in_transit_qty','provided_quantity_fields','snapshot_at_utc','source_run_id','source_run__id','source_run__status','source_run__failed_count').iterator(chunk_size=1000):
-        by_sku[record.internal_sku_id].append(record)
-    warehouses=WarehouseMaster.objects.filter(tenant_id=actor.tenant_id,country_code__iexact=country.country_code,status='active')
-    connected=set(SyncJob.objects.filter(tenant_id=actor.tenant_id,resource_type='inventory_snapshot',integration_config__platform='jifeng_wms',warehouse_authorization__warehouse__in=warehouses).values_list('warehouse_authorization__warehouse_id',flat=True))
-    facts=list(raw.order_by().values('warehouse_id').annotate(unmapped_count=Count('pk',filter=Q(internal_sku__isnull=True))))
-    connected.update(row['warehouse_id'] for row in facts)
-    return {'identity':(actor.tenant_id,actor.pk,country.pk),'by_sku':by_sku,'warehouses':list(warehouses.filter(pk__in=connected)),'unmapped_warehouses':{row['warehouse_id'] for row in facts if row['unmapped_count']}}
+    require_metrics(actor, permission_cache)
+    branches = _inventory_branches(actor, permission_cache, include_best=include_best)
+    now = now or timezone.now()
+    country_warehouses = WarehouseMaster.objects.filter(tenant_id=actor.tenant_id,
+        country_code__iexact=country.country_code, status='active')
+    by_sku = defaultdict(list)
+    coverage, unmapped = set(), set()
+    providers = {provider for branch in branches for provider in branch.providers}
+    for provider in sorted(providers):
+        provider_branches = [branch for branch in branches if provider in branch.providers]
+        source = (_country_inventory_source(actor, country, now) if provider == JIFENG else
+                  _provider_facts(actor, (BEST,)).filter(warehouse__in=country_warehouses, snapshot_at_utc__lte=now))
+        envelope, mapped = Q(pk__in=[]), Q(pk__in=[])
+        for branch in provider_branches:
+            source_filter = branch.source_filter()
+            # Q() is neutral for OR in Django. A branch with no source
+            # dimensions must explicitly contribute all warehouse/site pairs.
+            envelope |= source_filter or Q(pk__isnull=False)
+            mapped |= (source_filter & branch.product_filter(inventory=True)) or Q(pk__isnull=False)
+        if not any(not branch.source_filter() for branch in provider_branches):
+            source = source.filter(envelope)
+        raw = latest_country_inventory(source)
+        facts = raw.order_by().values('warehouse_id', 'site_code').annotate(
+            unmapped_count=Count('pk', filter=Q(internal_sku__isnull=True)))
+        for fact in facts:
+            pair = fact['warehouse_id'], provider, fact['site_code']
+            if any(not branch.product_restricted and branch.allows_source(*pair) for branch in provider_branches):
+                coverage.add(pair)
+                if fact['unmapped_count']:
+                    unmapped.add(pair)
+
+        # A bound job can explain a missing observation. BEST jobs query a
+        # configured SKU list, so a job or completed run never supplies zero
+        # stock or completeness for a SKU without its own fact.
+        jobs = _connected_inventory_jobs(actor, (provider,)).filter(
+            warehouse_authorization__warehouse__in=country_warehouses).order_by().values_list(
+            'warehouse_authorization__warehouse_id', 'warehouse_authorization__warehouse__country_code').distinct()
+        for warehouse_id, site_code in jobs:
+            pair = warehouse_id, provider, site_code.upper()
+            if any(branch.allows_source(*pair) for branch in provider_branches):
+                coverage.add(pair)
+
+        stock = raw.filter(mapped, warehouse__status='active', internal_sku_id__isnull=False)
+        if sku_ids is not None:
+            stock = stock.filter(internal_sku_id__in=sku_ids)
+        stock = stock.annotate(inventory_provider=Value(provider)).select_related('source_run').only(
+            'id', 'internal_sku_id', 'warehouse_id', 'site_code', 'source_sku', 'available_qty', 'on_hand_qty',
+            'in_transit_qty', 'provided_quantity_fields', 'snapshot_at_utc', 'source_run_id',
+            'source_run__status', 'source_run__failed_count', 'source_run__finished_at')
+        for record in stock.order_by().iterator(chunk_size=1000):
+            if any(branch.allows_source(record.warehouse_id, provider, record.site_code) for branch in provider_branches):
+                by_sku[record.internal_sku_id].append(record)
+    warehouse_ids = {pair[0] for pair in coverage}
+    warehouse_ids.update(record.warehouse_id for records in by_sku.values() for record in records)
+    warehouses = country_warehouses.in_bulk(warehouse_ids)
+    return {'identity': _inventory_identity(actor, country), 'branches': branches, 'now': now,
+            'by_sku': by_sku, 'warehouses': warehouses, 'coverage': coverage, 'unmapped': unmapped}
+
+
+def _sku_inventory_sources(context, sku):
+    branches = [branch for branch in context['branches'] if branch.allows_product(sku)]
+    pairs = context['coverage'] | {(row.warehouse_id, row.inventory_provider, row.site_code)
+                                   for row in context['by_sku'].get(sku.pk, ())}
+    return {pair for pair in pairs if pair[0] in context['warehouses']
+            and any(branch.allows_source(*pair) for branch in branches)}
+
+
+def _inventory_run_complete(row, now):
+    run = row.source_run
+    return (run.status == 'success' and not run.failed_count and
+            (row.inventory_provider != BEST or (run.finished_at is not None and run.finished_at <= now)))
+
+
+def _sku_inventory_rows(context, sku, sources):
+    by_warehouse = defaultdict(list)
+    for record in context['by_sku'].get(sku.pk, ()):
+        pair = record.warehouse_id, record.inventory_provider, record.site_code
+        if pair in sources:
+            by_warehouse[record.warehouse_id].append(record)
+    warehouse_rows = {}
+    for warehouse_id, candidates in by_warehouse.items():
+        row = max(candidates, key=lambda record: (record.snapshot_at_utc, record.pk))
+        problems = []
+        if 'available_qty' not in row.provided_quantity_fields:
+            problems.append('available_quantity_unverified')
+        if not _inventory_run_complete(row, context['now']):
+            problems.append('inventory_source_incomplete')
+        if row.snapshot_at_utc < context['now'] - timedelta(hours=24):
+            problems.append('stale_inventory_snapshot')
+        if len({r.source_sku for r in candidates if r.inventory_provider == row.inventory_provider}) > 1:
+            problems.append('ambiguous_inventory_aliases')
+        warehouse_rows[warehouse_id] = row, problems
+    return warehouse_rows
+
+
+def mapped_inventory_facts(context, skus):
+    """Use the same selected warehouse rows for the mapped workbench summary."""
+    for sku in skus.iterator(chunk_size=1000):
+        sources = _sku_inventory_sources(context, sku)
+        for row, problems in _sku_inventory_rows(context, sku, sources).values():
+            yield {'internal_sku_id': sku.pk, 'available_qty': row.available_qty if not problems else None}
+
+
+def _supply_warehouse_ids(sku, country_branches):
+    branches = [branch for branch in country_branches if branch.allows_product(sku)]
+    if any(not branch.warehouse_ids and
+           (not branch.provider_restricted or branch.site_codes is not None or branch.product_restricted)
+           for branch in branches):
+        return None
+    return {warehouse_id for branch in branches for warehouse_id in branch.warehouse_ids}
 
 
 def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mapped_only=False,
                   end_date=None, ratio=None, include_in_transit=True, windows=(7, 15, 30), exclude_order_id=None,
-                  demand_horizon_start=None, demand_horizon_end=None, platform_type=None, sales_observations=None, pipeline_observations=None, inventory_context=None, compact_product_details=False):
+                  demand_horizon_start=None, demand_horizon_end=None, platform_type=None, sales_observations=None, pipeline_observations=None, inventory_context=None, compact_product_details=False, include_best=False):
     # A fresh cache per calculation, never stored on the user or reused by a
     # later request/batch. Revocations remain visible on the very next call.
     permission_cache = {}
     require_metrics(actor, permission_cache)
-    from apps.sales_management.inventory_queries import latest_country_inventory
     skus = list(skus)
     if not skus:
         return []
@@ -329,40 +509,24 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mappe
     linked_ids = linked_sku_ids(actor.tenant_id, country.country_code, ids)
     window_sizes = tuple(sorted(set(windows) | {window_days}))
     sales = sales_observations if sales_observations is not None else sales_windows(actor, country, ids, window_sizes, end_date=end_date, permission_cache=permission_cache, platform_type=platform_type)
-    if inventory_context is not None:
-        if inventory_context['identity'] != (actor.tenant_id, actor.pk, country.pk):
-            raise PermissionDenied('库存上下文不匹配。')
-        stock=[record for sku_id in ids for record in inventory_context['by_sku'].get(sku_id,())]
-        warehouses=inventory_context['warehouses']
-        unmapped_warehouses=inventory_context['unmapped_warehouses']
-    else:
-        # Rank source identities before filtering mappings/status. A failed or unmapped newest row must not expose an older valid one.
-        raw = latest_country_inventory(_country_inventory_source(actor, country, now))
-        scoped = filter_inventory_queryset(actor, INVENTORY, raw, permission_cache=permission_cache)
-        stock = list(scoped.filter(internal_sku_id__in=ids).select_related('source_run', 'warehouse'))
-        country_warehouses = WarehouseMaster.objects.filter(tenant_id=actor.tenant_id,
-            country_code__iexact=country.country_code, status='active')
-        # Only connected or observed warehouses belong to this API stock total. Planned archives without an API connection do not invent stock.
-        connected = set(SyncJob.objects.filter(tenant_id=actor.tenant_id, resource_type='inventory_snapshot',
-            integration_config__platform='jifeng_wms', warehouse_authorization__warehouse__in=country_warehouses)
-            .values_list('warehouse_authorization__warehouse_id', flat=True))
-        # Both facts describe the same latest identity set; rank once, without
-        # pushing the unmapped predicate into source selection.
-        warehouse_facts = list(raw.order_by().values('warehouse_id').annotate(
-            unmapped_count=Count('pk', filter=Q(internal_sku__isnull=True))))
-        connected.update(row['warehouse_id'] for row in warehouse_facts)
-        warehouses = list(country_warehouses.filter(pk__in=connected))
-        unmapped_warehouses = {row['warehouse_id'] for row in warehouse_facts if row['unmapped_count']}
-    observations = defaultdict(list)
-    for record in stock:
-        observations[(record.internal_sku_id, record.warehouse_id)].append(record)
-    # Authorization is resolved per request, never cached across actors/requests.
-    configs = _custom_scope_configs(actor, INVENTORY, permission_cache, resource_code='commerce.inventory')
-    branches = None if configs is None else [(config, _config_countries(actor, config)) for config in configs]
-    warehouse_scopes = {sku.pk: _warehouse_ids(actor, country, sku, branches=branches) for sku in skus}
+    if inventory_context is None:
+        inventory_context = inventory_context_for(actor, country, include_best=include_best,
+            permission_cache=permission_cache, sku_ids=ids, now=now)
+    elif (inventory_context['identity'] != _inventory_identity(actor, country) or
+            inventory_context['branches'] != _inventory_branches(actor, permission_cache, include_best=include_best)):
+        raise PermissionDenied('库存上下文不匹配。')
+    branches = inventory_context['branches']
+    sku_sources = {sku.pk: _sku_inventory_sources(inventory_context, sku) for sku in skus}
+    # The supply summary has its own permission check. Inventory coverage
+    # cannot narrow local supply facts assigned to authorized warehouses.
+    country_branches = []
+    for branch in branches:
+        codes = _config_countries(actor, branch)
+        if codes is None or country.country_code.upper() in codes:
+            country_branches.append(branch)
     groups = defaultdict(list)
     for sku in skus:
-        scope = warehouse_scopes[sku.pk]
+        scope = _supply_warehouse_ids(sku, country_branches)
         groups[None if scope is None else tuple(sorted(scope))].append(sku.pk)
     pipelines = {}
     for scope, group_ids in groups.items():
@@ -380,30 +544,18 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mappe
     can_view_cost_ledger = check_user_permission(actor, 'supply.v2.view', cache=permission_cache) if skus else False
     for sku in skus:
         issues, warehouse_rows, selected = [], [], []
-        allowed_warehouses = warehouse_scopes[sku.pk]
+        sources = sku_sources[sku.pk]
+        observations = _sku_inventory_rows(inventory_context, sku, sources)
         pipe = pipelines[sku.pk]
         issues.extend(pipe['issues'])
         if not pipe['authorized']:
             issues.append('supply_summary_not_authorized')
-        for warehouse in warehouses:
-            if allowed_warehouses is not None and warehouse.pk not in allowed_warehouses:
-                continue
-            candidates = sorted(observations[(sku.pk, warehouse.pk)], key=lambda r: (r.snapshot_at_utc, r.pk), reverse=True)
-            if mapped_only and not candidates:
-                continue
-            row, problems = (candidates[0] if candidates else None), []
-            if not row:
-                problems.append('missing_inventory_snapshot')
-            else:
+        warehouse_ids = observations.keys() if mapped_only else {pair[0] for pair in sources}
+        for warehouse_id in sorted(warehouse_ids):
+            warehouse = inventory_context['warehouses'][warehouse_id]
+            row, problems = observations.get(warehouse_id, (None, ['missing_inventory_snapshot']))
+            if row:
                 selected.append(row)
-                if 'available_qty' not in row.provided_quantity_fields:
-                    problems.append('available_quantity_unverified')
-                if row.source_run.status != 'success' or row.source_run.failed_count:
-                    problems.append('inventory_source_incomplete')
-                if row.snapshot_at_utc < now - timedelta(hours=24):
-                    problems.append('stale_inventory_snapshot')
-                if len({r.source_sku for r in candidates}) > 1:
-                    problems.append('ambiguous_inventory_aliases')
             issues.extend(problems)
             warehouse_rows.append({'id': warehouse.pk, 'name': warehouse.name,
                 'available_qty': str(row.available_qty) if row and not problems else None,
@@ -411,14 +563,16 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mappe
                 'snapshot_at': row.snapshot_at_utc.isoformat() if row else None, 'issues': problems})
         if not warehouse_rows:
             issues.append('missing_inventory_snapshot')
-        relevant_unmapped = bool(unmapped_warehouses if allowed_warehouses is None else unmapped_warehouses & allowed_warehouses)
+        relevant_unmapped = any(
+            not branch.product_restricted and any(branch.allows_source(*pair)
+                for pair in sources & inventory_context['unmapped']) for branch in branches)
         if relevant_unmapped:
             issues.append('unmapped_inventory')
         complete = bool(warehouse_rows) and (mapped_only or not relevant_unmapped) and all(not r['issues'] for r in warehouse_rows)
         available = sum((r.available_qty for r in selected), Decimal(0)) if complete else None
         transit = (sum((r.in_transit_qty for r in selected), Decimal(0)) if selected and
-                   all('in_transit_qty' in r.provided_quantity_fields and r.source_run.status == 'success'
-                       and not r.source_run.failed_count for r in selected) else None)
+                   all('in_transit_qty' in r.provided_quantity_fields
+                       and _inventory_run_complete(r, inventory_context['now']) for r in selected) else None)
         windows_output = []
         for days in window_sizes:
             observed = sales[days]

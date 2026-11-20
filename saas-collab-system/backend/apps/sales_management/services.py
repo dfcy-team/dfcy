@@ -266,6 +266,31 @@ def upsert_normalized_refund(*, tenant, payload, source_run):
         if order_item is not None and sku is not None and sku.id != sku_id:
             sku_id = None
         sku_fields = {'internal_sku_id': sku_id} if sku_id and (current is None or current.internal_sku_id is None) else {}
+        details = dict(current.source_details or {}) if current is not None else {}
+        if isinstance(item_payload.get('amount_observations'), dict) and store.platform.platform_type == 'shopee':
+            details.update(item_payload['amount_observations'])
+        proof = item_payload.get('quantity_confirmation')
+        if proof is not None:
+            if (store.platform.platform_type != 'tiktok'
+                    or not isinstance(proof, dict)
+                    or set(proof) != {'return_line_item_id', 'order_line_item_id', 'quantity', 'source'}
+                    or proof.get('source') != 'matching_sales_order_item'
+                    or type(proof.get('quantity')) is not int or proof.get('quantity') != 1
+                    or type(item_payload.get('quantity')) is not int or item_payload.get('quantity') != 1
+                    or proof.get('return_line_item_id') != external_item_id
+                    or proof.get('order_line_item_id') != external_order_item_id
+                    or order_item is None
+                    or order_item.external_line_id != external_order_item_id
+                    or order_item.quantity != 1
+                    or not str(item_payload.get('platform_variant_id') or '')
+                    or order_item.platform_variant_id != str(item_payload.get('platform_variant_id') or '')):
+                raise ValidationError({'items': 'TikTok refund quantity proof does not match its linked order line.'})
+            details['quantity_confirmation'] = {
+                'return_line_item_id': external_item_id,
+                'order_line_item_id': external_order_item_id,
+                'quantity': 1,
+                'source': 'matching_sales_order_item',
+            }
         saved_item, _ = RefundReturnItem.objects.update_or_create(
             refund_return=refund,
             external_return_item_id=external_item_id,
@@ -280,8 +305,7 @@ def upsert_normalized_refund(*, tenant, payload, source_run):
                 "quantity": int(item_payload.get("quantity") or 0),
                 "currency": str(item_payload.get("currency") or defaults["currency"]).upper(),
                 "refund_amount": _decimal(item_payload.get("refund_amount")),
-                **({'source_details': item_payload['amount_observations']}
-                   if store.platform.platform_type == 'shopee' and isinstance(item_payload.get('amount_observations'), dict) else {}),
+                **({'source_details': details} if details else {}),
             },
         )
         if sku_fields:

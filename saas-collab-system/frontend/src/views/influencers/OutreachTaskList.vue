@@ -8,14 +8,53 @@
       </div>
     </header>
 
+    <div class="overview">
     <div class="metrics">
       <div><span>任务总数（接口筛选范围）</span><strong>{{ displayValue(taskStats.total) }}</strong></div>
       <div><span>进行中（接口当前页）</span><strong>{{ displayValue(taskStats.inProgress) }}</strong></div>
       <div><span>已建联（接口当前页）</span><strong>{{ displayValue(taskStats.linked) }}</strong></div>
       <div><span>送样记录（接口当前页）</span><strong>{{ displayValue(taskStats.fulfillments) }}</strong></div>
     </div>
-    <p class="metrics-note">统计不包含“下发人”和“正常任务”页内筛选；接口当前页指标包含因此隐藏的行。</p>
+    <div class="activity-board">
+    <section class="activity" aria-labelledby="priority-title">
+      <div class="activity-heading"><h2 id="priority-title">重点建联任务</h2></div>
+      <p v-if="activityError || priorityLoadError" class="activity-message" role="status">未能加载重点任务，请刷新动态重试。</p>
+      <p v-else-if="!priorityTasks.urgent.length && !priorityTasks.high.length" class="activity-message">{{ activityLoading ? '正在加载重点任务…' : '暂无紧急或高优先级任务' }}</p>
+      <div v-else class="priority-groups">
+        <div v-for="priority in ['urgent', 'high']" v-show="priorityTasks[priority].length" :key="priority" class="priority-group">
+          <h3><el-tag size="small" :type="priorityTagType(priority)">{{ OUTREACH_PRIORITY_LABELS[priority] }}</el-tag></h3>
+          <ul class="activity-list">
+            <li v-for="task in priorityTasks[priority]" :key="task.id" class="priority-task">
+              <strong>{{ task.task_no }}</strong><span>{{ displayValue(task.task_name) }}</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+    <section class="activity" aria-labelledby="activity-title">
+      <div class="activity-heading">
+        <h2 id="activity-title">最新运营要求 / 任务动态</h2>
+        <el-button link type="primary" :disabled="activityLoading" @click="loadRecentRequirements">刷新动态</el-button>
+      </div>
+      <p v-if="activityError" class="activity-message" role="status">任务动态刷新失败，请重试。</p>
+      <p v-else-if="!recentRequirements.length" class="activity-message">{{ activityLoading ? '正在加载任务动态…' : '暂无已下发的运营要求' }}</p>
+      <ul v-if="recentRequirements.length" class="activity-list">
+        <li v-for="task in recentRequirements" :key="task.id">
+          <button type="button" class="activity-row" @click="openDetail(task)">
+            <el-tag size="small" :type="priorityTagType(task.priority)">{{ statusLabel(OUTREACH_PRIORITY_LABELS, task.priority) }}</el-tag>
+            <strong>{{ task.task_no }}</strong>
+            <span class="activity-requirement" :title="task.dispatch_requirements">{{ task.dispatch_requirements }}</span>
+            <el-tag size="small" effect="plain">{{ statusLabel(OUTREACH_STATUS_LABELS, task.status) }}</el-tag>
+            <time :datetime="task.dispatch_time">{{ formatTaskTime(task.dispatch_time) }}</time>
+          </button>
+        </li>
+      </ul>
+    </section>
+    </div>
+    </div>
+    <p class="metrics-note">下发人和正常任务筛选适用于全部有权查看的记录；除任务总数外，其余指标按当前页统计。</p>
 
+    <PriorityTaskCarousel :groups="priorityTasks" :loading="priorityLoading" :error="priorityError" />
     <el-card class="workspace-card" shadow="never">
       <div class="toolbar">
         <el-input
@@ -24,10 +63,10 @@
           placeholder="搜索任务/店铺/商品/负责人"
           @keyup.enter="applyFilters"
         />
-        <el-select v-model="filters.status" clearable placeholder="全部状态" @change="applyFilters">
+        <el-select v-model="filters.status" multiple collapse-tags collapse-tags-tooltip clearable placeholder="全部状态" @change="applyFilters">
           <el-option v-for="(label, value) in OUTREACH_STATUS_LABELS" :key="value" :label="label" :value="value" />
         </el-select>
-        <el-select v-model="filters.store" clearable filterable placeholder="全部店铺" @change="applyFilters">
+        <el-select v-model="filters.store" multiple collapse-tags collapse-tags-tooltip clearable filterable placeholder="全部店铺" @change="applyFilters">
           <el-option v-for="store in filterStoreOptions" :key="store.id" :label="store.name" :value="store.id" />
         </el-select>
         <el-select v-model="filters.dispatcher" clearable filterable placeholder="全部下发人" @change="applyFilters">
@@ -47,12 +86,12 @@
         <el-checkbox v-model="filters.deletedOnly" @change="applyFilters">只显示删除的</el-checkbox>
         <el-button type="primary" @click="applyFilters">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
-        <el-button type="primary" :disabled="!canManage" @click="openCreate">新建任务</el-button>
+        <el-button type="primary" :disabled="!canManage" @click="openCreate()">新建任务</el-button>
       </div>
 
       <el-table
         v-loading="loading"
-        :data="visibleRows"
+        :data="rows"
         row-key="id"
         :row-class-name="rowClassName"
         empty-text="暂无建联任务"
@@ -90,9 +129,9 @@
             <span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column label="负责人" min-width="130">
+        <el-table-column label="运营下发要求" min-width="240" show-overflow-tooltip>
           <template #default="{ row }">
-            <b>{{ displayValue(taskOwnerNames(row)) }}</b>
+            {{ displayValue(row.dispatch_requirements) }}
           </template>
         </el-table-column>
         <el-table-column label="状态" width="100">
@@ -116,20 +155,21 @@
         <el-table-column prop="finalized_at" label="任务完成时间" min-width="165">
           <template #default="{ row }">{{ formatTaskTime(row.finalized_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" min-width="205" fixed="right">
+        <el-table-column label="操作" min-width="240" fixed="right">
           <template #default="{ row }">
             <el-button link @click.stop="openDetail(row)">查看详情</el-button>
             <el-button v-if="!row.is_deleted" link :disabled="!canManage" @click.stop="openEdit(row)">修改</el-button>
+            <el-button v-if="TASK_REUSE_ENABLED && !row.is_deleted" link :disabled="!canManage" @click.stop="openReuse(row)">复用</el-button>
             <el-button v-if="!row.is_deleted" link type="danger" :disabled="!canManage" @click.stop="removeTask(row)">删除</el-button>
             <el-button v-else link type="primary" :disabled="!canManage" @click.stop="restoreTask(row)">恢复</el-button>
           </template>
         </el-table-column>
       </el-table>
       <el-pagination
-        v-if="visibleTotal"
+        v-if="total"
         v-model:current-page="page"
         v-model:page-size="pageSize"
-        :total="visibleTotal"
+        :total="total"
         layout="total, prev, pager, next"
         @current-change="load"
       />
@@ -172,8 +212,11 @@
           <el-input v-model="form.sku_prefix" :disabled="editingTaskTerminal" placeholder="匹配商品后自动填写，也可人工调整" />
         </el-form-item>
         <el-form-item label="目标人数" required><el-input-number v-model="form.target_count" :disabled="editingTaskTerminal" :min="editingTask ? 0 : 1" :step="1" step-strictly /></el-form-item>
+        <el-form-item label="运营下发要求">
+          <el-input v-model="form.dispatch_requirements" type="textarea" :rows="3" maxlength="1000" show-word-limit :disabled="editingTaskTerminal" placeholder="填写视频内容、产品展示等要求（选填）" />
+        </el-form-item>
         <el-form-item v-if="editingTask" label="任务状态" required>
-          <el-select v-model="form.status" :disabled="editingTaskTerminal">
+          <el-select v-model="form.status" :disabled="editingTask?.status === 'cancelled'">
             <el-option v-for="value in editableTaskStatuses" :key="value" :label="statusLabel(OUTREACH_STATUS_LABELS, value)" :value="value" />
           </el-select>
         </el-form-item>
@@ -245,7 +288,7 @@
               v-if="!row.is_deleted"
               link
               type="primary"
-              :disabled="!canCreateFulfillment || isCancelled(activeTask)"
+              :disabled="!canCreateFulfillment || isCancelled(activeTask) || activeTask?.status === 'paused'"
               @click="openSampleFulfillment(row)"
             >创建送样</el-button>
             <el-button
@@ -342,7 +385,7 @@
               type="primary"
               :disabled="!canManage"
               @click="changeStatus(detailTask, nextStatus)"
-            >{{ taskStatusActionLabel(nextStatus) }}</el-button>
+            >{{ taskStatusActionLabel(nextStatus, detailTask) }}</el-button>
           </div>
 
           <section class="detail-section">
@@ -371,6 +414,7 @@
               <el-tag :type="sampleRecordTargetReached(detailTask) ? 'success' : 'info'">{{ sampleRecordTargetReached(detailTask) ? '已达到目标' : '未达到目标' }}</el-tag>
             </div>
             <div class="status-summary"><span v-for="[status, count] in sampleStatusSummaryEntries(detailTask)" :key="status">{{ statusLabel(FULFILLMENT_STATUS_LABELS, status) }} {{ count }}</span></div>
+            <div class="detail-note"><span>运营下发要求</span><p>{{ displayValue(detailTask.dispatch_requirements) }}</p></div>
             <div class="detail-note"><span>任务履约反馈</span><p>{{ displayValue(detailTask.notes) }}</p></div>
           </section>
 
@@ -381,7 +425,7 @@
                 <el-tag>{{ detailSamples.length }}</el-tag>
                 <el-button
                   type="primary"
-                  :disabled="!canCreateFulfillment || isCancelled(detailTask)"
+                  :disabled="!canCreateFulfillment || isCancelled(detailTask) || detailTask?.status === 'paused'"
                   @click="createSampleFromDetail"
                 >创建送样</el-button>
               </div>
@@ -406,7 +450,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import PriorityTaskCarousel from './PriorityTaskCarousel.vue';
 import { taskProgressNotice, recordSourceLabel, publishedEvidenceNotice } from './recordEvidence';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
@@ -447,11 +492,32 @@ import { formatTaskDateTime } from './taskDateTime';
 import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
 const auth = useAuthStore();
+const TASK_REUSE_ENABLED = false;
 const rows = ref([]);
+const recentRequirements = ref([]);
+const priorityTasks = ref({ urgent: [], high: [] });
+const priorityLoadError = ref(false);
+const priorityLoading = ref(false);
+const priorityError = ref(false);
+async function loadPriorityTasks() {
+  priorityLoading.value = true;
+  try {
+    const response = await fetchOutreachTasks({ priority_only: 'true' });
+    const grouped = response.data?.priority_tasks;
+    if (!response.success || !Array.isArray(grouped?.urgent) || !Array.isArray(grouped?.high)) throw new Error('Invalid priority data');
+    priorityTasks.value = grouped;
+    priorityError.value = false;
+  } catch { priorityError.value = true; }
+  finally { priorityLoading.value = false; }
+}
+const activityLoading = ref(false);
+const activityError = ref(false);
+let activityTimer;
 const total = ref(0);
 const page = ref(1);
 const pageSize = ref(20);
 const loading = ref(false);
+let listRequest = 0;
 const saving = ref(false);
 const createVisible = ref(false);
 const targetsVisible = ref(false);
@@ -471,10 +537,11 @@ const editingTask = ref(null);
 const editingTaskTerminal = computed(() => ['completed', 'cancelled'].includes(editingTask.value?.status));
 const storeOptions = ref([]);
 const bdOptions = ref([]);
+const dispatcherOptions = ref([]);
 const influencerOptions = ref([]);
 const taskOptionsLoaded = ref(false);
 const influencerOptionsLoaded = ref(false);
-const filters = reactive({ search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
+const filters = reactive({ search: '', status: [], store: [], dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
 const displayTargets = computed(() => [...targets.value, ...deletedTargets.value]);
 const canManage = computed(() => auth.hasPermission('influencers.outreach.manage'));
 const canCreateFulfillment = computed(() => auth.hasPermission('influencers.fulfillment.manage'));
@@ -487,6 +554,7 @@ const form = reactive({
   external_product_id: '',
   sku_prefix: '',
   target_count: 1,
+  dispatch_requirements: '',
   owners: [],
   status: 'pending',
   started_at: null,
@@ -553,18 +621,6 @@ const filterStoreOptions = computed(() => {
   return [...optionsById.values()];
 });
 
-const dispatcherOptions = computed(() => {
-  const optionsById = new Map();
-  rows.value.forEach((row) => {
-    const id = row.dispatcher_id ?? row.dispatcher_name;
-    if (hasValue(id) && !optionsById.has(id)) optionsById.set(id, {
-      id,
-      name: row.dispatcher_name || row.dispatcher_id
-    });
-  });
-  return [...optionsById.values()];
-});
-
 const visibleStoreOptions = computed(() => {
   if (!matchedStoreIds.value.length) return storeOptions.value;
   const optionsById = new Map(storeOptions.value.map((store) => [store.id, store]));
@@ -587,11 +643,12 @@ const progressLabel = (row) => sampleProgressLabel(row);
 const priorityTagType = (priority) => ({ urgent: 'danger', high: 'warning', low: 'info', normal: 'success' }[priority] || 'info');
 const taskStatusTransitions = {
   pending: ['in_progress', 'cancelled'],
-  in_progress: ['completed', 'cancelled'],
-  completed: [],
+  in_progress: ['paused', 'completed', 'cancelled'],
+  paused: ['in_progress', 'cancelled'],
+  completed: ['in_progress'],
   cancelled: []
 };
-const taskStatusActionLabel = (status) => ({ in_progress: '开始任务', completed: '完成任务', cancelled: '取消任务' }[status] || statusLabel(OUTREACH_STATUS_LABELS, status));
+const taskStatusActionLabel = (status, row) => ({ in_progress: row?.status === 'completed' ? '重新打开任务' : row?.status === 'paused' ? '恢复任务' : '开始任务', paused: '暂停任务', completed: '完成任务', cancelled: '取消任务' }[status] || statusLabel(OUTREACH_STATUS_LABELS, status));
 const nextTaskStatuses = (row) => taskStatusTransitions[row?.status] || [];
 const editableTaskStatuses = computed(() => {
   const current = editingTask.value?.status || 'pending';
@@ -599,13 +656,6 @@ const editableTaskStatuses = computed(() => {
 });
 const rowClassName = () => 'clickable-task-row';
 
-const visibleRows = computed(() => rows.value.filter((row) => {
-  const dispatcher = row.dispatcher_id ?? row.dispatcher_name;
-  const matchesDispatcher = !hasValue(filters.dispatcher) || String(dispatcher) === String(filters.dispatcher);
-  const matchesNormal = !filters.normalOnly || row.priority === 'normal';
-  return matchesDispatcher && matchesNormal;
-}));
-const visibleTotal = computed(() => filters.dispatcher || filters.normalOnly ? visibleRows.value.length : total.value);
 const taskStats = computed(() => {
   const linkedValues = rows.value.map((row) => row.linked_count).filter(hasValue);
   const fulfillmentValues = rows.value
@@ -622,14 +672,43 @@ const detailProgressLabel = computed(() => {
   return outreachProgressLabel(detailProgress.value, detailTask.value);
 });
 
+let loadSeq = 0;
+async function loadRecentRequirements() {
+  if (activityLoading.value) return;
+  activityLoading.value = true;
+  activityError.value = false;
+  try {
+    const response = await fetchOutreachTasks({ recent_requirements: 'true' });
+    if (!response.success) throw new Error('Task activity unavailable');
+    recentRequirements.value = collectionRows(response.data);
+    const grouped = response.data?.priority_tasks;
+    priorityLoadError.value = !Array.isArray(grouped?.urgent) || !Array.isArray(grouped?.high);
+    priorityTasks.value = {
+      urgent: priorityLoadError.value ? [] : grouped.urgent,
+      high: priorityLoadError.value ? [] : grouped.high
+    };
+  } catch {
+    recentRequirements.value = [];
+    priorityTasks.value = { urgent: [], high: [] };
+    activityError.value = true;
+  } finally {
+    activityLoading.value = false;
+  }
+}
+
 async function load() {
+  const request = ++listRequest;
   loading.value = true;
   const params = { page: page.value, page_size: pageSize.value, ordering: filters.ordering };
   if (filters.search.trim()) params.search = filters.search.trim();
-  if (filters.status) params.status = filters.status;
-  if (filters.store) params.store = filters.store;
+  if (filters.status.length) params.status = filters.status.join(',');
+  if (filters.store.length) params.store = filters.store.join(',');
+  if (filters.dispatcher) params.dispatcher = filters.dispatcher;
+  if (filters.normalOnly) params.normal_only = 'true';
   if (filters.deletedOnly) params.deleted_only = 'true';
   const r = await fetchOutreachTasks(params);
+  if (request !== listRequest) return;
+
   loading.value = false;
   if (r.success) {
     rows.value = collectionRows(r.data);
@@ -645,13 +724,14 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
+  Object.assign(filters, { search: '', status: [], store: [], dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
   applyFilters();
 }
 
 function applyTaskOptions(data = {}) {
   storeOptions.value = data.stores || [];
   bdOptions.value = data.bd_users || [];
+  dispatcherOptions.value = data.dispatchers || [];
   if (Array.isArray(data.influencers)) {
     influencerOptions.value = data.influencers.filter((influencer) => influencer?.id !== undefined && influencer?.id !== null);
     influencerOptionsLoaded.value = true;
@@ -678,24 +758,30 @@ function clearProductMatch() {
   productMatchType.value = 'info';
 }
 
-async function openCreate() {
+async function openCreate(source = null) {
+  if (!canManage.value || !await loadTaskOptions(true)) return;
   editingTask.value = null;
   Object.assign(form, {
     task_no: '',
-    task_name: '',
+    task_name: source?.task_name || '',
     priority: 'normal',
-    store: null,
-    external_product_id: '',
-    sku_prefix: '',
+    store: source?.store ?? null,
+    external_product_id: source?.external_product_id || '',
+    sku_prefix: source?.sku_prefix || '',
     target_count: 1,
-    owners: [],
+    dispatch_requirements: source?.dispatch_requirements || '',
+    owners: source?.owners?.length ? [...source.owners] : (hasValue(source?.owner) ? [source.owner] : []),
     status: 'pending',
     started_at: null,
     finalized_at: null
   });
   clearProductMatch();
-  if (!await loadTaskOptions(true)) return;
   createVisible.value = true;
+}
+
+function openReuse(row) {
+  if (!row || row.is_deleted) return;
+  return openCreate(row);
 }
 
 async function openEdit(row) {
@@ -710,6 +796,7 @@ async function openEdit(row) {
     external_product_id: row.external_product_id || '',
     sku_prefix: row.sku_prefix || '',
     target_count: row.target_count ?? 0,
+    dispatch_requirements: row.dispatch_requirements || '',
     owners: row.owners?.length ? [...row.owners] : (hasValue(row.owner) ? [row.owner] : []),
     status: row.status || 'pending',
     started_at: row.started_at || null,
@@ -785,6 +872,7 @@ async function submit() {
   if (!r.success) return ElMessage.error(formatInfluencerError(r));
   createVisible.value = false;
   ElMessage.success('任务已创建');
+  void loadRecentRequirements();
   load();
 }
 
@@ -799,7 +887,7 @@ async function submitEdit() {
     }
   }
   saving.value = true;
-  const payload = editingTaskTerminal.value ? { task_no: form.task_no.trim() } : {
+  let payload = editingTaskTerminal.value ? { task_no: form.task_no.trim() } : {
     task_no: form.task_no.trim(),
     task_name: form.task_name,
     priority: form.priority,
@@ -807,9 +895,31 @@ async function submitEdit() {
     external_product_id: form.external_product_id,
     sku_prefix: form.sku_prefix,
     target_count: form.target_count,
+    dispatch_requirements: form.dispatch_requirements,
     owners: form.owners,
     status: form.status
   };
+  if (editingTaskTerminal.value && form.status !== editingTask.value.status) {
+    payload.status = form.status;
+    if (payload.task_no === (editingTask.value.task_no || '').trim()) delete payload.task_no;
+  }
+  if (!editingTaskTerminal.value) {
+    const row = editingTask.value;
+    const original = {
+      task_no: (row.task_no || '').trim(), task_name: row.task_name || '',
+      priority: row.priority || 'normal', store: row.store ?? null,
+      external_product_id: row.external_product_id || '', sku_prefix: row.sku_prefix || '',
+      target_count: row.target_count ?? 0,
+      owners: row.owners?.length ? row.owners : (hasValue(row.owner) ? [row.owner] : []),
+      status: row.status || 'pending'
+    };
+    payload = Object.fromEntries(Object.entries(payload).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(original[key])));
+    if (!Object.keys(payload).length) {
+      saving.value = false;
+      createVisible.value = false;
+      return;
+    }
+  }
   const r = await updateOutreachTask(editingTask.value.id, payload, editingTask.value.version);
   saving.value = false;
   if (!r.success) {
@@ -821,6 +931,7 @@ async function submitEdit() {
   if (detailTask.value?.id === editingTask.value.id) detailTask.value = { ...detailTask.value, ...updated };
   createVisible.value = false;
   ElMessage.success('任务已修改');
+  void loadRecentRequirements();
   await load();
   if (detailTask.value?.id === updated.id) await loadDetailData(detailTask.value, false);
 }
@@ -838,6 +949,7 @@ async function changeStatus(row, status) {
   if (!r.success) return ElMessage.error(formatInfluencerError(r));
   Object.assign(row, detailData(r.data));
   ElMessage.success('任务状态已更新');
+  void loadRecentRequirements();
   await load();
   if (detailTask.value?.id === row.id) {
     detailTask.value = { ...detailTask.value, ...row };
@@ -855,8 +967,11 @@ async function openDetail(row) {
   await loadDetailData(row);
 }
 
+let detailLoadSequence = 0;
+
 async function loadDetailData(task, showLoading = true) {
   if (!task?.id) return;
+  const sequence = ++detailLoadSequence;
   const taskId = task.id;
   if (showLoading) detailLoading.value = true;
   const sampleRequest = canViewFulfillment.value && task.id
@@ -867,7 +982,7 @@ async function loadDetailData(task, showLoading = true) {
     fetchOutreachProgress(taskId),
     sampleRequest
   ]);
-  if (detailTask.value?.id !== taskId) return;
+  if (sequence !== detailLoadSequence || detailTask.value?.id !== taskId) return;
   const failures = [];
   if (taskResponse?.success) detailTask.value = { ...detailTask.value, ...detailData(taskResponse.data) };
   else failures.push('任务事实加载失败');
@@ -885,13 +1000,15 @@ async function loadDetailData(task, showLoading = true) {
 async function removeTask(row) {
   if (!canManage.value || !row?.id || row.is_deleted) return;
   try {
-    await ElMessageBox.confirm(`确认删除任务“${displayValue(row.task_no)}”吗？删除将保留后端软删除记录。`, '确认删除', { type: 'warning' });
+    await ElMessageBox.confirm(`确认删除任务“${displayValue(row.task_no)}”吗？全部关联送样记录也会级联删除，后端保留软删除记录。`, '确认删除任务及关联送样', { type: 'warning' });
   } catch {
     return;
   }
   const r = await deleteOutreachTask(row.id, row.version);
   if (!r.success) return ElMessage.error(formatInfluencerError(r));
-  ElMessage.success('任务已删除');
+  const deletedSampleCount = Number(r.data?.deleted_sample_count || 0);
+  ElMessage.success(`任务及 ${deletedSampleCount} 条关联送样已删除`);
+  void loadRecentRequirements();
   if (detailTask.value?.id === row.id) {
     detailVisible.value = false;
     detailTask.value = null;
@@ -904,6 +1021,7 @@ async function restoreTask(row) {
   const r = await restoreOutreachTask(row.id, row.version);
   if (!r.success) return ElMessage.error(formatInfluencerError(r));
   ElMessage.success('任务已恢复');
+  void loadRecentRequirements();
   await load();
 }
 
@@ -1020,7 +1138,7 @@ function filterSampleInfluencers(query) {
 }
 
 async function openSampleCreate(task, target = null) {
-  if (!task?.id || !canCreateFulfillment.value || isCancelled(task)) return;
+  if (!task?.id || !canCreateFulfillment.value || isCancelled(task) || task.status === 'paused') return;
   if (target && (!target.id || target.is_deleted)) return;
   if (!await loadTaskOptions(true, false)) return;
   const store = storeOptions.value.find((item) => String(item.id) === String(task.store));
@@ -1190,9 +1308,14 @@ async function restoreTarget(row) {
 }
 
 onMounted(async () => {
+  void loadRecentRequirements();
+  activityTimer = window.setInterval(() => {
+    if (!document.hidden) void loadRecentRequirements();
+  }, 60_000);
   await load();
   await loadTaskOptions();
 });
+onUnmounted(() => window.clearInterval(activityTimer));
 </script>
 
 <style scoped>
@@ -1201,6 +1324,8 @@ onMounted(async () => {
 .page-hero h1 { margin: 6px 0; }
 .page-hero p { margin: 0; opacity: .82; }
 .creator-page small, .target-card small, .sample-card small { display: block; color: #84909c; font-size: 12px; }
+.overview { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 12px; }
+.activity-board { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .metrics { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; overflow: hidden; }
 .metrics div { padding: 15px 18px; border-right: 1px solid #e5e7eb; }
 .metrics div:last-child { border: 0; }
@@ -1208,6 +1333,31 @@ onMounted(async () => {
 .metrics span { color: #84909c; font-size: 12px; }
 .metrics strong { margin-top: 5px; color: #1f2937; font-size: 24px; }
 .metrics-note { margin: 0; color: #64748b; font-size: 12px; }
+.activity { min-width: 0; border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px 14px; background: #fff; }
+.activity-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.activity-heading h2 { margin: 0; font-size: 14px; color: #14594c; }
+.activity-list { margin: 4px 0 0; padding: 0; list-style: none; }
+.priority-groups { display: grid; gap: 5px; margin-top: 5px; }
+.priority-group { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 6px; align-items: start; }
+.priority-group h3 { margin: 3px 0 0; font-size: 12px; }
+.priority-group .activity-list { margin: 0; }
+.priority-task { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; color: #334155; font-size: 12px; }
+.priority-task strong { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.priority-task span { min-width: 0; overflow-wrap: anywhere; }
+.activity-message { margin: 8px 0; font-size: 12px; color: #64748b; }
+.activity-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 3px; border: 0; border-radius: 5px; background: transparent; color: #334155; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
+.activity-row:hover, .activity-row:focus-visible { background: #f0f7f4; }
+.activity-row strong, .activity-row time { flex-shrink: 0; }
+.activity-row time { color: #64748b; }
+.activity-requirement { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1050px) {
+  .overview { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 620px) {
+  .activity-board { grid-template-columns: minmax(0, 1fr); }
+  .activity-row { flex-wrap: wrap; }
+  .activity-requirement { order: 1; flex-basis: 100%; white-space: normal; overflow-wrap: anywhere; }
+}
 .toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; margin-bottom: 16px; overflow-x: auto; }
 .toolbar .el-input { flex: 1 1 420px; min-width: 280px; }
 .toolbar .el-select { flex: 0 0 140px; width: 140px; }

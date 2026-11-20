@@ -49,7 +49,7 @@ def test_sales_dataset_groups_currency_and_separates_cancelled_orders_and_tenant
     _report_access(viewer, "sales_management.view")
 
     response = client_for(viewer).post(QUERY, _config("sales", ["store_id"], ["order_count", "valid_order_count", "cancelled_order_count", "gross_sales"]), format="json")
-    assert response.status_code == 200
+    assert response.status_code == 200, response.data
     data = response.json()["data"]
     assert data["config"]["dimensions"] == ["store_id", "currency"]
     assert data["count"] == 1
@@ -77,9 +77,14 @@ def test_all_dataset_defaults_execute_authorized_queries(dataset):
     tenant, _, _, _ = create_scope(f"report-default-{dataset}")
     viewer = user_for(tenant, f"report-default-{dataset}")
     _report_access(viewer, "sales_management.view", "finance.view", "products.cost.view", "analytics.view")
-    filters = {"date_from": "2026-01-01", "date_to": "2026-01-31"} if dataset == "advertising" else {}
+    for permission in set(DATASETS[dataset].get('extra_permissions', [])) - {
+            'sales_management.view', 'finance.view', 'products.cost.view', 'analytics.view'}:
+        grant(viewer, permission)
+    filters = {"date_from": "2026-01-01", "date_to": "2026-01-31"} if dataset in {"advertising", "sales_abc"} else {}
+    if dataset == 'sales_abc':
+        filters['country'] = 'PH'
     response = client_for(viewer).post(QUERY, {"dataset": dataset, **DATASETS[dataset]["defaults"], "filters": filters}, format="json")
-    assert response.status_code == 200
+    assert response.status_code == 200, response.data
     assert response.json()["data"]["api_status"] == "connected"
 
 

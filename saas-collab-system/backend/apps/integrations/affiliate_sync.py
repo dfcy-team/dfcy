@@ -227,6 +227,16 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
                 or plan["store_id"] != store.pk or plan["timezone"] != store.timezone):
             raise ReadonlyConfigurationError("AFFILIATE_FROZEN_SCOPE_MISMATCH")
         prefix = "a3:" + run.run_id + ":"
+        if isinstance(cursor_value, str) and cursor_value.startswith("a3:") and not cursor_value.startswith(prefix):
+            parts = cursor_value.split(":")
+            previous_run = parts[1] if len(parts) == 3 else ""
+            previous_index = parts[2] if len(parts) == 3 else ""
+            valid_index = (previous_index.isascii() and previous_index.isdigit()
+                           and len(previous_index) <= 2 and str(int(previous_index)) == previous_index)
+            if valid_index and SyncRun.objects.filter(
+                    tenant_id=sync_job.tenant_id, sync_job_id=sync_job.pk,
+                    run_id=previous_run, status__in=["success", "failed"]).exists():
+                cursor_value = ""
         if cursor_value in (None, ""):
             index = 0
         else:

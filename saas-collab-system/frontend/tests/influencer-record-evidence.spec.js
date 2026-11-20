@@ -4,11 +4,11 @@ import { formatTaskDateTime } from '../src/views/influencers/taskDateTime';
 import outreachSource from '../src/views/influencers/OutreachTaskList.vue?raw';
 
 describe('read-only identity and historical evidence presentation', () => {
-  it('distinguishes API statistics from dispatcher and normal-task page filters', () => {
+  it('distinguishes filtered total from current-page indicators', () => {
     expect(outreachSource).toContain('任务总数（接口筛选范围）');
     expect(outreachSource).toContain('进行中（接口当前页）');
-    expect(outreachSource).toContain('统计不包含“下发人”和“正常任务”页内筛选');
-    expect(outreachSource).toContain('接口当前页指标包含因此隐藏的行');
+    expect(outreachSource).toContain('下发人和正常任务筛选适用于全部有权查看的记录');
+    expect(outreachSource).toContain('除任务总数外，其余指标按当前页统计');
   });
   it('does not invent a platform identity from a draft name or code', () => {
     const draft = Object.freeze({ name: 'Historical name', code: 'draft-123', status: 'active', nickname_id: '', profile: null });

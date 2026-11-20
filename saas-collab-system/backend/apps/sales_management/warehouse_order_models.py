@@ -29,3 +29,28 @@ class OrderWarehouseLookup(models.Model):
 
     class Meta:
         db_table = 'sales_order_warehouse_lookup'
+
+
+class WarehouseOutboundLine(models.Model):
+    lookup = models.ForeignKey(OrderWarehouseLookup, on_delete=models.CASCADE, related_name='outbound_lines')
+    tenant = models.ForeignKey('tenants.Tenant', on_delete=models.PROTECT)
+    warehouse = models.ForeignKey('masterdata.WarehouseMaster', on_delete=models.PROTECT)
+    site_code = models.CharField(max_length=8)
+    document = models.CharField(max_length=191)
+    document_key = models.CharField(max_length=64)
+    identity_key = models.CharField(max_length=64)
+    shipped_at = models.DateTimeField()
+    warehouse_sku = models.CharField(max_length=191, blank=True)
+    source_sku = models.CharField(max_length=191, blank=True)
+    quantity = models.PositiveBigIntegerField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['lookup', 'identity_key'],
+                                    name='uniq_wh_outbound_lookup_line'),
+        ]
+        indexes = [
+            models.Index(fields=['tenant', 'warehouse', 'shipped_at'], name='wh_outbound_scope_time_idx'),
+            models.Index(fields=['tenant', 'warehouse', 'document_key'], name='wh_outbound_scope_doc_idx'),
+            models.Index(fields=['tenant', 'site_code', 'shipped_at'], name='wh_outbound_site_time_idx'),
+        ]

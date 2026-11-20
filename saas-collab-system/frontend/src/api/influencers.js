@@ -4,8 +4,10 @@ import { influencerMocks } from '../mock/influencers';
 const API_ROOT = '/api/internal/influencers';
 
 export const OUTREACH_STATUS_LABELS = Object.freeze({
+  paused: '已暂停',
   pending: '待开始',
   in_progress: '进行中',
+  paused: '已暂停',
   completed: '已完成',
   cancelled: '已取消'
 });
@@ -292,6 +294,11 @@ export const queryTikTokCreator = (id, storeId) => requestApi({
   data: { store_id: storeId }, timeout: 20000
 });
 
+export const renameTikTokCreator = (id, token) => requestApi({
+  method: 'post', url: `${API_ROOT}/${encodeURIComponent(id)}/tiktok-creator/`,
+  data: { rename_token: token }
+});
+
 export const updateInfluencer = (id, payload, version) => requestWithMockFallback(
   {
     method: 'patch',
@@ -447,7 +454,7 @@ export const resolveOrCreateInfluencerNickname = (nickname, requestKey = '', sto
 
 export const fetchSampleFulfillmentOptions = (params = {}) => requestWithMockFallback(
   { method: 'get', url: `${API_ROOT}/sample-fulfillment-options/`, params },
-  () => ({ success: true, data: { tasks: [], influencers: [], owners: [] } }),
+  () => ({ success: true, data: { tasks: [], influencers: [], owners: [], stores: [] } }),
   'influencers.fulfillment.options'
 );
 

@@ -58,7 +58,7 @@ describe('report navigation revision', () => {
   it('opens a historical inventory snapshot and links mapped rows to the correct cost version', () => {
     const inventory = read('src/views/analytics/InventoryAnalysis.vue');
     expect(inventory).toContain("ref(route?.query?.include_virtual === 'true')");
-    expect(inventory).toContain('@row-click="openInventoryRow"');
+    expect(inventory).toContain('@row-click="openInventoryRow($event, appliedFilters)"');
     expect(inventory).toContain('title="库存历史快照"');
     expect(inventory).toContain("canAccessPath(auth.currentUser, '/products/costs')");
     expect(inventory).not.toContain("path: '/analytics/sales'");

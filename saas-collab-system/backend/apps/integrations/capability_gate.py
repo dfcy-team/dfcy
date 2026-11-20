@@ -115,7 +115,9 @@ def sync_source_health_for_jobs(jobs):
         for capability in candidates:
             key = (capability.authorization.tenant_id, capability.authorization.store_id, capability.capability_code)
             selected.setdefault(key, capability)
-    return {job.pk: _source_health(job, selected) for job in jobs}
+    from .ads_binding_compat import workspace_digest_scope
+    with workspace_digest_scope():
+        return {job.pk: _source_health(job, selected) for job in jobs}
 
 
 def record_sync_source_decision(sync_job, sync_run, capability):

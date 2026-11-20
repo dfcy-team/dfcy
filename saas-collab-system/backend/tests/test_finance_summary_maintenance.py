@@ -38,6 +38,15 @@ def test_unattended_scheduler_queues_once_and_preserves_scope(scheduled):
     assert dataset.active
 
 
+def test_manual_only_batch_never_scans_or_schedules(scheduled, monkeypatch):
+    _, _, dataset, _ = scheduled
+    dataset.metadata['automatic_update_enabled'] = False
+    dataset.save()
+    monkeypatch.setattr('apps.finance.summary_maintenance.source_checkpoint', lambda ids: pytest.fail('manual batch source scan'))
+    schedule_changed_summaries()
+    assert not FinanceSummaryCalculation.objects.exists()
+
+
 def test_new_calendar_window_schedules_without_source_changes(scheduled, monkeypatch):
     _, _, dataset, _ = scheduled
     monkeypatch.setattr('apps.finance.summary_maintenance.source_checkpoint', lambda ids: {})
@@ -87,3 +96,18 @@ def test_long_rebuild_uses_dedicated_queue(context, monkeypatch, settings):
     assert send.call_args.kwargs['queue'] == 'finance-summary-rebuild'
     enqueue(SimpleNamespace(pk=2, kind='query'))
     assert send.call_args.kwargs['queue'] == 'finance-summary'
+
+
+def test_vm_queue_isolates_new_work_from_retained_backlog(context, monkeypatch, settings):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from apps.finance.summary_jobs import enqueue, run_calculation
+    settings.FINANCE_SUMMARY_QUEUE = 'finance-summary-v517'
+    settings.FINANCE_SUMMARY_REBUILD_QUEUE = 'finance-summary-v517'
+    send = Mock()
+    monkeypatch.setattr(run_calculation, 'apply_async', send)
+    for kind in ('query', 'rebuild'):
+        enqueue(SimpleNamespace(pk=1, kind=kind))
+    assert [call.kwargs['queue'] for call in send.call_args_list] == [
+        'finance-summary-v517', 'finance-summary-v517',
+    ]

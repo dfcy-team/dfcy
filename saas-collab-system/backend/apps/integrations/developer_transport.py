@@ -78,7 +78,9 @@ def gateway_transport(method, url, *, data=None, headers=None, connect_timeout=3
         payload = response.read(MAX_RESPONSE_BYTES + 1)
         if len(payload) > MAX_RESPONSE_BYTES:
             raise OSError('Response exceeds limit')
-        return HttpResponse(response.status, {}, payload.decode('utf-8'))
+        retry_after = response.getheader('Retry-After')
+        response_headers = {'Retry-After': retry_after} if retry_after is not None else {}
+        return HttpResponse(response.status, response_headers, payload.decode('utf-8'))
     finally:
         connection.close()
 

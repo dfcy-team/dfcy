@@ -24,6 +24,7 @@ import {
   FULFILLMENT_STATUS_TRANSITIONS,
   formatInfluencerError,
   OUTREACH_PRIORITY_LABELS,
+  OUTREACH_STATUS_LABELS,
   resolveOrCreateInfluencerNickname,
   restoreOutreachTarget,
   sampleDuplicateWarning,
@@ -77,6 +78,10 @@ const resourceLibraryStubs = {
 };
 
 describe('influencer integration workspace contracts', () => {
+  it('labels paused outreach tasks in Chinese', () => {
+    expect(OUTREACH_STATUS_LABELS.paused).toBe('已暂停');
+  });
+
   beforeEach(() => {
     requestMock.mockReset();
     authContext.canManage = true;
@@ -338,7 +343,10 @@ describe('influencer integration workspace contracts', () => {
     ]) expect(page).toContain(contract);
     expect(page).not.toContain('达人目标');
     for (const label of ['任务总数（接口筛选范围）', '进行中（接口当前页）', '已建联（接口当前页）', '送样记录（接口当前页）', '搜索任务/店铺/商品/负责人', '全部状态', '全部店铺', '全部下发人', '正常任务', '任务履约反馈', '目标进度']) expect(page).toContain(label);
-    for (const column of ['任务', '店铺 / 商品 ID', '优先级', '负责人', '状态', '任务下发人', '开始时间', '下发时间', '操作']) expect(page).toContain(`label="${column}"`);
+    for (const column of ['任务', '店铺 / 商品 ID', '优先级', '运营下发要求', '状态', '任务下发人', '开始时间', '下发时间', '操作']) expect(page).toContain(`label="${column}"`);
+    expect(page).not.toContain('<el-table-column label="负责人"');
+    expect(page).toContain('<span>负责人</span>');
+    expect(page).toContain('displayValue(row.dispatch_requirements)');
     expect(read('src/api/influencers.js')).toContain('黑名单');
     expect(read('src/api/influencers.js')).toContain('终态');
     expect(read('src/api/influencers.js')).toContain("'If-Match'");
@@ -375,8 +383,9 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('matchedStoreIds.value.map');
     expect(page).toContain('params.status = filters.status');
     expect(page).toContain('params.store = filters.store');
-    expect(page).toContain('matchesDispatcher');
-    expect(page).toContain("row.priority === 'normal'");
+    expect(page).toContain('params.dispatcher = filters.dispatcher');
+    expect(page).toContain("params.normal_only = 'true'");
+    expect(page).not.toContain('matchesDispatcher');
     expect(page).toContain('sample_fulfillment_count');
     expect(page).toContain('送样记录进度');
     expect(page).toContain('sampledInfluencerCount(detailTask)');
@@ -485,7 +494,7 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toMatch(/:disabled="!canManage \|\| isTerminal\(activeTask\) \|\| isTargetTerminal\(row\)"/);
     expect(page).toContain("['success', 'rejected', 'no_response', 'blocked']");
     expect(page).toContain('await refreshActiveTask()');
-    expect(page).toContain(':disabled="!canCreateFulfillment || isCancelled(detailTask)"');
+    expect(page).toContain(':disabled="!canCreateFulfillment || isCancelled(detailTask) || detailTask?.status === \'paused\'"');
     expect(page).toContain('isCancelled(task)');
     expect(page).not.toContain(':disabled="!canCreateFulfillment || isTerminal(detailTask)"');
 

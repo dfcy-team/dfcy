@@ -38,10 +38,16 @@
       </svg>
       <div class="chart-legend" aria-label="图表分组与数值"><button v-for="(point, index) in chartModel.points" :key="point.index" type="button" @click="select(point.row)"><span>{{ index + 1 }} · {{ point.label }}</span><strong>{{ format(point.value, metric) }}</strong></button></div>
     </template>
-    <el-table v-if="showTable || chart === 'table'" :data="pageRows" stripe :max-height="maxHeight" @row-click="select">
+    <el-table v-if="showTable || chart === 'table'" :data="pageRows" :row-key="dataset.id === 'sales_abc' ? treeRowKey : undefined" stripe :max-height="maxHeight" @row-click="select">
       <el-table-column v-if="canInvestigate" label="核查" width="120"><template #default="{ row }"><el-button text type="primary" @click.stop="$emit('investigate', row)">发起核查</el-button></template></el-table-column>
       <el-table-column v-for="column in result.columns" :key="column.key" :prop="column.key" :label="column.label" :align="dataset.metrics.some(item => item.key === column.key) ? 'right' : 'left'" min-width="140" show-overflow-tooltip>
-        <template #default="{ row }">{{ format(row[column.key], column.key) }}</template>
+        <template #default="{ row }">
+          <el-image v-if="column.key === 'image_url' && row.image_url" :src="row.image_url" fit="contain" style="width:52px;height:52px"><template #error><span>暂无图片</span></template></el-image>
+          <span v-else-if="column.key === 'image_url'">暂无图片</span>
+          <span v-else-if="dataset.id === 'sales_abc' && column.key === 'spu'">{{ row.children ? row.spu : row.sku }}</span>
+          <span v-else-if="dataset.id === 'sales_abc' && column.key === 'legacy_spu'">{{ row.children ? row.legacy_spu || '—' : row.legacy_sku || '—' }}</span>
+          <span v-else>{{ format(row[column.key], column.key) }}</span>
+        </template>
       </el-table-column>
     </el-table>
     <div v-if="result.rows.length > 50 && (showTable || ['table', 'card'].includes(chart))" class="result-pages"><span>共 {{ result.rows.length }} 个分组 · 每页 50 个 · 翻页无需重新查询</span><el-pagination v-model:current-page="page" :page-size="50" :total="result.rows.length" layout="prev, pager, next" aria-label="查询结果分页" /></div>
@@ -63,6 +69,7 @@ const metric = computed(() => props.config.chart_metric || props.config.metrics[
 const label = key => [...props.dataset.dimensions, ...props.dataset.metrics].find(item => item.key === key)?.label || key;
 const dimensionValue = (value, key) => props.result.dimension_labels?.[key]?.[String(value)] || displayReportValue(value, key);
 const format = (value, key) => props.dataset.metrics.find(item => item.key === key)?.kind === 'money' ? money(value) : dimensionValue(value, key);
+const treeRowKey = row => row.children ? "spu:" + row.spu : "sku:" + row.sku;
 const page = ref(1), matrixRowPage = ref(1), matrixColumnPage = ref(1);
 const pageRows = computed(() => props.result.rows.slice((page.value - 1) * 50, page.value * 50));
 const matrix = computed(() => {

@@ -1898,6 +1898,38 @@
       "owner": "influencers"
     },
     {
+      "code": "influencers.requirements.review",
+      "name": "汇总查看达人模块需求反馈",
+      "module": "influencers",
+      "action": "requirements.review",
+      "permission_type": "action",
+      "description": "Review requests within the current tenant.",
+      "risk": "high",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "influencers.requirements.review",
+      "resource_code": "legacy_resource",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "influencers"
+    },
+    {
+      "code": "influencers.requirements.submit",
+      "name": "提交达人模块需求反馈",
+      "module": "influencers",
+      "action": "requirements.submit",
+      "permission_type": "action",
+      "description": "Submit feedback and view your own requests.",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "influencers.requirements.submit",
+      "resource_code": "legacy_resource",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "influencers"
+    },
+    {
       "code": "influencers.view",
       "name": "View influencers",
       "module": "influencers",
@@ -3512,6 +3544,22 @@
       "owner": "influencers"
     },
     {
+      "code": "menu.influencers.influencers_requirements.view",
+      "name": "达人模块需求反馈",
+      "module": "influencers",
+      "action": "influencers_requirements.view",
+      "permission_type": "menu",
+      "description": "显示达人模块需求反馈入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/influencers/requirements",
+      "menu_code": "menu.influencers.influencers_requirements.view",
+      "resource_code": "influencers_requirements",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "influencers"
+    },
+    {
       "code": "menu.influencers.influencers_sample_fulfillments.view",
       "name": "送样履约",
       "module": "influencers",
@@ -4435,6 +4483,22 @@
       "menu_path": "/inventory/category-query",
       "menu_code": "menu.sales_management.category_inventory.view",
       "resource_code": "inventory_category_query",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "sales_management"
+    },
+    {
+      "code": "menu.sales_management.inventory_movements.view",
+      "name": "出入库明细",
+      "module": "sales_management",
+      "action": "inventory_movements.view",
+      "permission_type": "menu",
+      "description": "显示出入库明细入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/inventory/movements",
+      "menu_code": "menu.sales_management.inventory_movements.view",
+      "resource_code": "inventory_movements",
       "scope_adapter": "existing_business_adapter",
       "allowed_dimensions": [],
       "owner": "sales_management"
@@ -22271,6 +22335,31 @@
       "owner": "finance"
     },
     {
+      "route": "api/finance/summary/<int:pk>/publish/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/publish/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
       "route": "api/finance/summary/<int:pk>/rebuild/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -22436,6 +22525,31 @@
         "IsFinanceViewer"
       ],
       "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/initialize/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/initialize/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
     },
     {
       "route": "api/finance/summary/jobs/<int:pk>/",
@@ -30921,6 +31035,180 @@
       "owner": "influencers"
     },
     {
+      "route": "api/internal/influencers/requirements/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "influencers.requirements.review",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/influencers/requirements/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "influencers.requirements.submit",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/influencers/requirements/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "influencers.requirements.review",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/influencers/requirements/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "influencers.requirements.submit",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/influencers/requirements/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers"
+    },
+    {
+      "route": "api/internal/influencers/requirements/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "influencers.requirements.review",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/influencers/requirements/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "influencers.requirements.submit",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/influencers/requirements/<int:pk>/images/<int:image_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "influencers.requirements.review",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/influencers/requirements/<int:pk>/images/<int:image_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "influencers.requirements.submit",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/influencers/requirements/<int:pk>/images/<int:image_id>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "influencers.requirements.review",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/influencers/requirements/<int:pk>/images/<int:image_id>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "influencers.requirements.submit",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/influencers/requirements/<int:pk>/images/<int:image_id>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers"
+    },
+    {
       "route": "api/internal/influencers/resolve/",
       "method": "GET",
       "action": "read",
@@ -35828,6 +36116,45 @@
       "risk": "high"
     },
     {
+      "route": "api/internal/integrations/warehouse-authorizations/<int:pk>/best-notifications/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "integrations.warehouse.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsWarehouseAuthorizationViewer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/integrations/warehouse-authorizations/<int:pk>/best-notifications/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "integrations.warehouse.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsWarehouseAuthorizationViewer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/integrations/warehouse-authorizations/<int:pk>/best-notifications/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsWarehouseAuthorizationViewer"
+      ],
+      "owner": "integrations"
+    },
+    {
       "route": "api/internal/integrations/warehouse-authorizations/<int:pk>/credentials/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -36931,7 +37258,7 @@
         "IsAuthenticated"
       ],
       "owner": "flash_sales",
-      "guard_source_sha256": "5d2a793526479d152b6fc5adec4fad203169d4df973312cb9eb03ac081880247"
+      "guard_source_sha256": "99383a342147af3bfa3099522be631e33a7d05531f01f69b14608aa3a5b20469"
     },
     {
       "route": "api/internal/marketing/flash-sales/batches/<uuid:pk>/",
@@ -36978,7 +37305,7 @@
         "IsAuthenticated"
       ],
       "owner": "flash_sales",
-      "guard_source_sha256": "a644f869ea832e1611a8a2f7b1e82cca457983b9a9e8a0c517f96032cbe6fc4d"
+      "guard_source_sha256": "25fd492e200c55695a13533488b1d86511cb736233c3d722f01a9db9fd081c61"
     },
     {
       "route": "api/internal/marketing/flash-sales/configs/<int:store_id>/",
@@ -37036,7 +37363,7 @@
         "IsAuthenticated"
       ],
       "owner": "flash_sales",
-      "guard_source_sha256": "b10510f928f668b87c2122668736103a33181418ca0ad3e036367e5e9d72720e"
+      "guard_source_sha256": "e458a81f9819ac7dededf029dc395edede39d93e68eb041840cfebebb0696370"
     },
     {
       "route": "api/internal/marketing/flash-sales/plans/",
@@ -37141,7 +37468,7 @@
         "IsAuthenticated"
       ],
       "owner": "flash_sales",
-      "guard_source_sha256": "91f9fc929c0bdf94b1ff5e1694487fe8f55ddb3bff67040b418689f6c3b28bfb"
+      "guard_source_sha256": "0614b4340ea3c92674dc06b3ee2472c97eaf14e0f39d7cfd8ac1eb46f5b57e52"
     },
     {
       "route": "api/internal/marketing/flash-sales/workspace/",
@@ -37153,7 +37480,7 @@
         "IsAuthenticated"
       ],
       "owner": "flash_sales",
-      "guard_source_sha256": "91f9fc929c0bdf94b1ff5e1694487fe8f55ddb3bff67040b418689f6c3b28bfb"
+      "guard_source_sha256": "0614b4340ea3c92674dc06b3ee2472c97eaf14e0f39d7cfd8ac1eb46f5b57e52"
     },
     {
       "route": "api/internal/marketing/flash-sales/workspace/",
@@ -51541,6 +51868,61 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/supply-chain/v2/payment-batches/approval-mode/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/payment-batches/approval-mode/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/payment-batches/approval-mode/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/payment-batches/approval-mode/",
+      "method": "PATCH",
+      "action": "update",
+      "permission_code": "supply.v2.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
       "route": "api/internal/supply-chain/v2/payment-batches/candidates/",
       "method": "GET",
       "action": "read",
@@ -54351,6 +54733,129 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/supply-chain/v2/wms-inbound-documents/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/wms-inbound-documents/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/wms-inbound-documents/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/wms-inbound-documents/<int:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/wms-inbound-documents/<int:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/wms-inbound-documents/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/wms-inbound-movements/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/wms-inbound-movements/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/wms-inbound-movements/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
       "route": "api/internal/system/authorization/batches/apply/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -56767,6 +57272,15 @@
       "owner": "packing"
     },
     {
+      "route": "api/platform/best/glink/<int:config_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "function_callback_default_get",
+      "permission_classes": [],
+      "owner": "unknown"
+    },
+    {
       "route": "api/platform/health/",
       "method": "GET",
       "action": "read",
@@ -57407,6 +57921,84 @@
       "risk": "normal"
     },
     {
+      "route": "api/report/sales-abc-options/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "reports.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsDatasetReportViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "3298efe540f0c472a11b05245fe066e6ac2a61ef8433ea9f1b2353ae2decef05",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/sales-abc-options/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "reports.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsDatasetReportViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "3298efe540f0c472a11b05245fe066e6ac2a61ef8433ea9f1b2353ae2decef05",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/sales-abc-options/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsDatasetReportViewer"
+      ],
+      "owner": "reports"
+    },
+    {
+      "route": "api/report/sales-abc/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "reports.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsDatasetReportViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "3298efe540f0c472a11b05245fe066e6ac2a61ef8433ea9f1b2353ae2decef05",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/sales-abc/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "reports.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsDatasetReportViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "3298efe540f0c472a11b05245fe066e6ac2a61ef8433ea9f1b2353ae2decef05",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/sales-abc/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsDatasetReportViewer"
+      ],
+      "owner": "reports"
+    },
+    {
       "route": "api/report/views/",
       "method": "GET",
       "action": "read",
@@ -57823,5 +58415,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "24d64c752cdf24eaedeaa3c4be4e1eb81eadfcc61e1b3452c0f275ffb3a05d1a"
+  "catalog_hash": "9f742927af0892929a56c6051c09feaa1fdc296e4223cc1e4e14c8989624bf1f"
 }

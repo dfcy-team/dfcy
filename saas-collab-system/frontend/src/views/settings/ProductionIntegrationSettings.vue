@@ -207,6 +207,11 @@
               <el-button link :disabled="!auth.hasPermission('integrations.view')" @click="router.push('/integrations/readiness')">前往生产准入审批仓库只读网络</el-button>
               <el-button link :disabled="!auth.hasPermission('masterdata.view')" @click="router.push('/master-data/warehouses')">仓库档案 · API 接入</el-button>
             </div>
+            <div v-else-if="platform === 'best_ecapi'" class="warehouse-settings">
+              <p class="section-note">百世使用 GLINK 签名认证，无需 OAuth 回调或令牌续期。客户编码、partnerId、partnerKey 在仓库档案的 API 接入中维护，网关由后台按环境选择。</p>
+              <el-button link :disabled="!auth.hasPermission('masterdata.view')" @click="router.push('/master-data/warehouses')">仓库档案 · 百世 API 接入</el-button>
+              <el-button link :disabled="!auth.hasPermission('integrations.view')" @click="router.push('/integrations/readiness')">审批仓库只读网络</el-button>
+            </div>
             <div v-else class="form-grid compact">
               <el-form-item label="公开 App ID *"><el-input v-model="form.platforms[platform].app_id" autocomplete="off" placeholder="填写平台公开应用 ID" /></el-form-item>
               <el-form-item v-if="platform === 'tiktok'" label="Service ID"><el-input v-model="form.platforms[platform].service_id" autocomplete="off" placeholder="TikTok Shop Service ID" /></el-form-item>
@@ -219,7 +224,7 @@
               <el-form-item label="market *"><el-input v-model="form.platforms[platform].market" maxlength="40" placeholder="SG" /></el-form-item>
               <el-form-item v-if="platform === 'shopee'" label="region"><el-input v-model="form.platforms[platform].region" maxlength="40" placeholder="SG" /></el-form-item>
             </div>
-            <details v-if="platform !== 'jifeng_wms'" class="advanced-endpoints" :open="openEndpointPlatform === platform">
+            <details v-if="!['jifeng_wms', 'best_ecapi'].includes(platform)" class="advanced-endpoints" :open="openEndpointPlatform === platform">
               <summary>高级 endpoint / path 配置（{{ platformEndpointFields[platform].length }} 项）</summary>
               <div class="form-grid compact endpoint-grid">
                 <el-form-item v-for="field in platformEndpointFields[platform]" :key="field.key" :label="field.label">
@@ -378,9 +383,9 @@ const writeOverview = ref(null);
 const platformSectionRefs = ref({});
 const openEndpointPlatform = ref('');
 
-const platformKeys = ['lazada', 'shopee', 'tiktok', 'jifeng_wms'];
-const platformLabels = { lazada: 'Lazada', shopee: 'Shopee', tiktok: 'TikTok Shop', jifeng_wms: '极风 WMS · 仓库' };
-const platformDescriptions = { lazada: 'Lazada Open Platform', shopee: 'Shopee Partner API', tiktok: 'TikTok Shop Open API', jifeng_wms: '仓库独立授权与库存只读接入' };
+const platformKeys = ['lazada', 'shopee', 'tiktok', 'jifeng_wms', 'best_ecapi'];
+const platformLabels = { lazada: 'Lazada', shopee: 'Shopee', tiktok: 'TikTok Shop', jifeng_wms: '极风 WMS · 仓库', best_ecapi: '百世海外仓 · 仓库' };
+const platformDescriptions = { lazada: 'Lazada Open Platform', shopee: 'Shopee Partner API', tiktok: 'TikTok Shop Open API', jifeng_wms: '仓库独立授权与库存只读接入', best_ecapi: 'GLINK 签名认证与仓库只读接入' };
 const platformEndpointFields = {
   lazada: [
     { key: 'auth_url', label: '授权地址 auth_url', kind: 'url', placeholder: 'https://auth.lazada.com/oauth/authorize' },
@@ -430,6 +435,7 @@ const platformEndpointFields = {
 };
 const platformPayloadKeys = {
   jifeng_wms: ['contract_approved', 'auto_refresh_enabled'],
+  best_ecapi: ['contract_approved'],
   lazada: ['contract_approved', 'auto_refresh_enabled', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'order_list_path', 'order_items_path', 'finance_transaction_path', 'market'],
   shopee: ['contract_approved', 'auto_refresh_enabled', 'product_contract_approved', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'revoke_path', 'shop_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'return_detail_path', 'product_list_path', 'product_base_info_path', 'product_model_list_path', 'finance_list_path', 'finance_detail_path', 'market', 'region'],
   tiktok: ['shop_direct_callback_url', 'ads_direct_callback_url', 'contract_approved', 'auto_refresh_enabled', 'product_contract_approved', 'app_id', 'service_id', 'redirect_uri', 'market', 'auth_url', 'api_host', 'auth_urls', 'api_hosts', 'token_host', 'token_path', 'refresh_path', 'revoke_path', 'authorized_shops_path', 'metadata_path', 'creator_query_bindings', 'order_list_path', 'order_detail_path', 'return_list_path', 'product_search_path', 'product_detail_path', 'finance_statement_path', 'finance_transaction_path']
@@ -546,9 +552,9 @@ function runtimeReady(config, maskedStatus = {}) {
       && custody.backend && custody.backend !== 'refuse'
       && custody.service_url && custody.service_host
       && custodyMask.token_available
-      && platformKeys.every((platform) => {
+      && platformKeys.filter(platform => platform !== 'best_ecapi').every((platform) => {
         const item = platforms[platform] || {};
-        if (platform === 'jifeng_wms') return item.contract_approved;
+        if (['jifeng_wms', 'best_ecapi'].includes(platform)) return item.contract_approved;
         return item.contract_approved && item.app_id && item.redirect_uri && (item.api_host || Object.keys(item.api_hosts || {}).length) && item.market;
       })
   );

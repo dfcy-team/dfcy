@@ -290,5 +290,5 @@ describe('manual inbound lifecycle',()=>{
 
 it('manual receipt begins with zero quantities and emits only selected SKU quantities',async()=>{
  const w=mount(ManualInboundCreateV2,{props:{modelValue:true,batch:{id:8,planned_warehouse_id:12,inbound_candidates:[{shipment_line_id:2,sku:'A',available_quantity:5},{shipment_line_id:7,sku:'B',available_quantity:3}]},warehouses:[{id:12,name:'US'}]},global:{stubs}});
- const nums=w.findAll('input[type="number"]');expect(nums.map(n=>n.element.value)).toEqual(['0','0']);expect(w.findAll('button').find(b=>b.text()==='创建草稿').element.disabled).toBe(true);await nums[0].setValue(2);await w.findAll('button').find(b=>b.text()==='创建草稿').trigger('click');expect(w.emitted('create')[0][0].lines).toEqual([{shipment_line_id:2,quantity:2}]);w.unmount();
+ const nums=w.findAll('input[type="number"]');expect(nums.map(n=>n.element.value)).toEqual(['0','0']);expect(w.findAll('button').find(b=>b.text()==='合并创建 1 张草稿').element.disabled).toBe(true);await nums[0].setValue(2);await w.findAll('button').find(b=>b.text()==='合并创建 1 张草稿').trigger('click');expect(w.emitted('create')[0][0].lines).toEqual([{shipment_line_id:2,quantity:2}]);w.unmount();
 });

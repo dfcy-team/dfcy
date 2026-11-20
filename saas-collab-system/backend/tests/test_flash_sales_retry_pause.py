@@ -37,7 +37,69 @@ def retry(task, adapter=None):
     return result
 
 
-def test_three_unchanged_failures_pause_persistently_and_require_explicit_resume(shop, monkeypatch, settings):
+def test_legacy_server_error_reads_partial_result_without_replaying(shop):
+    from apps.flash_sales.models import WriteOperation
+    user, store, _ = shop
+    configured(shop)
+    adapter = FakeShopee()
+    task = submit(user, request_id="server-error-readback", store_ids=[store.id]).tasks.get()
+    engine.run_step(task.id, adapter=adapter)
+    intent = task.intents.get()
+    WriteOperation.objects.create(tenant_id=task.tenant_id, intent=intent, key="add:0",
+        endpoint="add_shop_flash_sale_items", status="rejected", response={"code": "error_server"})
+    adapter.products[intent.platform_id] = []
+    assert retry(task, adapter) == "confirming"
+    assert "0/" in task.message and "不重复提交" in task.message
+    assert not any(endpoint == "add_shop_flash_sale_items" for endpoint, _ in adapter.calls)
+    intent.refresh_from_db()
+    assert intent.result["specifications"]
+    assert intent.status == "adding"
+    assert not any(endpoint == "add_shop_flash_sale_items" for endpoint, _ in adapter.calls)
+
+
+def test_failed_attempt_is_deleted_before_each_of_three_retries(shop):
+    user, store, _ = shop
+    configured(shop)
+    task = submit(user, request_id="three-clean-retries", store_ids=[store.id]).tasks.get()
+    adapter = FakeShopee(reject_all=True)
+    drain(task, adapter, 25)
+    assert task.status == "failed" and task.completed == 0
+    assert task.intents.count() == 4
+    assert all(i.absence_evidence.get("absent") and i.reservation_key is None for i in task.intents.all())
+    calls = [endpoint for endpoint, _ in adapter.calls if endpoint in {"create_shop_flash_sale", "delete_shop_flash_sale"}]
+    assert calls == ["create_shop_flash_sale", "delete_shop_flash_sale"] * 4
+    assert not adapter.created
+
+
+def test_failed_attempt_can_succeed_on_retry(shop):
+    user, store, _ = shop
+    configured(shop)
+    task = submit(user, request_id="retry-success", store_ids=[store.id]).tasks.get()
+    class Recovering(FakeShopee):
+        def call(self, endpoint, *, body):
+            result = super().call(endpoint, body=body)
+            if endpoint == "delete_shop_flash_sale":
+                self.reject_all = False
+            return result
+    adapter = Recovering(reject_all=True)
+    drain(task, adapter)
+    assert task.status == "succeeded" and task.completed == 1
+    assert task.intents.count() == 2
+
+
+def test_unexpected_error_keeps_safe_diagnostic_without_exception_payload(shop, monkeypatch):
+    user, store, _ = shop
+    configured(shop)
+    task = submit(user, request_id="safe-error", store_ids=[store.id]).tasks.get()
+    def broken(*args):
+        raise TypeError("synthetic-secret-must-not-appear")
+    monkeypatch.setattr(engine, "step", broken)
+    retry(task)
+    assert "TypeError" in task.message and "broken:" in task.message
+    assert "synthetic-secret" not in task.message
+
+
+def test_legacy_pause_requires_explicit_resume(shop, monkeypatch, settings):
     user, store, client = shop
     configured(shop)
     batch = submit(user, request_id="pause-before-intent", store_ids=[store.id])
@@ -48,6 +110,9 @@ def test_three_unchanged_failures_pause_persistently_and_require_explicit_resume
     for count in range(1, 4):
         retry(task)
         assert task.state["no_progress_count"] == count
+    # Existing paused rows remain protected until explicit recovery.
+    StoreTask.objects.filter(pk=task.pk).update(state={**task.state, "retry_paused": True}, next_attempt_at=None)
+    task.refresh_from_db()
     assert task.state["retry_paused"] and task.next_attempt_at is None
     assert task.retry_count == 3 and task.finished_at is None
     assert StoreLock.objects.get(store=store).task_id == task.id
@@ -130,10 +195,10 @@ def test_paused_unknown_creation_never_replays_create_after_resume(shop):
     batch = submit(user, request_id="lost-create-pause", store_ids=[store.id])
     task = batch.tasks.get()
     adapter = FakeShopee(lose_create=True)
-    for _ in range(10):
-        retry(task, adapter)
-        if task.state.get("retry_paused"):
-            break
+    retry(task, adapter)
+    retry(task, adapter)
+    StoreTask.objects.filter(pk=task.pk).update(state={**task.state, "retry_paused": True}, next_attempt_at=None)
+    task.refresh_from_db()
     assert task.state["retry_paused"]
     intent = task.intents.get()
     original = (intent.pk, intent.platform_id, intent.reservation_key)
@@ -169,6 +234,8 @@ def test_pause_survives_fresh_worker_processes(shop, monkeypatch):
     monkeypatch.setattr(engine, "step", unavailable)
     for _ in range(3):
         retry(task)
+    StoreTask.objects.filter(pk=task.pk).update(state={**task.state, "retry_paused": True}, next_attempt_at=None)
+    task.refresh_from_db()
     assert task.state["retry_paused"]
     environment = dict(os.environ, DB_ENGINE=db["ENGINE"], DB_HOST=db["HOST"],
                        DB_PORT=str(db["PORT"]), DB_NAME=db["NAME"], DB_USER=db["USER"],

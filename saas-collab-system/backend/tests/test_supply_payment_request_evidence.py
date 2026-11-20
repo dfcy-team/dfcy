@@ -131,6 +131,8 @@ def test_supplemental_attachment_is_separate_from_transfer_voucher(world, monkey
 def test_direct_payment_respects_submitted_reservation_and_cancel_releases_it(world, monkeypatch):
     from apps.supply_chain import costs
     _buyer, api, shipment, account, row, _approver, _reviewer_api = _setup_request(world, monkeypatch)
+    world['tenant'].payment_approval_required = False
+    world['tenant'].save(update_fields=['payment_approval_required'])
     state = costs.payment_summary(_buyer, 'shipment', shipment.pk)
     amount = state['summary']['remaining_amount']
     url = f'{BASE}costs/shipment/{shipment.pk}/payments/'
@@ -154,6 +156,8 @@ def test_prepayment_application_respects_submitted_reservation_and_cancel_releas
     from apps.supply_chain import costs
     buyer, api, shipment, _account, row, _approver, _reviewer_api = _setup_request(
         world, monkeypatch, request_amount=None)
+    world['tenant'].payment_approval_required = False
+    world['tenant'].save(update_fields=['payment_approval_required'])
     order_account = write(api, f'costs/purchase/{shipment.order_id}/payee-accounts/', {
         'nature': 'corporate', 'account_name': '定金账户', 'account_holder': '供应商',
         'bank_name': '测试银行', 'account_number': '6222000000002222', 'active': True}, 'deposit-account')
@@ -188,6 +192,8 @@ def test_prepayment_application_can_use_balance_after_submitted_request_reservat
     from apps.supply_chain import costs
     buyer, api, shipment, _account, row, _approver, _reviewer_api = _setup_request(
         world, monkeypatch, request_amount=lambda remaining: remaining - Decimal('0.5000'))
+    world['tenant'].payment_approval_required = False
+    world['tenant'].save(update_fields=['payment_approval_required'])
     apply_amount = Decimal('0.5000')
     order_account = write(api, f'costs/purchase/{shipment.order_id}/payee-accounts/', {
         'nature': 'corporate', 'account_name': '剩余额度定金户', 'account_holder': '供应商',

@@ -8,7 +8,7 @@ const api = fs.readFileSync(path.resolve(process.cwd(), 'src/api/integrations.js
 describe('平台接入真实准备度契约', () => {
   it('提供仓库专用合同、审批与授权入口，不要求商城回调', () => {
     expect(page).toContain("row.platform_code === 'jifeng_wms'");
-    expect(page).toContain("v-if=\"row.platform_code !== 'jifeng_wms'\" label=\"回调地址\"");
+    expect(page).toContain("v-if=\"!['jifeng_wms', 'best_ecapi'].includes(row.platform_code)\" label=\"回调地址\"");
     expect(page).toContain('到仓库档案维护授权 / 连接校验');
     expect(page).toContain("path: '/master-data/warehouses'");
     expect(page).toContain('warehouse_host_not_allowlisted');

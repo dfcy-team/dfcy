@@ -3,41 +3,31 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
-
 from .models import SyncJob, SyncRun, SyncScheduleDispatch
 from .scheduler import dispatch_due_jobs, paused_until, resume_due_sync_runs
 from .sync_services import fail_queued_sync_run, run_sync_job, validate_manual_sync_job
 from .sync_alerts import upsert_sync_failure_alert
-
-
+from .sync_task_limits import VIDEO_HARD_TIME_LIMIT_SECONDS, VIDEO_SOFT_TIME_LIMIT_SECONDS
 @shared_task(soft_time_limit=540, time_limit=600)
 def dispatch_feishu_deliveries():
     from .feishu_delivery import dispatch_feishu
     return dispatch_feishu()
-
-
 @shared_task(soft_time_limit=540, time_limit=600)
 def refresh_due_integration_credentials():
     from .automatic_refresh import refresh_due_authorizations
     return refresh_due_authorizations()
-
-
 @shared_task(soft_time_limit=540, time_limit=600)
 def cleanup_tiktok_shop_bindings():
     if not settings.TIKTOK_OAUTH_CLEANUP_ENABLED:
         return {"status": "disabled"}
     from .tiktok_shop_binding import cleanup_shop_bindings, cleanup_previous_shop_references
     return {"staged": cleanup_shop_bindings(limit=50), "previous": cleanup_previous_shop_references(limit=50)}
-
-
 @shared_task(soft_time_limit=540, time_limit=600)
 def cleanup_tiktok_ads_authorizations():
     if not settings.TIKTOK_OAUTH_CLEANUP_ENABLED:
         return {"status": "disabled"}
     from .tiktok_ads_oauth import cleanup_ads_authorizations
     return cleanup_ads_authorizations(limit=50)
-
-
 @shared_task(bind=True, soft_time_limit=840, time_limit=900, acks_late=True)
 def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequence=0):
     sync_job = SyncJob.objects.select_related("tenant", "integration_config").get(pk=sync_job_id)
@@ -80,11 +70,11 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
             run_readonly_sync_job.apply_async(
                 args=(sync_job_id,),
                 kwargs={"idempotency_key": idempotency_key, "resume_sequence": resume_sequence},
-                queue="sync-history", priority=5,
+                queue=history_queue, priority=5, **({"soft_time_limit": VIDEO_SOFT_TIME_LIMIT_SECONDS, "time_limit": VIDEO_HARD_TIME_LIMIT_SECONDS} if video_history else {}),
             )
         except Exception as exc:
             raise self.retry(exc=exc, countdown=5, max_retries=3)
-        return {"status": "rerouted", "queue": "sync-history", "created": False}
+        return {"status": "rerouted", "queue": history_queue, "created": False}
     if str(idempotency_key or "").startswith("scheduled:"):
         with transaction.atomic():
             sync_job = SyncJob.objects.select_for_update(of=("self",)).select_related("tenant", "integration_config").get(pk=sync_job_id)
@@ -170,6 +160,16 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
         raise
     return {"run_id": run.id, "status": run.status, "created": created}
 @shared_task
+def dispatch_due_flash_sales_plans():
+    """Dispatch plans transferred to Sync Tasks through the flash sales outbox."""
+    if not getattr(settings, "FLASH_SALES_WORKERS_ENABLED", False):
+        return {"plans_processed": 0}
+    from apps.flash_sales.tasks import dispatch_plans
+
+    return {"plans_processed": dispatch_plans(scheduler_owner="sync_tasks")}
+
+
+@shared_task
 def dispatch_due_readonly_sync_jobs(limit=20):
     from .sync_dispatch_policy import DispatchAdmission, fair_resource_order, queue_for_run, lane_capacity
     from .affiliate_sync import dispatch_pending_affiliate_refreshes
@@ -178,7 +178,7 @@ def dispatch_due_readonly_sync_jobs(limit=20):
         priority = 0 if SyncJob.objects.filter(pk=job_id, resource_type="inventory_snapshot").exists() else 5
         queue = queue_for_run(job_id, key)
         # Small video pages deliberately run slowly on the isolated consumer.
-        limits = {"soft_time_limit": 3500, "time_limit": 3600} if queue == "sync-video" else {}
+        limits = {"soft_time_limit": VIDEO_SOFT_TIME_LIMIT_SECONDS, "time_limit": VIDEO_HARD_TIME_LIMIT_SECONDS} if queue == "sync-video" else {}
         return run_readonly_sync_job.apply_async(
             args=(job_id,), kwargs={"idempotency_key": key, "resume_sequence": resume_sequence}, priority=priority,
             queue=queue, **limits,
@@ -219,8 +219,6 @@ def dispatch_due_readonly_sync_jobs(limit=20):
     result["history_admission"] = history_admission.summary()
     result["affiliate_refresh_submitted"] = affiliate_refreshed
     return result
-
-
 @shared_task
 def refresh_affiliate_ingestion_day(sync_run_id, business_day, generation=None):
     from apps.influencers.tasks import refresh_affiliate_order_attributions_task

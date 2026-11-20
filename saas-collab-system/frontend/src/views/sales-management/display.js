@@ -4,7 +4,7 @@ const labels = {
   completed: '已完成', success: '成功', partial: '部分成功', failed: '失败',
   open: '待处理', resolved: '已解决', high: '高', medium: '中', low: '低',
   healthy: '正常', warning: '需关注', none: '无', confirmed: '已确认', accepted: '已接受',
-  fulfilled: '已履约', cancelled: '已取消', canceled: '已取消', rejected: '已拒绝',
+  fulfilled: '已履约', cancellation_pending: '取消处理中', cancelled: '已取消', canceled: '已取消', rejected: '已拒绝',
   approved: '已通过', closed: '已关闭', mapped: '已关联', unmapped: '未关联',
   active: '已启用', disabled: '已停用', idle: '尚未运行', expired: '已过期',
   refund: '退款', refund_only: '仅退款', return: '退货', return_refund: '退货退款',
@@ -22,7 +22,7 @@ export function statusLabel(value) {
 export function statusType(value) {
   if (['completed', 'success', 'resolved', 'healthy', 'mapped', 'approved', 'active'].includes(value)) return 'success';
   if (['failed', 'high', 'rejected'].includes(value)) return 'danger';
-  if (['partial', 'warning', 'pending', 'medium', 'unmapped', 'expired'].includes(value)) return 'warning';
+  if (['partial', 'warning', 'pending', 'cancellation_pending', 'medium', 'unmapped', 'expired'].includes(value)) return 'warning';
   return 'info';
 }
 

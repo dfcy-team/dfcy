@@ -13,6 +13,22 @@ from tests.test_finance_summary import context
 from tests.test_sales_management import create_scope, create_run, grant, user_for
 
 
+def test_posted_provider_fields_preserve_raw_signs_zero_and_missing_values():
+    from apps.finance.summary_database import posted_income
+    rows = [SimpleNamespace(pk=1, raw_envelope_id=7, match_status='matched',
+                raw_fee_name='commission_fee', raw_amount=Decimal('12'), signed_amount=Decimal('-12')),
+            SimpleNamespace(pk=2, raw_envelope_id=7, match_status='matched',
+                raw_fee_name='seller_return_refund', raw_amount=Decimal('0'), signed_amount=Decimal('0'))]
+    result = posted_income(rows, 7)
+    assert result['income'] == {'commission_fee':'12.000000','seller_return_refund':'0.000000'}
+    assert 'seller_discount' not in result['income']
+    assert result['platform_finance_fields'] == {'commission_fee':1,'seller_return_refund':2}
+    assert posted_income(rows, 8) is None
+    assert posted_income([*rows, rows[0]], 7) is None
+    rows[0].match_status = 'conflict'
+    assert posted_income(rows, 7) is None
+
+
 def posted_settlement(user, store, run, order, amount, match_status='matched', day='2026-09-05'):
     from apps.finance.models import PlatformFinanceTransaction
     from apps.integrations.store_authorization_service import create_store_authorization

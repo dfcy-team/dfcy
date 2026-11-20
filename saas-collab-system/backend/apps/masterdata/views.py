@@ -434,16 +434,25 @@ class MasterDataDetailView(APIView):
         _, serializer_class = resource_contract(resource)
         return success_response(serializer_class(instance, context={"request": request}).data)
 
+    @transaction.atomic
     def patch(self, request, resource, pk):
         instance = self.get_object(request, resource, pk)
+        if resource == "platforms":
+            instance = PlatformMaster.objects.select_for_update().get(pk=instance.pk, tenant=request.user.tenant)
+            if {"warehouse_connector_state", "warehouse_connector_key"} & set(request.data):
+                if type(request.data.get("version")) is not int or request.data["version"] != instance.version:
+                    raise StateConflict("平台档案已更新，请刷新后重新选择连接器。")
         before = {"code": _instance_code(instance), "status": instance.status}
+        if resource == "platforms":
+            before.update(warehouse_connector_state=instance.warehouse_connector_state,
+                          warehouse_connector_key=instance.warehouse_connector_key, version=instance.version)
         _, serializer_class = resource_contract(resource)
         serializer = serializer_class(
             instance, data=request.data, partial=True, context={"request": request}
         )
         serializer.is_valid(raise_exception=True)
         try:
-            instance = serializer.save()
+            instance = serializer.save(**({"version": instance.version + 1} if resource == "platforms" else {}))
         except IntegrityError as exc:
             if resource == "stores":
                 raise ValidationError(
@@ -458,7 +467,10 @@ class MasterDataDetailView(APIView):
             object_type=resource,
             object_id=instance.pk,
             before_data=before,
-            after_data={"code": _instance_code(instance), "status": instance.status},
+            after_data={"code": _instance_code(instance), "status": instance.status,
+                **({"warehouse_connector_state": instance.warehouse_connector_state,
+                    "warehouse_connector_key": instance.warehouse_connector_key, "version": instance.version}
+                   if resource == "platforms" else {})},
         )
         return success_response(serializer.data)
 

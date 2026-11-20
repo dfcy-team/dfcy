@@ -92,6 +92,12 @@ describe('内部系统只读调用方配置', () => {
         expect([resources[0].module].flat(), code).toContain(module);
       }
     }
+    const movements = menuItems.find(item => item.label === '库存管理').children.find(item => item.path === '/inventory/movements');
+    expect(movements).toMatchObject({ label: '出入库明细', permissions: ['sales_management.view'], allPermissions: ['supply.v2.view'] });
+    expect(internalReadonlyResources.some(resource => resource.label === movements.label)).toBe(false);
+    expect(internalReadonlyResources.some(resource => resource.code === 'inventory_movements' || resource.code === 'warehouse_outbound_lines')).toBe(false);
+    const ready = read('../backend/apps/integrations/internal_readonly_api.py').split('READY = {')[1].split('\n}')[0];
+    expect(ready).not.toMatch(/"(?:inventory_movements|warehouse_outbound_lines)":/);
     for (const module of internalReadonlyModules.filter((item) => item.code !== 'advertising')) {
       const menu = menuItems.find((item) => item.label === module.label);
       expect(menu, module.label).toBeTruthy();
@@ -99,7 +105,8 @@ describe('内部系统只读调用方配置', () => {
         .filter((item) => (Array.isArray(item.module) ? item.module : [item.module]).includes(module.code))
         .map((item) => item.label));
       // New private registrations are not enrolled in the external readonly API.
-      const privateRegistrations = ['/inventory/warehouse-details', '/inventory/category-query', '/sales/pre-shipment-adjustments', '/sales/special-order-registrations', '/finance/gcash-refunds', '/finance/warehouse-fees'];
+      const privateRegistrations = ['/inventory/warehouse-details', '/inventory/category-query', '/inventory/movements', '/sales/pre-shipment-adjustments', '/sales/special-order-registrations', '/finance/gcash-refunds', '/finance/warehouse-fees', '/influencers/requirements'];
+      expect(internalReadonlyResources.some(resource => resource.label === '达人模块需求反馈')).toBe(false);
       for (const child of menu.children.filter(item => !privateRegistrations.includes(item.path))) {
         if (child.path === '/workflow/payment-flows') {
           // Flow administration does not expose a machine-client read resource.

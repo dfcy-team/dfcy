@@ -247,9 +247,10 @@ class CategoryInventory(CountryDecisionAPI):
                                   'warehouses': [{'id': pk, 'name': name} for pk, name in warehouses]}})
 
 
-def operations_summary(actor, country, skus, days, permissions):
+def operations_summary(actor, country, skus, days, permissions, *, snapshots=None):
     key = f'operations-summary:v2:{actor.tenant_id}:{actor.pk}:{country.pk}:{domain.permission_signature(actor, permissions)}'
-    snapshots = cache.get_or_set(key, lambda: stock_facts(actor, country, permissions), 60)
+    if snapshots is None:
+        snapshots = cache.get_or_set(key, lambda: stock_facts(actor, country, permissions), 60)
     observations = cache.get_or_set(key + f':sales:{days}', lambda: sales_facts(actor, country, days, permissions), 120)
     ids = set(skus.order_by().values_list('pk', flat=True))
     quantities = defaultdict(int)

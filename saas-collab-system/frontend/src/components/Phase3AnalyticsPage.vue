@@ -96,27 +96,29 @@
           <div><h2>{{ tableTitle }}</h2><p>{{ tableNote }}</p></div>
           <div class="table-actions">
             <slot name="table-actions" :search="search" :loading="loading" />
-            <span class="result-summary">共 {{ total }} 条结果<span v-if="dateSummary"> · {{ dateSummary }}</span></span>
+            <span class="result-summary">共 {{ total }} {{ resultUnit }}<span v-if="dateSummary"> · {{ dateSummary }}</span></span>
           </div>
         </div>
-        <el-table ref="tableRef" :data="items" :empty-text="emptyText" stripe @sort-change="changeSort" @row-click="row => emit('row-click', row, appliedFilters)">
-          <el-table-column
-            v-for="column in columns"
-            :key="column.prop"
-            :prop="column.prop"
-            :label="column.label"
-            :min-width="column.width || 120"
-            :sortable="column.sortable || false"
-            show-overflow-tooltip
-          >
-            <template #default="{ row }">
-              <el-tag v-if="column.type === 'status'" :type="statusType(row[column.prop])" effect="light">
-                {{ displayStatus(row[column.prop]) }}
-              </el-tag>
-              <span v-else>{{ (row[column.prop] == null || row[column.prop] === '') && column.empty ? column.empty : formatValue(row[column.prop]) }}</span>
-            </template>
-          </el-table-column>
-        </el-table>
+        <slot name="table" :items="items" :report-data="reportData" :applied-filters="appliedFilters" :change-sort="changeSort" :set-table-ref="setTableRef">
+          <el-table ref="tableRef" :data="items" :empty-text="emptyText" stripe @sort-change="changeSort" @row-click="row => emit('row-click', row, appliedFilters)">
+            <el-table-column
+              v-for="column in columns"
+              :key="column.prop"
+              :prop="column.prop"
+              :label="column.label"
+              :min-width="column.width || 120"
+              :sortable="column.sortable || false"
+              show-overflow-tooltip
+            >
+              <template #default="{ row }">
+                <el-tag v-if="column.type === 'status'" :type="statusType(row[column.prop])" effect="light">
+                  {{ displayStatus(row[column.prop]) }}
+                </el-tag>
+                <span v-else>{{ (row[column.prop] == null || row[column.prop] === '') && column.empty ? column.empty : formatValue(row[column.prop]) }}</span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </slot>
         <el-pagination
           v-if="total > pageSize"
           class="analytics-pagination"
@@ -154,6 +156,7 @@ const props = defineProps({
   qualityLabel: { type: String, default: '数据可信度' },
   tableTitle: { type: String, default: '明细' },
   tableNote: { type: String, default: '' },
+  resultUnit: { type: String, default: '条结果' },
   emptyText: { type: String, default: '当前筛选条件下暂无数据' }
 });
 const emit = defineEmits(['reset', 'row-click']);
@@ -226,6 +229,10 @@ function initializeFilters() {
     else if (filter.key === 'warehouse' && routeQuery.warehouse_id != null) query[filter.key] = String(routeQuery.warehouse_id);
   });
   currentPage.value = 1;
+}
+
+function setTableRef(table) {
+  tableRef.value = table;
 }
 
 function resetFilters() {

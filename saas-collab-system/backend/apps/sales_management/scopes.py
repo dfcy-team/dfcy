@@ -3,7 +3,7 @@ from django.db.models import Q, Subquery
 from apps.common.exceptions import DataScopeDenied
 from apps.permissions.models import DataScope
 from apps.permissions.services import get_permission_data_scopes
-from apps.masterdata.models import StoreMaster
+from apps.masterdata.models import CountrySiteMaster, StoreMaster
 
 
 SAFE_SCOPE_KEYS = ("store_ids", "platforms", "regions")
@@ -72,17 +72,27 @@ def _stores_for_config(user, config):
     return stores
 
 
-def filter_inventory_queryset(user, permission_code, queryset, permission_cache=None):
+def filter_inventory_queryset(user, permission_code, queryset, permission_cache=None, *, outbound=False):
     configs = _custom_scope_configs(user, permission_code, permission_cache, "commerce.inventory")
     if configs is None:
         return queryset
     allowed = Q(pk__in=[])
     for config in configs:
+        supported = {"warehouse_ids", "sku_ids", "spu_ids", "platforms", "store_ids", "regions", "site_ids"}
+        if permission_code == "analytics.view":
+            supported.add("analytics_dimensions")
+        if set(config) - supported and (outbound or "site_ids" in config or not set(config) & {"warehouse_ids", "sku_ids", "spu_ids"}):
+            # Never discard an additional business restriction and keep only
+            # its country predicate. Other independently authorized roles may
+            # still contribute their complete branches.
+            continue
+        if outbound and set(config) & {"sku_ids", "spu_ids", "platforms", "store_ids", "analytics_dimensions"}:
+            continue
         branch = Q()
         constrained = False
         identity_fields = {"warehouse_ids": "warehouse_id", "sku_ids": "internal_sku_id", "spu_ids": "internal_sku__spu_id"}
         if set(config) & set(identity_fields):
-            supported = set(identity_fields) | {"platforms", "store_ids", "regions"}
+            supported = set(identity_fields) | {"platforms", "store_ids", "regions", "site_ids"}
             if permission_code == "analytics.view":
                 supported.add("analytics_dimensions")
             if set(config) - supported:
@@ -110,10 +120,23 @@ def filter_inventory_queryset(user, permission_code, queryset, permission_cache=
         if platforms:
             branch &= Q(source_run__sync_job__integration_config__platform__in=platforms)
             constrained = True
+        if "site_ids" in config:
+            identifiers = config["site_ids"]
+            if not isinstance(identifiers, list) or not identifiers or any(
+                type(value) is not int or value <= 0 for value in identifiers
+            ):
+                continue
+            country_rows = list(CountrySiteMaster.objects.filter(
+                tenant_id=user.tenant_id, pk__in=identifiers).values_list("pk", "country_code"))
+            countries = {str(code or "").strip().upper() for _, code in country_rows}
+            if {pk for pk, _ in country_rows} != set(identifiers) or "" in countries:
+                continue
+            branch &= Q(site_code__in=countries)
+            constrained = True
         if config.get("store_ids") or config.get("regions"):
-            sites = set(_stores_for_config(user, config).values_list("country_code", flat=True))
+            sites = {str(value or "").strip().upper() for value in _stores_for_config(user, config).values_list("country_code", flat=True)}
             if config.get("regions") and not config.get("store_ids"):
-                sites.update(str(value) for value in config["regions"])
+                sites.update(str(value).strip().upper() for value in config["regions"])
             branch &= Q(site_code__in=sites)
             constrained = True
         if constrained:

@@ -16,8 +16,11 @@ RUN printf '%s\n' \
         build-essential \
         default-libmysqlclient-dev \
         fonts-noto-cjk \
+        nodejs \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
+
+RUN node --version
 
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt

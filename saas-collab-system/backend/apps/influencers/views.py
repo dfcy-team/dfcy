@@ -9,6 +9,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import SAFE_METHODS
 from rest_framework.views import APIView
@@ -37,6 +38,7 @@ from .models import (
     InfluencerPlatformAccount,
     InfluencerRestrictEvent,
     InfluencerRestriction,
+    InfluencerUsernameAlias,
     OutreachTarget,
     OutreachTask,
     SampleFulfillment,
@@ -85,7 +87,9 @@ from .bd_config import bd_performance_settings
 from .sample_nickname import allocate_sample_nickname_draft
 from .archive_associations import create_related_archive, get_related_archives
 from .platform_accounts import get_influencer_form, platform_account_prefetch, save_influencer_aggregate, require_influencer_nickname_access
+from .verified_market import filter_display_market, with_verified_market
 from .tiktok_creator_lookup import available_tiktok_lookup_stores, creator_snapshots_for_influencer, lookup_tiktok_creator
+from .username_rename import apply_verified_rename
 
 
 class Conflict(ValidationError):
@@ -352,6 +356,9 @@ class InfluencerCollectionView(ScopedInfluencerView):
             )
             if include_nickname_id:
                 search_filter |= Q(handle__icontains=search)
+                search_filter |= Q(pk__in=InfluencerUsernameAlias.objects.filter(
+                    tenant_id=request.user.tenant_id, username=normalize_tiktok_username(search),
+                ).values("influencer_id"))
                 search_filter |= Q(pk__in=InfluencerPlatformAccount.objects.filter(
                     tenant_id=request.user.tenant_id, is_active=True, handle__icontains=search,
                 ).values("influencer_id"))
@@ -375,7 +382,11 @@ class InfluencerCollectionView(ScopedInfluencerView):
         cooperation_status = request.query_params.get("cooperation_status", "").strip()
         if cooperation_status:
             queryset = queryset.filter(cooperation_status=cooperation_status)
-        for field in ("level", "market", "tier"):
+        queryset = with_verified_market(queryset)
+        market = request.query_params.get("market", "").strip()
+        if market:
+            queryset = filter_display_market(queryset, market, request.user.tenant_id)
+        for field in ("level", "tier"):
             value = request.query_params.get(field, "").strip()
             if value:
                 queryset = queryset.filter(**{f"profile__tenant": request.user.tenant, f"profile__{field}__iexact": value})
@@ -459,12 +470,14 @@ class InfluencerDetailView(ScopedInfluencerView):
             self.read_permission_code = self.write_permission_code
         return super().get_permissions()
 
-    def get_object(self, request, pk, *, include_relations=True):
+    def get_object(self, request, pk, *, include_relations=True, verified_market=False):
         queryset = Influencer.objects.select_related("profile").prefetch_related(
             platform_account_prefetch(request.user.tenant_id, active_only=True, summaries_only=True),
         )
         if include_relations:
             queryset = queryset.prefetch_related("contacts", "restrict_events__actor")
+        if verified_market:
+            queryset = with_verified_market(queryset)
         return self.scoped_object(request, queryset, pk=pk, tenant=request.user.tenant)
 
     def get(self, request, pk):
@@ -477,7 +490,7 @@ class InfluencerDetailView(ScopedInfluencerView):
             request.query_params.get("include_relations", "true"),
             field="include_relations",
         )
-        instance = self.get_object(request, pk, include_relations=include_relations)
+        instance = self.get_object(request, pk, include_relations=include_relations, verified_market=True)
         serializer_class = InfluencerNicknameSerializer if include_nickname_id else InfluencerPublicSerializer
         return success_response(serializer_class(
             instance,
@@ -573,6 +586,10 @@ class TikTokCreatorLookupView(ScopedInfluencerView):
 
     def post(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
+        if isinstance(request.data, dict) and set(request.data) == {"rename_token"}:
+            return success_response(apply_verified_rename(
+                user=request.user, influencer_id=pk, token=request.data["rename_token"],
+            ))
         if not isinstance(request.data, dict) or set(request.data) != {"store_id"}:
             raise ValidationError({"store_id": "请选择一个已授权的试点店铺。"})
         store_id = request.data["store_id"]
@@ -848,6 +865,32 @@ class OutreachTaskCollectionView(ScopedInfluencerView):
 
     def get(self, request):
         require_scope(request.user, self.read_permission_code)
+        if _query_bool(request.query_params.get("priority_only", "false"), field="priority_only"):
+            tasks = filter_queryset(request.user, OutreachTask.objects.filter(
+                tenant=request.user.tenant, is_deleted=False, priority__in=["urgent", "high"],
+            ).exclude(status__in=["completed", "cancelled"]), self.read_permission_code)
+            fields = ("id", "task_no", "task_name", "priority", "status")
+            return success_response({"priority_tasks": {
+                priority: list(tasks.filter(priority=priority).order_by("-created_at", "-id").values(*fields)[:100])
+                for priority in ("urgent", "high")
+            }})
+        if _query_bool(request.query_params.get("recent_requirements", "false"), field="recent_requirements"):
+            visible_tasks = filter_queryset(
+                request.user,
+                OutreachTask.objects.filter(
+                    tenant=request.user.tenant, is_deleted=False, dispatch_time__isnull=False,
+                ),
+                self.read_permission_code,
+            )
+            ordered = visible_tasks.order_by("-dispatch_time", "-id")
+            recent = ordered.exclude(dispatch_requirements="").values(
+                "id", "task_no", "task_name", "priority", "status", "dispatch_requirements", "dispatch_time",
+            )[:3]
+            priority_tasks = {
+                priority: list(ordered.filter(priority=priority).values("id", "task_no", "task_name")[:3])
+                for priority in ("urgent", "high")
+            }
+            return success_response({"results": list(recent), "priority_tasks": priority_tasks})
         active_samples = Prefetch(
             "sample_fulfillments",
             queryset=filter_queryset(request.user, SampleFulfillment.objects.filter(
@@ -890,10 +933,22 @@ class OutreachTaskCollectionView(ScopedInfluencerView):
             queryset = queryset.filter(is_deleted=False)
         status = request.query_params.get("status", "").strip()
         if status:
-            queryset = queryset.filter(status=status)
+            statuses = [value.strip() for value in status.split(",")]
+            if not set(statuses) <= {*OutreachTask.Status.values, "paused"}:
+                raise ValidationError({"status": "无效的建联任务状态"})
+            queryset = queryset.filter(status__in=statuses)
         store_id = request.query_params.get("store", "").strip()
         if store_id:
-            queryset = queryset.filter(store_id=store_id)
+            stores = [value.strip() for value in store_id.split(",")]
+            if any(not s.isascii() or not s.isdecimal() or len(s) > 19 or not 0 < int(s) < 2**63 for s in stores):
+                raise ValidationError({"store": "无效的店铺 ID"})
+            queryset = queryset.filter(store_id__in=stores)
+        dispatcher = request.query_params.get("dispatcher", "").strip()
+        if dispatcher:
+            dispatcher_id = serializers.IntegerField(min_value=1, max_value=2**63 - 1).run_validation(dispatcher)
+            queryset = queryset.filter(dispatcher_id=dispatcher_id)
+        if _query_bool(request.query_params.get("normal_only", "false"), field="normal_only"):
+            queryset = queryset.filter(priority="normal")
         search = request.query_params.get("search", "").strip()
         if search:
             queryset = queryset.filter(
@@ -968,6 +1023,11 @@ class OutreachTaskOptionsView(ScopedInfluencerView):
             user_roles__role__status="active",
         ).distinct().order_by("full_name", "username")[:200]
         stores = filter_queryset(request.user, stores, self.read_permission_code)[:200]
+        scoped_tasks = filter_queryset(request.user, OutreachTask.objects.all(), self.read_permission_code)
+        dispatchers = CustomUser.objects.filter(
+            Exists(scoped_tasks.filter(dispatcher_id=OuterRef("pk"))),
+            tenant=request.user.tenant,
+        ).order_by("full_name", "username", "id")
         payload = {
             "stores": [
                 {
@@ -982,6 +1042,10 @@ class OutreachTaskOptionsView(ScopedInfluencerView):
             "bd_users": [
                 {"id": user.id, "username": user.username, "full_name": user.full_name}
                 for user in bd_users
+            ],
+            "dispatchers": [
+                {"id": user.id, "name": user.full_name or user.username}
+                for user in dispatchers
             ],
         }
         if include_influencers:
@@ -1087,6 +1151,17 @@ class SampleFulfillmentOptionsView(ScopedInfluencerView):
         ]
         if _query_bool(request.query_params.get("owners_only", "false"), field="owners_only"):
             return success_response({"owners": owner_payload})
+        if _query_bool(request.query_params.get("filters_only", "false"), field="filters_only"):
+            # Keep historical stores filterable, including when showing deleted samples.
+            filter_stores = StoreMaster.objects.filter(
+                tenant=request.user.tenant,
+            ).filter(
+                Exists(visible_samples.filter(store_id=OuterRef("pk")))
+            ).order_by("name", "id")
+            return success_response({
+                "owners": owner_payload,
+                "stores": list(filter_stores.values("id", "name", "country_code")),
+            })
         tasks = OutreachTask.objects.filter(
             tenant=request.user.tenant,
             is_deleted=False,
@@ -1209,7 +1284,9 @@ class OutreachTaskDetailView(ScopedInfluencerView):
             if "conflict" in str(exc.get_codes()):
                 raise Conflict(exc.detail) from exc
             raise
-        return success_response(OutreachTaskSerializer(task, context={"request": request}).data)
+        payload = dict(OutreachTaskSerializer(task, context={"request": request}).data)
+        payload["deleted_sample_count"] = task._cascade_deleted_sample_count
+        return success_response(payload)
 
 
 class OutreachTaskRestoreView(ScopedInfluencerView):
@@ -1440,9 +1517,10 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
             queryset = queryset.filter(created_at__lt=datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=beijing_tz))
         status = request.query_params.get("status", "").strip()
         if status:
-            if status not in SampleFulfillment.Status.values:
+            statuses = {value.strip() for value in status.split(",")}
+            if not statuses.issubset(SampleFulfillment.Status.values):
                 raise ValidationError({"status": "Unsupported fulfillment status."})
-            queryset = queryset.filter(status=status)
+            queryset = queryset.filter(status__in=statuses)
         outreach_task_id = request.query_params.get("outreach_task", "").strip()
         if outreach_task_id:
             if not outreach_task_id.isdigit() or int(outreach_task_id) < 1:
@@ -1453,7 +1531,11 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
             )
         store_id = request.query_params.get("store", "").strip()
         if store_id:
-            queryset = queryset.filter(store_id=store_id)
+            stores = {value.strip() for value in store_id.split(",")}
+            if any(not value.isascii() or not value.isdecimal() or len(value) > 19
+                   or not 0 < int(value) < 2**63 for value in stores):
+                raise ValidationError({"store": "Expected positive store IDs."})
+            queryset = queryset.filter(store_id__in=stores)
         owner_id = request.query_params.get("owner", "").strip()
         if owner_id:
             if not owner_id.isdigit() or int(owner_id) < 1:

@@ -21,7 +21,7 @@
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <div v-if="error" role="status">查询未完成，结果数量未知。<el-button @click="load">重试</el-button></div>
     <el-table v-if="!error" v-loading="loading" :data="rows" border stripe :empty-text="loading ? '正在加载仓库 SKU…' : '当前范围暂无仓库库存 SKU'">
-      <el-table-column label="平台" width="110"><template #default>极风 WMS</template></el-table-column>
+      <el-table-column label="平台" width="110"><template #default="{ row }">{{ row.provider === 'best_ecapi' ? '百世海外仓' : row.provider === 'jifeng_wms' ? '极风 WMS' : '未提供' }}</template></el-table-column>
       <el-table-column prop="warehouse_name" label="店铺/仓库" min-width="160" show-overflow-tooltip />
       <el-table-column prop="warehouse_code" label="仓库编码" width="120" />
       <el-table-column prop="source_sku" label="来源 SKU" min-width="160" show-overflow-tooltip />

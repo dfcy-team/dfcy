@@ -81,10 +81,12 @@ def decorate_rows(actor, country, rows, *, window_days, target_days, rules=None)
     return rows
 
 
-def decision_page(actor, country, skus, *, decision_state, window_days, target_days, offset, limit, mapped_only=False):
+def decision_page(actor, country, skus, *, decision_state, window_days, target_days, offset, limit,
+                  mapped_only=False, inventory_context=None, include_best=False):
     # Compatibility path for consumers that request an unclassified page.
     rows = domain.decision_rows(actor, country, list(skus[offset:offset + limit]),
-                                window_days=window_days, target_days=target_days, mapped_only=mapped_only)
+                                window_days=window_days, target_days=target_days, mapped_only=mapped_only,
+                                inventory_context=inventory_context, include_best=include_best)
     decorate_rows(actor, country, rows, window_days=window_days, target_days=target_days)
     return rows, skus.count(), None
 

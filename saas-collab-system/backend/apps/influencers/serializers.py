@@ -220,6 +220,17 @@ class InfluencerPublicSerializer(InfluencerSerializer):
     field when the write allow-list changes.
     """
 
+    def to_representation(self, instance):
+        from .verified_market import market_label
+
+        data = super().to_representation(instance)
+        region = getattr(instance, "_verified_market", None)
+        if data.get("profile") is not None:
+            data["profile"]["market_source"] = "tiktok_verified" if region else "archive"
+            if region:
+                data["profile"]["market"] = market_label(region)
+        return data
+
     def get_fields(self):
         fields = super().get_fields()
         fields.pop("handle", None)
@@ -524,7 +535,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             "task_completed": obj.status == OutreachTask.Status.COMPLETED,
             "status_consistent": (
                 not target_reached
-                or obj.status in {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED}
+                or obj.status in {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED, OutreachTask.Status.PAUSED}
             ),
         }
 
@@ -536,7 +547,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             "product_match_source", "product_matched_at", "priority", "target_count", "linked_count", "dispatcher_id",
             "owner", "owner_name", "owners", "owner_names", "dispatcher_name", "source_owner_name_snapshot", "source_dispatcher_name_snapshot",
             "dispatch_time", "outreach_at", "status", "started_at", "finalized_at",
-            "is_deleted", "deleted_at", "source", "external_id", "version", "notes",
+            "is_deleted", "deleted_at", "source", "external_id", "version", "notes", "dispatch_requirements",
             "sample_status_summary", "sample_fulfillment_status_summary", "sample_fulfillment_count",
             "sample_fulfillment_influencer_count",
             "sample_fulfillment_completed_count", "sample_fulfillment_video_match_count", "video_match_count",
@@ -573,11 +584,13 @@ class OutreachTaskUpdateSerializer(serializers.ModelSerializer):
     """Allow-list for task detail edits; workflow state is service-owned."""
 
     task_no = serializers.CharField(max_length=80, required=False)
+    status = serializers.ChoiceField(choices=OutreachTask.Status.choices, required=False)
 
     class Meta:
         model = OutreachTask
         fields = (
             "task_no",
+            "status",
             "task_name",
             "priority",
             "store",
@@ -586,6 +599,7 @@ class OutreachTaskUpdateSerializer(serializers.ModelSerializer):
             "target_count",
             "owner",
             "owners",
+            "dispatch_requirements",
         )
         extra_kwargs = {
             "task_name": {"required": False, "allow_blank": True},
@@ -847,6 +861,10 @@ class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
 
     items = SampleItemSerializer(many=True, required=False)
     fulfillment_no = serializers.CharField(max_length=80, required=False)
+    sample_sent_at = serializers.DateTimeField(
+        required=False, input_formats=["%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z"],
+        error_messages={"invalid": "请填写带时区的送样时间，精确到秒。"},
+    )
     type_no = serializers.CharField(max_length=80, required=False)
     external_product_id = serializers.CharField(max_length=120, required=False)
     append_items = SampleItemSerializer(many=True, required=False, write_only=True)
@@ -863,6 +881,7 @@ class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
         model = SampleFulfillment
         fields = (
             "sample_order_no",
+            "sample_sent_at",
             "fulfillment_no",
             "type_no",
             "external_product_id",

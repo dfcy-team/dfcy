@@ -730,6 +730,26 @@
       }
     },
     {
+      "code": "menu.sales_management.inventory_movements.view",
+      "name": "出入库明细",
+      "module": "sales_management",
+      "action": "inventory_movements.view",
+      "description": "显示出入库明细入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/inventory/movements",
+        "route": "/inventory/movements",
+        "resource": "inventory_movements",
+        "parent": "库存管理",
+        "action_codes": [
+          "sales_management.view",
+          "supply.v2.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.alerts.decision_inventory_alerts.view",
       "name": "库存预警",
       "module": "alerts",
@@ -1332,6 +1352,26 @@
         "parent": "达人管理",
         "action_codes": [
           "config.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.influencers.influencers_requirements.view",
+      "name": "达人模块需求反馈",
+      "module": "influencers",
+      "action": "influencers_requirements.view",
+      "description": "显示达人模块需求反馈入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/influencers/requirements",
+        "route": "/influencers/requirements",
+        "resource": "influencers_requirements",
+        "parent": "达人管理",
+        "action_codes": [
+          "influencers.requirements.submit",
+          "influencers.requirements.review"
         ],
         "source": "frontend/src/router/menu.js",
         "status": "active"
@@ -2809,6 +2849,21 @@
       ]
     },
     {
+      "path": "/inventory/movements",
+      "permissions": [
+        "sales_management.view"
+      ],
+      "allPermissions": [
+        "supply.v2.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.sales_management.inventory_movements.view"
+      ]
+    },
+    {
       "path": "/analytics/advertising-overview",
       "permissions": [
         "analytics.view"
@@ -4155,6 +4210,19 @@
       ],
       "menuPermissions": [
         "menu.config.influencers_bd_config.view"
+      ]
+    },
+    {
+      "path": "/influencers/requirements",
+      "permissions": [
+        "influencers.requirements.submit",
+        "influencers.requirements.review"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.influencers.influencers_requirements.view"
       ]
     },
     {

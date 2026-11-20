@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ElMessageBox } from 'element-plus';
 
 const request = vi.hoisted(() => vi.fn());
 const messages = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn(), success: vi.fn() }));
@@ -27,8 +28,13 @@ const stubs = {
     template: '<input :value="modelValue" :readonly="readonly" :disabled="disabled" @input="$emit(\'update:modelValue\', $event.target.value)" />'
   },
   ElSelect: {
-    props: ['modelValue', 'disabled'], emits: ['update:modelValue'],
-    template: '<select :disabled="disabled" :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value)"><slot /></select>'
+    props: { modelValue: {}, disabled: Boolean, multiple: Boolean }, emits: ['update:modelValue', 'change'],
+    methods: { select(event) {
+      const value = this.multiple ? Array.from(event.target.selectedOptions, option => option.value) : event.target.value;
+      this.$emit('update:modelValue', value);
+      this.$emit('change', value);
+    } },
+    template: '<select :disabled="disabled" :multiple="multiple" @change="select"><slot /></select>'
   },
   ElOption: { props: ['value', 'label'], template: '<option :value="value">{{ label }}</option>' },
   ElInputNumber: { props: ['modelValue', 'disabled'], template: '<input type="number" :value="modelValue" :disabled="disabled" />' },
@@ -50,7 +56,7 @@ beforeEach(() => {
     let data = { count: 0, results: [] };
     if (config.method === 'get' && config.url.endsWith('/sample-fulfillments/23/')) data = serverSample;
     if (config.url.endsWith('/outreach-task-options/')) data = { stores: [{ id: 3, name: 'Synthetic store', country_code: 'PH' }], bd_users: [{ id: 9, username: 'synthetic' }] };
-    if (config.url.endsWith('/sample-fulfillment-options/')) data = { warehouses: [] };
+    if (config.url.endsWith('/sample-fulfillment-options/')) data = { warehouses: [], owners: [], stores: [] };
     if (config.method === 'patch') data = { ...(config.url.includes('/outreach-tasks/') ? task : sample), ...config.data };
     return { success: true, data };
   });
@@ -97,6 +103,154 @@ describe('editable task number and sample type', () => {
     await wrapper.vm.submitEdit();
     expect(writes()).toHaveLength(0);
     wrapper.unmount();
+  });
+
+  it('renders priority tasks as read-only rows and keeps recent requirements separate', async () => {
+    const base = request.getMockImplementation();
+    const recent = { ...task, dispatch_requirements: 'Demonstrate the product', status: 'paused',
+      dispatch_time: '2026-11-17T08:30:00+08:00', priority: 'high' };
+    const high = { id: 18, task_no: 'DRJL480480', task_name: '舒棉绒建联' };
+    request.mockImplementation((config) => config.params?.recent_requirements
+      ? Promise.resolve({ success: true, data: { results: [recent], priority_tasks: { urgent: [], high: [high] } } })
+      : base(config));
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    const activity = wrapper.get('[aria-labelledby="activity-title"]');
+    expect(activity.text()).toContain('Demonstrate the product');
+    expect(activity.text()).toContain('已暂停');
+    const priority = wrapper.get('.priority-task');
+    expect(priority.text()).toBe('DRJL480480舒棉绒建联');
+    expect(wrapper.get('[aria-labelledby="priority-title"]').findAll('button')).toHaveLength(0);
+    await priority.trigger('click');
+    await flushPromises();
+    expect(request.mock.calls.map(([config]) => config.url)).not.toContain('/api/internal/influencers/outreach-tasks/18/');
+    wrapper.unmount();
+  });
+
+  it('does not label an incomplete priority response as an empty task list', async () => {
+    const base = request.getMockImplementation();
+    request.mockImplementation((config) => config.params?.recent_requirements
+      ? Promise.resolve({ success: true, data: { results: [] } })
+      : base(config));
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    const priority = wrapper.get('[aria-labelledby="priority-title"]');
+    expect(priority.text()).toContain('未能加载重点任务');
+    expect(priority.text()).not.toContain('暂无紧急或高优先级任务');
+    wrapper.unmount();
+  });
+
+  it('reuses editable task details without copying task identity, state or progress', async () => {
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    const source = { ...task, status: 'completed', priority: 'high', external_product_id: '1736417128860124444',
+      sku_prefix: 'HY274', dispatch_requirements: 'Show the product in use', linked_count: 15, started_at: 'yesterday', finalized_at: 'today' };
+    await wrapper.vm.openReuse(source);
+    expect(wrapper.vm.createVisible).toBe(true);
+    expect(wrapper.vm.editingTask).toBeNull();
+    expect({ ...wrapper.vm.form }).toEqual({
+      task_no: '', task_name: source.task_name, priority: 'normal', store: 3,
+      external_product_id: source.external_product_id, sku_prefix: 'HY274',
+      target_count: 1, dispatch_requirements: source.dispatch_requirements, owners: [9], status: 'pending', started_at: null, finalized_at: null
+    });
+    wrapper.vm.form.owners.push(10);
+    expect(source.owners).toEqual([9]);
+    expect(request.mock.calls.some(([config]) => config.method !== 'get')).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('filters all task pages by dispatcher without adding a status restriction', async () => {
+    const base = request.getMockImplementation();
+    request.mockImplementation(async (config) => {
+      if (config.url.endsWith('/outreach-task-options/')) {
+        return { success: true, data: { dispatchers: [{ id: 55, name: 'Synthetic dispatcher' }] } };
+      }
+      if (config.url.endsWith('/outreach-tasks/')) {
+        const data = config.params.dispatcher
+          ? { count: 110, results: [{ ...task, id: config.params.page, status: 'completed' }] }
+          : { count: 200, results: [{ ...task, dispatcher_id: 1 }] };
+        return { success: true, data };
+      }
+      return base(config);
+    });
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    expect(wrapper.vm.dispatcherOptions).toEqual([{ id: 55, name: 'Synthetic dispatcher' }]);
+    wrapper.vm.page = 3;
+    wrapper.vm.filters.dispatcher = 55;
+    wrapper.vm.applyFilters();
+    await flushPromises();
+    expect(request.mock.lastCall[0].params).toMatchObject({ page: 1, dispatcher: 55 });
+    expect(request.mock.lastCall[0].params).not.toHaveProperty('status');
+    expect(wrapper.vm.total).toBe(110);
+    expect(wrapper.vm.rows[0].status).toBe('completed');
+    wrapper.vm.page = 2;
+    wrapper.vm.filters.normalOnly = true;
+    await wrapper.vm.load();
+    expect(request.mock.lastCall[0].params).toMatchObject({ page: 2, dispatcher: 55, normal_only: 'true' });
+    wrapper.unmount();
+  });
+
+  it('warns about linked samples and reports the server cascade count', async () => {
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    request.mockResolvedValue({ success: true, data: { deleted_sample_count: 2 } });
+    await wrapper.vm.removeTask({ ...task });
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(expect.stringContaining('全部关联送样记录'), '确认删除任务及关联送样', { type: 'warning' });
+    expect(request.mock.calls.some(([config]) => config.method === 'delete' && config.url.endsWith('/outreach-tasks/17/'))).toBe(true);
+    expect(messages.success).toHaveBeenCalledWith('任务及 2 条关联送样已删除');
+    wrapper.unmount();
+  });
+
+  it('does not send a delete request when the cascade warning is cancelled', async () => {
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    ElMessageBox.confirm.mockRejectedValueOnce(new Error('cancel'));
+    await wrapper.vm.removeTask({ ...task });
+    expect(request.mock.calls.some(([config]) => config.method === 'delete')).toBe(false);
+    expect(messages.success).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+  it('loads the stored Beijing time and sends a time-only patch without SKU changes', async () => {
+    serverSample = { ...sample, sample_sent_at: '2026-11-18T15:04:06Z' };
+    const wrapper = render(SampleFulfillmentList);
+    try {
+      await flushPromises();
+      await wrapper.vm.openEdit(sample);
+      expect(wrapper.vm.form.sample_sent_at).toBe('2026-11-18T23:04:06');
+      await wrapper.get('input[type="datetime-local"]').setValue('2026-11-17T22:03:02');
+      await wrapper.vm.submitEdit();
+      expect(writes()).toHaveLength(1);
+      expect(writes()[0].data).toEqual({ sample_sent_at: '2026-11-17T22:03:02+08:00' });
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it('filters by a permitted store absent from the current fulfillment page', async () => {
+    request.mockImplementation(async (config) => ({
+      success: true,
+      data: config.url.endsWith('/sample-fulfillment-options/')
+        ? { owners: [], stores: [{ id: 3, name: 'Page one shop' }, { id: 9, name: 'Other shop' }] }
+        : { count: 21, results: [config.params.store
+          ? { ...sample, store: 9, store_name: 'Other shop' }
+          : { ...sample, store_name: 'Page one shop' }] }
+    }));
+    const wrapper = render(SampleFulfillmentList);
+    try {
+      await flushPromises();
+      const storeFilter = wrapper.get('.toolbar select[placeholder="全部店铺"]');
+      expect(storeFilter.findAll('option').map((option) => option.text())).toEqual(['Page one shop', 'Other shop']);
+      await storeFilter.setValue(['3', '9']);
+      await wrapper.get('.toolbar select[placeholder="全部状态"]').setValue(['shipped', 'completed']);
+      await wrapper.findAll('.toolbar button').find((button) => button.text() === '查询').trigger('click');
+      await flushPromises();
+      expect(request.mock.calls.at(-1)[0].params).toMatchObject({ page: 1, store: '3,9', status: 'shipped,completed' });
+      expect(storeFilter.findAll('option').map((option) => option.text())).toEqual(['Page one shop', 'Other shop']);
+      expect(request.mock.calls.filter(([config]) => config.params?.filters_only === 'true')).toHaveLength(1);
+    } finally {
+      wrapper.unmount();
+    }
   });
 
   it.each(['task', 'standalone'])('passes the selected store for country-scoped nickname creation (%s)', async (kind) => {
@@ -600,7 +754,7 @@ describe('editable task number and sample type', () => {
     expect(wrapper.get('[data-label="任务编号"] input').element.disabled).toBe(false);
     expect(wrapper.text()).not.toContain('已完成或已取消的任务仅支持修正任务编号');
     for (const label of ['任务优先级', '店铺', '任务状态', '负责人（BD）']) {
-      expect(wrapper.get(`[data-label="${label}"] select`).element.disabled).toBe(true);
+      expect(wrapper.get(`[data-label="${label}"] select`).element.disabled).toBe(!(status === 'completed' && label === '任务状态'));
     }
     expect(wrapper.get('[data-label="目标人数"] input').element.disabled).toBe(true);
     await wrapper.get('[data-label="任务编号"] input').setValue('CORRECTED-TERMINAL');

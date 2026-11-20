@@ -72,6 +72,23 @@ afterEach(() => {
 });
 
 describe('MainLayout navigation shell', () => {
+  it('preserves menu group identity when loaded permissions insert earlier groups', async () => {
+    const wrapper = mountMainLayout('/sales-management/stores');
+    try {
+      await nextTick();
+      const salesGroup = () => wrapper.findAllComponents({ name: 'ElSubMenu' })
+        .find(group => String(group.props('index')).endsWith('销售管理'));
+      const before = salesGroup();
+      expect(before).toBeDefined();
+      const instance = before.vm;
+      harness.auth.currentUser = { ...harness.auth.currentUser, is_superuser: true };
+      await nextTick();
+      expect(salesGroup().vm).toBe(instance);
+      expect(salesGroup().text()).toContain('销售订单');
+    } finally {
+      wrapper.unmount();
+    }
+  });
   it('restores the binding drawer once and removes only OAuth feedback parameters', async () => {
     const wrapper = mountMainLayout('/', { feishu_binding: 'complete', retained: 'value' });
     try {

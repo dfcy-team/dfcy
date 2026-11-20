@@ -12,3 +12,6 @@ export const preview=(id,file)=>fetchApiFile(voucherPath(id,file));
 export const download=(id,file)=>downloadApiFile(voucherPath(id,file),file.file_name);
 
 export const removeVoucher=(id,file,version,key)=>requestApi({method:'post',url:`${base}${id}/vouchers/${file.id}/remove/`,data:{expected_version:version},headers:{'Idempotency-Key':key}});
+
+export const getApprovalMode = () => requestApi({method:'get',url:base+'approval-mode/'});
+export const setApprovalMode = data => requestApi({method:'patch',url:base+'approval-mode/',data});

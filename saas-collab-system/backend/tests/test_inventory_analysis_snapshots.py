@@ -257,3 +257,60 @@ def test_as_of_drill_keeps_last_snapshot_before_cutoff_even_without_same_day_syn
     assert rows == {'FAKE-SKU': 12, 'OLDER-SKU': 7}
     params.pop('as_of')
     assert client.get('/api/internal/analytics/inventory/', params).json()['data']['count'] == 1
+
+
+def test_spu_and_sku_pages_preserve_latest_snapshot_scope_and_images(inventory):
+    from apps.products.models import ProductSKU, ProductSPU
+
+    client, warehouse, snapshot = inventory
+    tenant = warehouse.tenant
+    spu = ProductSPU.objects.create(
+        tenant=tenant, spu_code="NEW-SPU", legacy_spu_code="OLD-SPU", product_name="Grouped item",
+    )
+    for index, qty in [(1, 3), (2, 9)]:
+        sku = ProductSKU.objects.create(
+            tenant=tenant, spu=spu, sku_code=f"NEW-SKU-{index}", legacy_sku_code=f"OLD-SKU-{index}",
+            image_url=f"/media/products/sku-{index}.jpg", inventory_type="physical",
+        )
+        row = snapshot(f"SOURCE-{index}", NOW, qty)
+        row.internal_sku = sku
+        row.save()
+    other = ProductSPU.objects.create(tenant=tenant, spu_code="OTHER-SPU", product_name="Other item")
+    sku = ProductSKU.objects.create(tenant=tenant, spu=other, sku_code="OTHER-SKU", inventory_type="virtual")
+    row = snapshot("OTHER-SOURCE", NOW, 50)
+    row.internal_sku = sku
+    row.save()
+    url = "/api/internal/analytics/inventory/"
+    params = {"detail_view": "spu", "include_virtual": "false", "ordering": "-on_hand_qty", "page_size": 1}
+
+    response = client.get(url, params)
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["count"] == 2
+    assert data["quality"]["total_count"] == 3
+    assert data["metrics"][0]["value"] == "15"
+    assert data["next"]
+    group = data["results"][0]
+    assert (group["spu_code"], group["legacy_spu_code"]) == ("NEW-SPU", "OLD-SPU")
+    assert group["image_url"] == "/media/products/sku-1.jpg"
+    assert (group["snapshot_count"], group["on_hand_qty"]) == (2, 12)
+    assert "results" not in group
+    fallback = client.get(url, {**params, "page": 2}).json()["data"]["results"][0]
+    assert fallback["group_key"] == "source:FAKE-SKU"
+    assert fallback["snapshot_count"] == 1
+    assert fallback["image_url"] == ""
+
+    child = client.get(url, {**params, "group_key": group["group_key"]}).json()["data"]
+    assert child["detail_view"] == "sku"
+    assert child["count"] == 2
+    assert child["next"]
+    assert "metrics" not in child
+    row = child["results"][0]
+    assert (row["internal_sku"], row["legacy_sku_code"], row["source_sku"]) == ("NEW-SKU-2", "OLD-SKU-2", "SOURCE-2")
+    assert row["image_url"] == "/media/products/sku-2.jpg"
+    assert row["snapshot_at_utc"]
+    second = client.get(url, {**params, "group_key": group["group_key"], "page": 2}).json()["data"]
+    assert second["results"][0]["legacy_sku_code"] == "OLD-SKU-1"
+    assert client.get(url, {**params, "group_key": f"spu:{other.pk}"}).json()["data"]["count"] == 0
+    assert client.get(url, {**params, "group_key": "spu:invalid"}).status_code == 400
+    assert client.get(url, {**params, "group_key": fallback["group_key"], "risk": "healthy"}).json()["data"]["count"] == 0

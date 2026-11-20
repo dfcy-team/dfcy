@@ -47,6 +47,28 @@ async function library() {
 }
 
 describe('independent linked platform archives', () => {
+  it.each([false, true])('only submits a verified TikTok rename after confirmation (%s)', async (confirmed) => {
+    const wrapper = await library();
+    await wrapper.vm.openDetail(record());
+    wrapper.vm.creatorStoreId = 42;
+    const snapshot = { store_id: 42, external_influencer_id: '7488000000000000007', identity_status: 'handle_mismatch' };
+    const preview = { old_username: 'misschedly', username: 'new.handle', nickname: 'New Display', profile_url: 'https://www.tiktok.com/@new.handle', token: 'test-rename-proof' };
+    api.direct.mockClear();
+    api.direct.mockResolvedValueOnce({ success: true, data: { snapshot, rename_preview: preview } })
+      .mockResolvedValueOnce({ success: true, data: { id: 7 } });
+    if (confirmed) api.confirm.mockResolvedValueOnce('confirm');
+    else api.confirm.mockRejectedValueOnce('cancel');
+
+    await wrapper.vm.queryCreator(true);
+
+    expect(api.confirm).toHaveBeenCalledWith(expect.stringContaining('@misschedly → @new.handle'), '确认更新平台用户名', { type: 'warning' });
+    const submissions = api.direct.mock.calls.map(([config]) => config).filter(config => config.method === 'post');
+    expect(submissions.map(config => config.data)).toEqual(confirmed
+      ? [{ store_id: 42 }, { rename_token: 'test-rename-proof' }]
+      : [{ store_id: 42 }]);
+    wrapper.unmount();
+  });
+
   it('shows the detail profile without waiting for slow related archives', async () => {
     const wrapper = await library();
     let finish;

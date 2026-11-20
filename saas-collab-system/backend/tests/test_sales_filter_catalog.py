@@ -18,7 +18,8 @@ def _raw_order_update(order, **fields):
 
 
 @pytest.mark.django_db
-def test_catalog_uses_scoped_sales_facts_and_keeps_fact_platform_pairs():
+@pytest.mark.parametrize("dimensions_only", [False, True])
+def test_catalog_uses_scoped_sales_facts_and_keeps_fact_platform_pairs(dimensions_only):
     tenant, platform, store, _ = create_scope("catalog-sales")
     order = create_order(tenant, store, "catalog")
     second_platform = PlatformMaster.objects.create(
@@ -41,6 +42,7 @@ def test_catalog_uses_scoped_sales_facts_and_keeps_fact_platform_pairs():
         orders,
         RefundReturn.objects.none(),
         SyncJob.objects.filter(tenant_id=tenant.pk),
+        dimensions_only=dimensions_only,
     )
 
     assert result["platforms"] == ["lazada"]
@@ -51,6 +53,9 @@ def test_catalog_uses_scoped_sales_facts_and_keeps_fact_platform_pairs():
         "region": store.country_code,
         "platform": "lazada",
     }]
+    if dimensions_only:
+        assert set(result) == {"platforms", "stores"}
+        return
     assert result["currencies"] == ["", order.currency]
     assert result["order_statuses"] == ["", order.normalized_status]
     assert result["refund_statuses"] == []

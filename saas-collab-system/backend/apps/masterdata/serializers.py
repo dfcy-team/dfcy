@@ -54,9 +54,10 @@ class PlatformMasterSerializer(TenantOwnedSerializer):
             "id", "tenant_id", "code", "name", "platform_type", "canonical_code",
             "platform_category", "priority_level", "default_integration_mode",
             "connector_key", "connector_name", "connector_status", "connector_hint",
+            "warehouse_connector_state", "warehouse_connector_key", "version",
             "status", "created_at", "updated_at",
         )
-        read_only_fields = ("id", "tenant_id", "created_at", "updated_at")
+        read_only_fields = ("id", "tenant_id", "created_at", "updated_at", "version")
 
     def _catalog_value(self, obj, key):
         item = platform_catalog_item(obj.platform_type)
@@ -67,6 +68,8 @@ class PlatformMasterSerializer(TenantOwnedSerializer):
         if cached is None:
             cached = resolve_platform_connector(
                 platform_type=getattr(obj, "platform_type", ""),
+                warehouse_connector_state=getattr(obj, "warehouse_connector_state", None),
+                warehouse_connector_key=getattr(obj, "warehouse_connector_key", ""),
                 code=getattr(obj, "code", ""),
                 name=getattr(obj, "name", ""),
             )
@@ -84,6 +87,29 @@ class PlatformMasterSerializer(TenantOwnedSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        platform_type = attrs.get("platform_type", getattr(self.instance, "platform_type", ""))
+        state = attrs.get("warehouse_connector_state", getattr(self.instance, "warehouse_connector_state", None))
+        key = str(attrs.get("warehouse_connector_key", getattr(self.instance, "warehouse_connector_key", "")) or "").strip().lower()
+        if platform_type in WAREHOUSE_SERVICE_PLATFORM_TYPES:
+            state = state or "pending"
+            if state == "selected":
+                from .platform_catalog import WAREHOUSE_CONNECTOR_REGISTRY
+                if key not in WAREHOUSE_CONNECTOR_REGISTRY:
+                    raise serializers.ValidationError({"warehouse_connector_key": "请选择受支持的库存连接器。"})
+            elif state in {"pending", "none"}:
+                key = ""
+            else:
+                raise serializers.ValidationError({"warehouse_connector_state": "仓储连接器状态无效。"})
+        else:
+            if state not in (None, "") or key:
+                raise serializers.ValidationError({"warehouse_connector_state": "销售平台不适用仓储连接器字段。"})
+            state, key = None, ""
+        if self.instance and (state, key) != (self.instance.warehouse_connector_state, self.instance.warehouse_connector_key):
+            from apps.integrations.models import WarehouseAuthorization
+            if WarehouseAuthorization.objects.select_for_update().filter(tenant_id=self.instance.tenant_id,
+                    warehouse__service_platform=self.instance).exclude(status="revoked").exists():
+                raise serializers.ValidationError({"warehouse_connector_key": "该平台存在仓库授权，请先解除授权再修改库存连接器。"})
+        attrs.update(warehouse_connector_state=state, warehouse_connector_key=key)
         if self.instance and "platform_type" in attrs:
             previous_type = str(self.instance.platform_type or "").strip().lower()
             next_type = str(attrs["platform_type"] or "").strip().lower()
@@ -451,6 +477,8 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
 
         return integration_platform_key(
             platform_type=obj.service_platform.platform_type,
+            warehouse_connector_state=obj.service_platform.warehouse_connector_state,
+            warehouse_connector_key=obj.service_platform.warehouse_connector_key,
             code=obj.service_platform.code,
             name=obj.service_platform.name,
         )
@@ -522,7 +550,10 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
         elif service_platform.platform_type != expected_platform_type:
             raise serializers.ValidationError({"service_platform_id": "仓储服务平台类型必须与仓库类型一致。"})
         from apps.integrations.platform_schema_service import integration_platform_key
-        provider = integration_platform_key(platform_type=service_platform.platform_type, code=service_platform.code, name=service_platform.name) if service_platform else ""
+        provider = integration_platform_key(platform_type=service_platform.platform_type,
+            warehouse_connector_state=service_platform.warehouse_connector_state,
+            warehouse_connector_key=service_platform.warehouse_connector_key,
+            code=service_platform.code, name=service_platform.name) if service_platform else ""
         if self.instance and any(attrs.get(key, getattr(self.instance, key)) != getattr(self.instance, key)
                                  for key in ("service_platform", "country_code", "warehouse_type")):
             from apps.integrations.models import WarehouseAuthorization

@@ -45,6 +45,10 @@ DATASETS = {
         "dimensions": {"platform": field("平台", "sales_order__platform__platform_type"), "store_id": field("店铺", "sales_order__store_id"), "region": field("站点", "sales_order__region"), "country": field("国家代码", "sales_order__region"), "currency": field("币种", "currency"), "date": field("订单业务日期", "sales_order__business_date"), "sku": field("平台 SKU", "seller_sku"), "internal_sku": field("内部 SKU", "internal_sku__sku_code")},
         "metrics": {"order_count": field("非取消订单量", Count("sales_order_id", distinct=True), "count"), "units_sold": field("非取消商品销量", Sum("quantity"), "count"), "gross_sales": field("非取消商品销售额", Sum("line_total_amount"), "money", "商品行金额；不同于订单总金额。"), "unmapped_count": field("未关联商品行数", Count("pk", filter=Q(internal_sku__isnull=True)), "count")},
         "defaults": {"dimensions": ["store_id", "sku", "currency"], "metrics": ["units_sold", "gross_sales", "unmapped_count"]}, "note": "排除取消订单；未关联商品保留平台 SKU。订单数按每个分组去重，不能将跨 SKU 的订单数相加。"},
+    "sales_abc": {"name": "销售 ABC", "module": "销售管理", "permissions": ["sales_management.view"], "extra_permissions": ["sales_management.skus.view", "sales_management.returns.view"], "report_type": "sales_details", "path": "/sales-management/orders",
+        "dimensions": {"spu": field("新编码（SPU／SKU）", "spu"), "sku": field("新编码（SKU）", "sku"), "legacy_spu": field("旧编码（SPU／SKU）", "legacy_spu"), "legacy_sku": field("旧编码（SKU）", "legacy_sku"), "product_name": field("商品名称", "product_name"), "image_url": field("图片", "image_url"), "abc": field("ABC 分类", "abc")},
+        "metrics": {"units": field("需求销量", "units", "count"), "ordered_units": field("下单数量", "ordered_units", "count"), "cancelled_units": field("取消数量", "cancelled_units", "count"), "refund_requested_units": field("退款申请数量", "refund_requested_units", "count"), "refund_completed_units": field("已完成退款数量", "refund_completed_units", "count"), "return_received_units": field("已收货退货数量", "return_received_units", "count"), "cumulative_percent": field("累计占比", "cumulative_percent", "percent")},
+        "defaults": {"dimensions": ["spu", "legacy_spu", "product_name", "image_url", "abc"], "metrics": ["units", "cancelled_units", "refund_requested_units", "refund_completed_units", "return_received_units", "cumulative_percent"]}, "note": "按需求销量排序分级；支持非取消订单或已履约及已完成订单口径，保留取消、退款和退货收货信息。"},
     "refunds": {"name": "退款退货分析", "module": "销售管理", "permissions": ["sales_management.returns.view", "sales_management.view", "analytics.view"], "report_type": "sales_details", "path": "/sales-management/returns",
         "dimensions": {**STORE, "region": field("站点", "store__country_code"), "country": field("国家", "store__country_code"), "date": field("申请日期（店铺时区）", TruncDate("requested_at_utc", tzinfo=UTC)), "status": field("售后状态", "normalized_status")},
         "metrics": {"case_count": field("售后申请量", Count("pk"), "count"), "requested_amount": field("退款申请金额", Sum("refund_amount"), "money"), "completed_amount": field("已完成退款金额", Sum("refund_amount", filter=Q(normalized_status="completed"), default=Decimal(0)), "money", "仅计入已完成状态；已接受申请不视为资金退款完成。"), "unlinked_count": field("未关联订单量", Count("pk", filter=Q(sales_order__isnull=True)), "count")},
@@ -72,6 +76,7 @@ FILTER_KEYS = {"date_from", "date_to", "platform", "platforms", "store_id", "sto
 DATASET_FILTERS = {
     "sales": ["date_from", "date_to", "platform", "store_id", "region", "currency", "sku", "status", "external_order_id", "unmapped_only"],
     "sales_skus": ["date_from", "date_to", "platform", "store_id", "region", "currency", "sku", "unmapped_only"],
+    "sales_abc": ["date_from", "date_to", "country", "platform", "store_id", "currency", "sku", "demand_mode"],
     "refunds": ["date_from", "date_to", "platform", "store_id", "region", "currency", "sku", "status", "external_order_id", "unmapped_only"],
     "finance": ["date_from", "date_to", "platform", "store_id", "currency", "fee_category", "match_status", "external_order_id", "raw_fee_name"],
     "inventory": ["date_to", "warehouse_id", "site_code", "sku", "inventory_type", "unmapped_only"],
@@ -123,7 +128,7 @@ def _report_resource(dataset):
         return None
     if dataset is DATASETS.get("inventory"):
         return "reports.inventory"
-    if dataset in (DATASETS.get("sales"), DATASETS.get("sales_skus"), DATASETS.get("refunds")):
+    if dataset in (DATASETS.get("sales"), DATASETS.get("sales_skus"), DATASETS.get("refunds"), DATASETS.get("sales_abc")):
         return "reports.sales"
     return None
 
@@ -167,6 +172,8 @@ def normalize_config(raw):
     allowed_filters = set(DATASET_FILTERS[config["dataset"]])
     if config["dataset"].startswith("inventory"):
         allowed_filters.add("include_virtual")
+    elif config["dataset"] == "sales_abc":
+        pass
     else:
         allowed_filters.update({"platforms", "store_ids"})
     if not isinstance(filters, dict) or set(filters) - allowed_filters:
@@ -192,6 +199,8 @@ def normalize_config(raw):
         raise ValidationError({"unmapped_only": "请选择是否只看未关联商品。"})
     if filters.get("inventory_type") not in (None, "", "physical", "virtual", "unknown"):
         raise ValidationError({"inventory_type": "商品类型不正确。"})
+    if config["dataset"] == "sales_abc" and filters.get("demand_mode") not in (None, "", "non_cancelled", "fulfilled"):
+        raise ValidationError({"demand_mode": "请选择有效的需求口径。"})
     if filters.get("cost_status") not in (None, "", "missing", "confirmed", "zero"):
         raise ValidationError({"cost_status": "成本状态不正确。"})
     if any(not isinstance(config[key], str) for key in ("chart", "pivot", "ordering")) or config["chart"] not in {"table", "bar", "line", "pivot"} or config["pivot"] not in ["", *config["dimensions"]]:
@@ -228,7 +237,7 @@ def normalize_config(raw):
 
 def scope_fingerprint(user, dataset, permission, dataset_id=None):
     codes = sorted(set(["reports.view", permission, *dataset.get("extra_permissions", [])]))
-    resource = "commerce.inventory" if dataset_id in {"inventory", "inventory_value"} else "sales_management.sales" if dataset_id in {"sales", "sales_skus", "refunds"} else "analytics.advertising" if dataset_id == "advertising" else None
+    resource = "commerce.inventory" if dataset_id in {"inventory", "inventory_value"} else "sales_management.sales" if dataset_id in {"sales", "sales_skus", "refunds", "sales_abc"} else "analytics.advertising" if dataset_id == "advertising" else None
     result = {code: get_permission_data_scopes(user, code, resource_code=resource if code == permission else None) for code in codes}
     if dataset_id == "advertising":
         from .advertising_dataset import advertising_store_scope
@@ -261,7 +270,7 @@ def _analytics_scope(user, queryset, dataset_id, permission):
         allowed |= condition
     return queryset.filter(pk__in=Subquery(queryset.filter(allowed).values("pk")))
 
-def source_queryset(request, config, permission):
+def source_queryset(request, config, permission, *, include_cancelled=False):
     name, filters = config["dataset"], config["filters"]
     user = request.user
     if name == "advertising":
@@ -280,7 +289,9 @@ def source_queryset(request, config, permission):
         if filters.get("external_order_id"):
             qs = qs.filter(**{"sales_order__external_order_id" if name == "refunds" else "external_order_id": filters["external_order_id"]})
         if name == "sales_skus":
-            qs = SalesOrderItem.objects.filter(sales_order__tenant=user.tenant, sales_order__in=qs.exclude(normalized_status="cancelled"))
+            if not include_cancelled:
+                qs = qs.exclude(normalized_status="cancelled")
+            qs = SalesOrderItem.objects.filter(sales_order__tenant=user.tenant, sales_order__in=qs)
             if permission == "analytics.view":
                 configs = analytics_dimension_configs(user, permission, resource_code="sales_management.sales")
                 if configs is not None:
@@ -414,6 +425,50 @@ def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scop
     if delivery_store_ids is not None and config["dataset"].startswith("inventory"):
         raise ValidationError({"delivery_store_ids": "内部店铺范围不能用于库存数据集。"})
     permission = selected_permission(request.user, dataset)
+    if config["dataset"] == "sales_abc":
+        from types import SimpleNamespace
+        from django.http import QueryDict
+        params = QueryDict(mutable=True)
+        params.update({k: str(v) for k, v in config["filters"].items()})
+        proxy = SimpleNamespace(user=request.user, query_params=params)
+        filters = config["filters"]
+        if not all(filters.get(key) for key in ("date_from", "date_to")) or not any(filters.get(key) for key in ("country", "platform", "store_id")):
+            raise ValidationError("请选择国家、平台或店铺，并设置完整日期范围。")
+        if (date.fromisoformat(filters["date_to"]) - date.fromisoformat(filters["date_from"])).days >= 92:
+            raise ValidationError("单次最多查询 92 天。")
+        from .sales_abc import compute_sales_abc
+        facts = compute_sales_abc(proxy, filters, mode=filters.get("demand_mode") or "non_cancelled", export_scope=export_scope)
+        flat = facts["sku_rows"]
+        want = set(config["dimensions"] + config["metrics"])
+        flat_sku = bool({"sku", "legacy_sku"} & set(config["dimensions"]))
+        if flat_sku:
+            rows = [{key: row.get(key) for key in want | {"spu", "legacy_spu", "sku", "legacy_sku", "product_name", "image_url", "abc"}} for row in flat]
+        else:
+            rows = []
+            for parent in facts["spu_rows"]:
+                children = [{key: child.get(key) for key in want | {"sku", "legacy_sku", "product_name", "image_url", "spu", "legacy_spu", "abc"}} for child in parent["children"]]
+                rows.append({**{key: parent.get(key) for key in want | {"spu", "legacy_spu", "product_name", "image_url"}}, "children": children})
+        if config["ordering"]:
+            key = config["ordering"].lstrip("-")
+            reverse = config["ordering"].startswith("-")
+            def sort_value(row):
+                value = row.get(key)
+                if value is None:
+                    return (1, "")
+                if key in dataset["metrics"]:
+                    return (0, Decimal(str(value)))
+                return (0, str(value).casefold())
+            rows.sort(key=sort_value, reverse=reverse)
+            if not flat_sku:
+                for row in rows:
+                    row["children"].sort(key=sort_value, reverse=reverse)
+        columns = [{"key": k, "label": dataset["dimensions"].get(k, dataset["metrics"].get(k))["label"], "kind": dataset["dimensions"].get(k, dataset["metrics"].get(k))["kind"]} for k in config["dimensions"] + config["metrics"]]
+        truncated = max(len(rows), sum(len(row.get("children", [])) or 1 for row in rows)) > limit
+        return {"api_status": "connected", "config": config, "rows": rows[:limit], "count": min(len(rows), limit), "truncated": truncated, "limit": limit, "metric_version": VERSION,
+            "refreshed_at": None, "computed_at": timezone.now(), "cache_seconds": 0, "cached": False, "note": dataset["note"], "columns": columns,
+            "mapping_version": None, "dimension_labels": {"spu": {str(row.get("spu")): f"{row.get('product_name') or ''} · {row.get('spu')}" for row in rows if row.get("spu")}, "legacy_spu": {str(row.get("legacy_spu")): str(row.get("legacy_spu")) for row in rows if row.get("legacy_spu")}},
+            "identity_names": {"spu": {str(row.get("spu")): row.get("product_name") for row in rows if row.get("spu")}, "legacy_spu": {str(row.get("legacy_spu")): row.get("product_name") for row in rows if row.get("legacy_spu")}},
+            "ranked_units": facts["ranked_units"], "unmapped_units": facts["unmapped_units"], "unlinked_refund_units": facts["unlinked_refund_units"], "return_receipts_available": facts["return_receipts_available"]}
     # Pass only validated strings to the existing dimension/date parser.
     from types import SimpleNamespace
     from django.http import QueryDict

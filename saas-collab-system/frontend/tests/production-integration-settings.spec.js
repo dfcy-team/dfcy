@@ -36,7 +36,7 @@ describe('系统管理员生产环境 API 配置闭环', () => {
   it('仓库合同走版本审批，不复制公共配置或仓库凭据', () => {
     expect(page).toContain("jifeng_wms: ['contract_approved', 'auto_refresh_enabled']");
     expect(page).toContain('极风 WMS · 仓库');
-    expect(page).toContain("v-if=\"platform !== 'jifeng_wms'\" class=\"advanced-endpoints\"");
+    expect(page).toContain("v-if=\"!['jifeng_wms', 'best_ecapi'].includes(platform)\" class=\"advanced-endpoints\"");
     expect(page).toContain('极风无需 OAuth 回调地址');
     expect(page).toContain("router.push('/master-data/warehouses')");
     expect(page).toContain("router.push('/integrations/readiness')");

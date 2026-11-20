@@ -31,3 +31,5 @@ export function reportError(message, fallback = '数据读取失败，请重试�
   return fallback;
 }
 export const reportFieldLabel = (dataset, key) => [...(dataset?.dimensions || []), ...(dataset?.metrics || [])].find(item => item.key === key)?.label || '未命名字段';
+
+filterChoices.demand_mode = [{ value: "non_cancelled", label: "非取消订单（含待处理）" }, { value: "fulfilled", label: "已履约及已完成订单" }];
