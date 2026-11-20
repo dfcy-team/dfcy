@@ -81,10 +81,12 @@
         </el-table-column>
       </el-table>
     </el-card>
+    <InventoryAbcSettings />
   </section>
 </template>
 
 <script setup>
+import InventoryAbcSettings from '../../components/inventory/InventoryAbcSettings.vue';
 import { computed, onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { fetchProductCategoryBackgroundColors, updateProductCategoryBackgroundColors } from '../../api/products';

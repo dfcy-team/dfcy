@@ -1,3 +1,4 @@
+import { createPinia } from 'pinia';
 import { flushPromises, shallowMount } from '@vue/test-utils';
 import { expect, it, vi } from 'vitest';
 import { fetchInventoryWarnings } from '../src/api/alerts';
@@ -7,7 +8,7 @@ vi.mock('../src/api/alerts', () => ({ fetchInventoryWarnings: vi.fn() }));
 
 it('uses the applied country and selected SPU for read-only variant details', async () => {
   fetchInventoryWarnings.mockResolvedValue({ success: true, data: { results: [] } });
-  const page = shallowMount(InventoryWarningSnapshot, { global: { stubs: { RouterLink: true } } });
+  const page = shallowMount(InventoryWarningSnapshot, { global: { plugins: [createPinia()], stubs: { RouterLink: true } } });
   await flushPromises();
   page.vm.filters.country_id = 7;
   page.vm.apply();

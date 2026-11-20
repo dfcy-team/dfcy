@@ -42,12 +42,17 @@ def test_reconcile_and_worker_claims_share_global_capacity(shop):
     compare_finished = Event()
     read_started = Event()
 
-    def inspect(**kwargs):
+    def inspect(result):
         read_started.set()
         assert compare_finished.wait(timeout=12)
-        return []
+        return result
 
-    adapter = Mock(activities=Mock(side_effect=inspect))
+    # The protected fixture may already know the platform ID. Gate either
+    # read-only path so capacity is measured while reconciliation is in flight.
+    present = {"status": 1, "timeslot_id": "still-present", "end_time": 4102444800}
+    adapter = Mock(activities=Mock(side_effect=lambda **kwargs: inspect([
+                       {**present, "timeslot_id": old.intents.get().slot_id}])),
+                   detail=Mock(side_effect=lambda *args: inspect(present)))
     with ThreadPoolExecutor(max_workers=1) as pool:
         check = pool.submit(_thread_job, lambda: engine.reconcile_failed(old.pk, adapter=adapter))
         try:
@@ -59,7 +64,7 @@ def test_reconcile_and_worker_claims_share_global_capacity(shop):
             compare_finished.set()
         check.result(timeout=15)
 
-    adapter.activities.assert_called_once()
+    assert adapter.activities.call_count + adapter.detail.call_count >= 1
     assert StoreTask.objects.filter(lease_until__gt=timezone.now()).count() == 2
     assert StoreLock.objects.get(store=old.store).task_id == old.id
 

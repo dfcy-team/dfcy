@@ -7,17 +7,25 @@ from apps.masterdata.models import InventoryABCRun, InventoryABCEntry, Inventory
 from apps.products.models import ProductSKU
 
 
+ABC_POLICY_VERSION = "composite_revenue_units_v1_20261120"
+
+
 def published_run(actor, country):
     runs = InventoryABCRun.objects.filter(tenant_id=actor.tenant_id, country_id=country.pk)
-    latest = runs.order_by("-created_at", "-pk").first()
+    current_policy = Q(config__classification_basis="composite", config__policy_version=ABC_POLICY_VERSION)
+    latest = runs.annotate(
+        policy_priority=Case(When(status__in=("queued", "building"), then=Value(0)), When(current_policy, then=Value(1)), default=Value(2))
+    ).order_by("policy_priority", "-created_at", "-pk").first()
+    latest_composite = latest if latest and latest.config.get("classification_basis") == "composite" and latest.config.get("policy_version") == ABC_POLICY_VERSION else None
     settings = InventoryObservationSettings.objects.filter(tenant_id=actor.tenant_id).first()
     enabled = settings.abc_enabled if settings else True
     run = None
-    if enabled and latest:
+    if enabled and latest and latest.policy_priority <= 1:
         preferred_status = Case(When(status="ready", then=Value(0)), default=Value(1))
-        run = runs.filter(status__in=("ready", "partial")).order_by(
+        run = runs.filter(current_policy, status__in=("ready", "partial")).order_by(
             preferred_status, "-cutoff_date", "-completed_at", "-pk"
         ).first()
+    composite_pending = bool(enabled and run is None and latest)
     expected = {
         "window_days": settings.abc_window_days,
         "a_percent": f"{settings.abc_a_percent:.2f}",
@@ -33,14 +41,18 @@ def published_run(actor, country):
     meta = {
         "run_id": run.pk if run else None,
         "enabled": enabled,
-        "status": run.status if run else "unavailable",
+        "status": run.status if run else ("pending" if composite_pending else "unavailable"),
         "latest_status": latest.status if latest else "unavailable",
+        "classification_basis": "composite",
+        "policy_version": ABC_POLICY_VERSION,
+        "composite_pending": composite_pending,
         "cutoff_date": str(run.cutoff_date) if run else None,
         "computed_at": run.completed_at.isoformat() if run and run.completed_at else None,
         "window_days": run.window_days if run else (settings.abc_window_days if settings else 90),
         "currency": run.currency if run else country.currency,
         "stale": bool(run and run.cutoff_date < today - timedelta(days=1)),
-        "issues": sorted({str(issue).split(":", 1)[0] for issue in latest.issues}) if latest and latest.status in {"failed", "partial"} else [],
+        "issues": sorted({str(issue).split(":", 1)[0] for issue in latest_composite.issues})
+        if latest_composite and latest_composite.status in {"failed", "partial"} else [],
         "config_pending": config_pending,
     }
     return run, meta
@@ -83,7 +95,12 @@ def decorate_rows(actor, country, rows):
             spu_id = row["id"]
         sku = entries.get(("sku", sku_id))
         spu = entries.get(("spu", spu_id))
+        sku_evidence = sku.evidence if sku and isinstance(sku.evidence, dict) else {}
+        spu_evidence = spu.evidence if spu and isinstance(spu.evidence, dict) else {}
+        reference = meta["status"] == "partial"
         row["abc"] = {
+            "classification_basis": meta["classification_basis"],
+            "policy_version": meta["policy_version"],
             "sku_first_sale_date": str(sku.first_sale_date) if sku and sku.first_sale_date else None,
             "spu_first_sale_date": str(spu.first_sale_date) if spu and spu.first_sale_date else None,
             "observation_days": run.config.get("new_product_observation_days", 30) if run else 30,
@@ -95,8 +112,10 @@ def decorate_rows(actor, country, rows):
             "sku_candidate_streak": sku.candidate_streak if sku else 0,
             "spu_candidate_grade": spu.candidate_grade if spu else "",
             "spu_candidate_streak": spu.candidate_streak if spu else 0,
-            "sku_reference_grade": sku.candidate_grade if sku and run.status == "partial" else "",
-            "spu_reference_grade": spu.candidate_grade if spu and run.status == "partial" else "",
+            "sku_reference_grade": sku_evidence.get("reference_grade", sku.candidate_grade) if sku and reference else "",
+            "spu_reference_grade": spu_evidence.get("reference_grade", spu.candidate_grade) if spu and reference else "",
+            "sku_evidence": sku_evidence,
+            "spu_evidence": spu_evidence,
             "cutoff_date": meta["cutoff_date"],
             "computed_at": meta["computed_at"],
             "status": meta["status"],

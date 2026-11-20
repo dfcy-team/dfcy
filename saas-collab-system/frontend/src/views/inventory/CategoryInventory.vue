@@ -53,7 +53,7 @@
       <el-table-column v-if="level === 'category'" label="商品款数"><template #default="{row}">{{ row.spu_count }}</template></el-table-column>
       <el-table-column v-if="level !== 'sku'" label="规格数"><template #default="{row}">{{ row.sku_count }}</template></el-table-column>
       <el-table-column v-if="level !== 'category'" label="ABC 等级">
-        <template #default="{row}">{{ abcGrades[level === 'spu' ? row.abc?.spu_grade : row.abc?.sku_grade] || '暂无分级' }}</template>
+        <template #default="{row}"><InventoryAbcBadges :row="row" :entity-type="level" /></template>
       </el-table-column>
       <el-table-column label="最近同步可售库存"><template #default="{row}">{{ format(row.available) }}</template></el-table-column>
       <el-table-column :label="'近 ' + (applied?.days || days) + ' 天销量'"><template #default="{row}">{{ format(row.sales) }}<small v-if="row.unlisted_stock_sku_count">{{ row.unlisted_stock_sku_count }} 个有库存无销售（未关联平台商品）</small></template></el-table-column>
@@ -89,9 +89,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import InventoryAbcBadges from '../../components/inventory/InventoryAbcBadges';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import AppPage from '../../components/AppPage.vue';
 import DocumentProductImageV2 from '../../components/supply-chain/DocumentProductImageV2.vue';
+import { useAuthStore } from '../../stores/auth';
 import { requestApi } from '../../api/request';
 
 const abcGrade = ref(''), stockedOnly = ref(false);
@@ -104,6 +106,8 @@ const detailOpen = ref(false), detailTitle = ref(''), detailLevel = ref(''), det
 const detailCount = ref(0), detailPage = ref(1), detailLoading = ref(false), detailError = ref('');
 let sequence = 0, detailSequence = 0, detailParams;
 let mainController, detailController;
+const auth = useAuthStore();
+watch(() => [auth.authorizationStale, auth.currentUser], () => { reset(); countries.value=[]; country.value=null; warehouses.value=[]; categories.value=[]; detailRows.value=[]; }, {deep:true, flush:'sync'});
 
 const warehouses = ref([]), warehouse = ref(null), categories = ref([]), selectedCategories = ref([]);
 const categoryOptions = computed(() => {
@@ -250,11 +254,15 @@ async function loadDetail(next) {
   }
 }
 onMounted(async () => {
+  const seq = ++sequence;
+  mainController = new AbortController();
   try {
-    countries.value = (await fetchRows({})).countries;
+    const data = await fetchRows({}, mainController.signal);
+    if (seq !== sequence) return;
+    countries.value = data.countries;
     if (countries.value.length === 1) country.value = countries.value[0].id;
   } catch (err) {
-    error.value = err.message;
+    if (seq === sequence) error.value = err.message;
   }
 });
 onUnmounted(reset);

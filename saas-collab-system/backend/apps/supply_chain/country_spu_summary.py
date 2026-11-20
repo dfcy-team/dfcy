@@ -58,6 +58,7 @@ def country_spu_summary(actor, country, skus, *, now=None):
     from django.utils import timezone
     from apps.commerce import country_decisions as cd
     from apps.sales_management.inventory_queries import latest_country_inventory
+    from apps.sales_management.scopes import filter_inventory_queryset
     from apps.permissions.services import check_user_permission
     from apps.products.models import ProductSPU
     from .country_listing_evidence import country_listing_evidence
@@ -87,7 +88,7 @@ def country_spu_summary(actor, country, skus, *, now=None):
         aliases = list(source.filter(internal_sku_id__in=visible_ids).order_by()
             .values_list('source_sku', flat=True).distinct())
         ranked = latest_country_inventory(source.filter(source_sku__in=aliases))
-        scoped = cd.filter_inventory_queryset(actor, cd.INVENTORY, ranked)
+        scoped = filter_inventory_queryset(actor, cd.INVENTORY, ranked)
         records = list(scoped.filter(internal_sku_id__in=visible_ids)
             .filter(warehouse__country_code__iexact=country.country_code)
             .select_related("source_run", "internal_sku").order_by())

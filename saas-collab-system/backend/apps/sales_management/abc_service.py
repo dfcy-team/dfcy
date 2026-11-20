@@ -6,6 +6,8 @@ never advances the official ABC grade stability state.
 """
 
 from collections import defaultdict
+from heapq import merge as merge_sorted
+from itertools import groupby
 from datetime import datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -15,17 +17,19 @@ from django.db.models import Min, Sum, F, Q, Value, DecimalField, DateField, Dat
 from django.db.models.functions import Cast, Coalesce
 from django.utils import timezone
 
-from apps.commerce.models import RefundReturn, RefundReturnItem, SalesOrder, SalesOrderItem
+from apps.commerce.models import RefundReturn, RefundReturnItem, SalesOrder, SalesOrderItem, SalesOrderBundleSnapshot
 from apps.integrations.models import HistorySyncSegment
 from apps.masterdata.models import DailyExchangeRateSnapshot, StoreMaster
 from apps.masterdata.models import InventoryABCEntry, InventoryABCRun, InventoryObservationSettings
-from apps.products.models import ProductSPU
+from apps.products.models import ProductSPU, ProductSKU
 from apps.sales_management.abc_ranking import rank_entities, transition_grade
+from apps.sales_management.composite_rules import evaluate_comprehensive_abc
 from apps.sales_management.inventory_queries import eligible_inventory_orders, prefer_sales_order_time
 from apps.sales_management.scopes import filter_sales_queryset
 
 
 ZERO = Decimal("0")
+ABC_POLICY_VERSION = "composite_revenue_units_v1_20261120"
 VALID_ORDER_STATES = ("confirmed", "fulfilled", "completed")
 
 
@@ -266,6 +270,8 @@ def _previous_entries(tenant_id, country_id, cutoff_date, config):
         country_id=country_id,
         status="ready",
         cutoff_date__lte=cutoff_date,
+        config__classification_basis=config["classification_basis"],
+        config__policy_version=config["policy_version"],
     ).order_by("-cutoff_date", "-pk").first()
     if not previous_run:
         return {}
@@ -290,6 +296,226 @@ def _previous_entries(tenant_id, country_id, cutoff_date, config):
             "changed_at": entry.changed_at,
         }
         for entry in previous_run.entries.all()
+    }
+
+
+def _bundle_component_order_facts(actor, bundle_items, requested_skus, zone):
+    """Yield exact immutable bundle component quantities grouped by order and SKU."""
+    if not bundle_items:
+        return [], True
+    order_item_ids = [row["id"] for row in bundle_items]
+    snapshots = {
+        row.order_item_id: row for row in SalesOrderBundleSnapshot.objects.filter(
+            tenant_id=actor.tenant_id, order_item_id__in=order_item_ids
+        ).select_related("order_item__sales_order", "bundle_version", "bundle_version__bundle_sku").only(
+            "tenant_id", "order_item_id", "bundle_version_id", "components_payload",
+            "order_item__sales_order__tenant_id", "bundle_version__tenant_id",
+            "bundle_version__bundle_sku_id", "bundle_version__effective_at",
+            "bundle_version__bundle_sku__tenant_id", "bundle_version__bundle_sku__product_type",
+        )
+    }
+    component_payloads = []
+    component_ids = set()
+    complete = True
+    for item in bundle_items:
+        snapshot = snapshots.get(item["id"])
+        if not snapshot:
+            # Never use today's mutable bundle recipe to reconstruct old demand.
+            complete = False
+            continue
+        order_tenant = item["sales_order__tenant_id"]
+        bundle_id = item["internal_sku_id"]
+        if (
+            snapshot.tenant_id != order_tenant
+            or snapshot.order_item.sales_order.tenant_id != order_tenant
+            or snapshot.bundle_version.tenant_id != order_tenant
+            or snapshot.bundle_version.bundle_sku_id != bundle_id
+            or snapshot.bundle_version.effective_at > item["sales_order__created_at_utc"]
+            or snapshot.bundle_version.bundle_sku.tenant_id != order_tenant
+            or snapshot.bundle_version.bundle_sku.product_type != "bundle"
+        ):
+            complete = False
+            continue
+        payload = snapshot.components_payload
+        if not isinstance(payload, list) or not payload:
+            complete = False
+            continue
+        seen = set()
+        parsed = []
+        valid = True
+        for component in payload:
+            if not isinstance(component, dict):
+                valid = False
+                break
+            component_id, quantity = component.get("component_sku_id"), component.get("quantity")
+            if (
+                type(component_id) is not int or component_id <= 0
+                or type(quantity) is not int or quantity <= 0
+                or component_id in seen or component_id == bundle_id
+            ):
+                valid = False
+                break
+            seen.add(component_id)
+            parsed.append((component_id, quantity))
+        if not valid:
+            complete = False
+            continue
+        component_payloads.append((item, parsed))
+        component_ids.update(component_id for component_id, _ in parsed)
+
+    valid_components = set(ProductSKU.objects.filter(
+        tenant_id=actor.tenant_id, pk__in=component_ids, product_type="standard"
+    ).values_list("pk", flat=True))
+    facts = defaultdict(int)
+    for item, components in component_payloads:
+        if any(component_id not in valid_components for component_id, _ in components):
+            complete = False
+            continue
+        day = item["sales_order__created_at_utc"].astimezone(zone).date()
+        order_id = item["sales_order_id"]
+        bundle_units = int(item["quantity"] or 0)
+        for component_id, per_bundle in components:
+            if component_id in requested_skus:
+                facts[(order_id, component_id, day)] += bundle_units * per_bundle
+    return [(*key, units) for key, units in sorted(facts.items())], complete
+
+
+def _order_spu_totals(order_sku_units, spu_by_sku):
+    """Sum sibling SKU units inside one order for exact SPU concentration."""
+    totals = defaultdict(int)
+    for sku_id, units in order_sku_units.items():
+        spu_id = spu_by_sku.get(sku_id)
+        if spu_id:
+            totals[spu_id] += units
+    return totals
+
+
+def _quantity_facts(actor, store_ids, sku_ids, spu_by_sku, zone, cutoff_date, window_days):
+    """Aggregate demand by local day and exact order with bounded streaming.
+
+    SQL groups direct SKU quantity by order/SKU. Immutable bundle snapshots are
+    read in 500-item chunks and merged into the ordered stream. Memory use is
+    bounded by one chunk plus the SKU lines in one order, never all orders.
+    """
+    scan_days = max(window_days, 84)
+    start = cutoff_date - timedelta(days=scan_days - 1)
+    ranking_start = cutoff_date - timedelta(days=window_days - 1)
+    lower = datetime.combine(start, time.min, tzinfo=zone)
+    upper = datetime.combine(cutoff_date + timedelta(days=1), time.min, tzinfo=zone)
+    orders = _eligible_orders(actor, store_ids, lower, upper)
+    source_unverified = _eligible_orders(
+        actor, store_ids, lower, upper, include_unverified=True
+    ).exclude(_valid_order_source()).exists()
+    requested = set(sku_ids)
+    day_units = defaultdict(int)
+    max_order_by_sku = defaultdict(int)
+    max_order_by_spu = defaultdict(int)
+    complete = not source_unverified
+
+    with eligible_inventory_orders(orders) as eligible:
+        source = SalesOrderItem.objects.filter(sales_order_id__in=eligible)
+        # Preserve bundle SKU own sales; exclude only immutable component rows.
+        direct = source.filter(internal_sku_id__in=sku_ids).exclude(
+            (Q(bundle_snapshot__isnull=False) & ~Q(internal_sku__product_type="bundle"))
+        ).order_by().values("sales_order_id", "internal_sku_id").annotate(
+            local_day=_local_day_expression("sales_order__created_at_utc", zone, lower, upper),
+            units=Sum("quantity"),
+        ).order_by("sales_order_id", "internal_sku_id").values_list(
+            "sales_order_id", "internal_sku_id", "local_day", "units"
+        ).iterator(chunk_size=1000)
+
+        bundle_source = source.filter(
+            Q(internal_sku__product_type="bundle") | Q(bundle_snapshot__isnull=False)
+        ).order_by("sales_order_id", "id").values(
+            "id", "sales_order_id", "sales_order__tenant_id", "sales_order__created_at_utc",
+            "internal_sku_id", "quantity",
+        ).iterator(chunk_size=1000)
+
+        def component_stream():
+            nonlocal complete
+            pending = []
+            for item in bundle_source:
+                pending.append(item)
+                if len(pending) >= 500:
+                    facts, verified = _bundle_component_order_facts(actor, pending, requested, zone)
+                    complete = complete and verified
+                    yield from facts
+                    pending = []
+            if pending:
+                facts, verified = _bundle_component_order_facts(actor, pending, requested, zone)
+                complete = complete and verified
+                yield from facts
+
+        direct_facts = (
+            (order_id, sku_id, day, int(units or 0))
+            for order_id, sku_id, day, units in direct
+        )
+        merged = merge_sorted(
+            direct_facts, component_stream(), key=lambda row: row[0]
+        )
+        for order_id, facts in groupby(merged, key=lambda row: row[0]):
+            order_skus = defaultdict(int)
+            order_day = None
+            for _, sku_id, day, units in facts:
+                if day is None:
+                    complete = False
+                    continue
+                order_day = day
+                order_skus[sku_id] += int(units or 0)
+            if order_day is None:
+                continue
+            for sku_id, units in order_skus.items():
+                day_units[(sku_id, order_day)] += units
+                if order_day >= ranking_start:
+                    max_order_by_sku[sku_id] = max(max_order_by_sku[sku_id], units)
+            order_spus = _order_spu_totals(order_skus, spu_by_sku)
+            if order_day >= ranking_start:
+                for spu_id, units in order_spus.items():
+                    max_order_by_spu[spu_id] = max(max_order_by_spu[spu_id], units)
+
+    return {
+        "day_units": dict(day_units),
+        "max_order_by_sku": dict(max_order_by_sku),
+        "max_order_by_spu": dict(max_order_by_spu),
+        "source_unverified": source_unverified,
+        "history_complete": complete,
+    }
+
+
+def _aggregate_quantity_profile(day_units, spu_by_sku, cutoff_date, ranking_window_days):
+    """Roll up country-wide daily demand; separate ranking from continuity dates."""
+    sku_units = defaultdict(int)
+    sku_active_weeks = defaultdict(set)
+    sku_max_day = defaultdict(int)
+    spu_day_units = defaultdict(lambda: defaultdict(int))
+    window_start = cutoff_date - timedelta(days=ranking_window_days - 1)
+    continuity_start = cutoff_date - timedelta(days=83)
+    for (sku_id, day), units in day_units.items():
+        if units <= 0:
+            continue
+        spu_id = spu_by_sku.get(sku_id)
+        if day >= window_start:
+            sku_units[sku_id] += units
+            sku_max_day[sku_id] = max(sku_max_day[sku_id], units)
+            if spu_id:
+                spu_day_units[spu_id][day] += units
+        if continuity_start <= day <= cutoff_date:
+            sku_active_weeks[sku_id].add((cutoff_date - day).days // 7)
+    spu_units = defaultdict(int)
+    spu_active_weeks = defaultdict(set)
+    spu_max_day = defaultdict(int)
+    for sku_id, spu_id in spu_by_sku.items():
+        spu_units[spu_id] += sku_units[sku_id]
+        spu_active_weeks[spu_id].update(sku_active_weeks[sku_id])
+    for spu_id, daily in spu_day_units.items():
+        spu_max_day[spu_id] = max(daily.values(), default=0)
+    return {
+        "sku_units": sku_units,
+        "sku_active_weeks": sku_active_weeks,
+        "sku_max_day": sku_max_day,
+        "spu_units": spu_units,
+        "spu_active_weeks": spu_active_weeks,
+        "spu_max_day": spu_max_day,
     }
 
 
@@ -371,6 +597,8 @@ def calculate_country(actor, country, run=None):
     run.config = {
         **(run.config if isinstance(run.config, dict) else {}),
         "window_days": window_days,
+        "classification_basis": "composite",
+        "policy_version": ABC_POLICY_VERSION,
         "a_percent": str(_decimal(a_percent).quantize(Decimal("0.01"))),
         "b_percent": str(_decimal(b_percent).quantize(Decimal("0.01"))),
         "stability_days": stable_days,
@@ -493,6 +721,38 @@ def calculate_country(actor, country, run=None):
         from apps.commerce.inventory_listing import linked_sku_ids
         stock_ids = {fact["internal_sku_id"] for fact in stock_facts(actor, country, {}) if fact["internal_sku_id"] is not None}
         listed_ids = linked_sku_ids(actor.tenant_id, country.country_code, sku_ids)
+        # Verified immutable bundle history is also country sales evidence.
+        # Discover it before narrowing the catalog, including components with no
+        # direct order, current stock or listing. Never consult today's recipe.
+        bundle_first_sales = {}
+        requested_components = set(sku_ids)
+        for store_ids in grouped_stores.values():
+            zone, _, _ = store_windows[store_ids[0]]
+            upper = datetime.combine(cutoff + timedelta(days=1), time.min, tzinfo=zone)
+            orders = _eligible_orders(actor, store_ids, None, upper)
+            with eligible_inventory_orders(orders) as eligible:
+                source = SalesOrderItem.objects.filter(
+                    sales_order_id__in=eligible, bundle_snapshot__isnull=False,
+                ).order_by("id")
+                last_id = 0
+                while True:
+                    # LIMIT bounds MySQL's buffered result, unlike iterator alone.
+                    items = list(source.filter(id__gt=last_id).values(
+                        "id", "sales_order_id", "sales_order__tenant_id", "sales_order__created_at_utc",
+                        "sales_order__paid_at_utc", "internal_sku_id", "quantity",
+                    )[:500])
+                    if not items:
+                        break
+                    last_id = items[-1]["id"]
+                    paid_days = {item["sales_order_id"]: item["sales_order__paid_at_utc"].astimezone(zone).date() for item in items}
+                    facts, _ = _bundle_component_order_facts(actor, items, requested_components, zone)
+                    for order_id, component_id, _, units in facts:
+                        day = paid_days[order_id]
+                        if units > 0 and (component_id not in bundle_first_sales or day < bundle_first_sales[component_id]):
+                            bundle_first_sales[component_id] = day
+        for sku_id, day in bundle_first_sales.items():
+            if sku_id not in first_sale_dates or day < first_sale_dates[sku_id]:
+                first_sale_dates[sku_id] = day
         relevant_ids = set(first_sale_dates) | stock_ids | set(listed_ids)
         relevant_ids.update(key[0] for key in sales_amounts)
         relevant_ids.update(key[0] for key in refund_amounts)
@@ -505,10 +765,57 @@ def calculate_country(actor, country, run=None):
             amount = max(sku_revenue[sku_id], ZERO)
             first_sale = first_sale_dates.get(sku_id)
             age_days = (cutoff - first_sale).days if first_sale else None
-            is_new = age_days is not None and 0 <= age_days < observation_days
-            if amount > 0 and not is_new:
+            is_mature = age_days is not None and age_days >= observation_days
+            if amount > 0 and is_mature:
                 sku_candidates.append({"id": sku_id, "amount": amount})
         sku_ranks = rank_entities(sku_candidates, a_percent, b_percent)
+
+        country_day_units = defaultdict(int)
+        country_max_order_sku = defaultdict(int)
+        country_max_order_spu = defaultdict(int)
+        quantity_complete = True
+        quantity_source_unverified = False
+        continuity_days = max(window_days, 84)
+        continuity_lower = cutoff - timedelta(days=continuity_days - 1)
+        for store_ids in grouped_stores.values():
+            zone, _, _ = store_windows[store_ids[0]]
+            for store_id in store_ids:
+                if not _complete_history(
+                    datetime.combine(continuity_lower, time.min, tzinfo=zone),
+                    datetime.combine(cutoff + timedelta(days=1), time.min, tzinfo=zone),
+                    history[store_id],
+                ):
+                    quantity_complete = False
+                    issues.append(f"continuity_history_incomplete:{store_id}")
+            day_facts = _quantity_facts(actor, store_ids, sku_ids, spu_by_sku, zone, cutoff, window_days)
+            quantity_complete = quantity_complete and day_facts["history_complete"]
+            quantity_source_unverified = quantity_source_unverified or day_facts["source_unverified"]
+            for key, units in day_facts["day_units"].items():
+                country_day_units[key] += units
+            for sku_id, units in day_facts["max_order_by_sku"].items():
+                country_max_order_sku[sku_id] = max(country_max_order_sku[sku_id], units)
+            for spu_id, units in day_facts["max_order_by_spu"].items():
+                country_max_order_spu[spu_id] = max(country_max_order_spu[spu_id], units)
+        if quantity_source_unverified:
+            issues.append("continuity_source_unverified")
+        quantity_profile = _aggregate_quantity_profile(country_day_units, spu_by_sku, cutoff, window_days)
+        sku_units = quantity_profile["sku_units"]
+        sku_active_weeks = quantity_profile["sku_active_weeks"]
+        sku_max_day = quantity_profile["sku_max_day"]
+        spu_units = quantity_profile["spu_units"]
+        spu_active_weeks = quantity_profile["spu_active_weeks"]
+        spu_max_day = quantity_profile["spu_max_day"]
+        if not quantity_complete:
+            issues.append("bundle_quantity_or_sales_day_unverified")
+        mature_sku_ids = {
+            sku_id for sku_id in sku_ids
+            if (first_sale_dates.get(sku_id) is not None
+                and (cutoff - first_sale_dates[sku_id]).days >= observation_days)
+        }
+        sku_unit_ranks = rank_entities(
+            [{"id": sku_id, "amount": sku_units[sku_id]} for sku_id in mature_sku_ids if sku_units[sku_id] > 0],
+            a_percent, b_percent,
+        )
 
         spu_revenue = defaultdict(Decimal)
         for sku_id, spu_id in spu_by_sku.items():
@@ -526,7 +833,7 @@ def calculate_country(actor, country, run=None):
         for spu_id in active_spus:
             first_sale = spu_first_sale.get(spu_id)
             age_days = (cutoff - first_sale).days if first_sale else None
-            if not (age_days is not None and 0 <= age_days < observation_days):
+            if age_days is not None and age_days >= observation_days:
                 established_spus.append(spu_id)
         spu_ranks = rank_entities(
             [{"id": spu_id, "amount": max(spu_revenue[spu_id], ZERO)} for spu_id in established_spus],
@@ -535,45 +842,107 @@ def calculate_country(actor, country, run=None):
         )
 
         all_issues = list(dict.fromkeys(issues))
-        is_complete = not all_issues
+        is_complete = not all_issues and quantity_complete
         previous = _previous_entries(actor.tenant_id, country.pk, cutoff, run.config) if is_complete else {}
         entries = []
-        for sku_id in sku_ids:
-            amount = max(sku_revenue[sku_id], ZERO)
-            first_sale = first_sale_dates.get(sku_id)
+        spu_unit_ranks = rank_entities(
+            [{"id": spu_id, "amount": spu_units[spu_id]} for spu_id in established_spus if spu_units[spu_id] > 0],
+            a_percent, b_percent,
+        )
+
+        def build_entry(entity_type, entity_id, amount, revenue_rank, units_rank, units,
+                        active_weeks, max_day, max_order, first_sale):
             age_days = (cutoff - first_sale).days if first_sale else None
-            is_new = age_days is not None and 0 <= age_days < observation_days
-            rank = sku_ranks.get(sku_id, {"grade": "new" if is_new else "no_sales", "share": ZERO, "cumulative_share": ZERO})
+            maturity = "new" if age_days is not None and 0 <= age_days < observation_days else (
+                "mature" if age_days is not None and age_days >= observation_days else "unknown"
+            )
+            if maturity != "mature":
+                revenue_rank = {"grade": "unavailable", "share": ZERO, "cumulative_share": ZERO}
+                units_rank = {"grade": "unavailable", "share": ZERO, "cumulative_share": ZERO}
+            rev_grade = revenue_rank.get("grade", "no_sales")
+            unit_grade = units_rank.get("grade", "no_sales")
+            weeks = sorted(active_weeks)
+            weeks12 = len(weeks)
+            weeks4 = sum(1 for week in weeks if week < 4)
+            observation_complete = is_complete and quantity_complete
+            result = evaluate_comprehensive_abc(
+                revenue_grade=rev_grade,
+                units_grade=unit_grade,
+                active_weeks_last12=weeks12,
+                active_weeks_last4=weeks4,
+                history_complete=observation_complete,
+                maturity=maturity,
+                total_units=units,
+                max_single_order_units=max_order,
+                max_single_day_units=max_day,
+            )
+            official_candidate = result["grade"] if is_complete else "unavailable"
+            reference_grade = result.get("reference_grade", "unavailable")
+            rank_for_stability = {**revenue_rank, "grade": official_candidate}
             if is_complete:
                 entry = _ready_entry(
-                    "sku", sku_id, amount, rank, previous, cutoff, stable_days,
-                    first_sale_date=first_sale,
-                    new_observation_days=observation_days,
+                    entity_type, entity_id, amount, rank_for_stability, previous, cutoff, stable_days,
+                    first_sale_date=first_sale, new_observation_days=observation_days,
                 )
+                # Composite labels are stabilized across the existing consecutive
+                # cutoff days. Preserve composite facts independently of revenue shares.
+                if official_candidate == "unavailable":
+                    entry.grade = "unavailable"
+                    entry.candidate_grade = reference_grade if reference_grade != "unavailable" else ""
+                    entry.candidate_streak = 0
+                elif official_candidate == "no_sales":
+                    entry.grade = "no_sales"
+                    entry.candidate_grade = ""
+                    entry.candidate_streak = 0
             else:
                 entry = InventoryABCEntry(
-                    entity_type="sku", entity_id=sku_id, grade="unavailable",
-                    candidate_grade=rank["grade"] if rank["grade"] in {"A", "B", "C", "new"} else "",
-                    candidate_streak=0, revenue=amount, share=rank["share"],
-                    cumulative_share=rank["cumulative_share"], first_sale_date=first_sale,
+                    entity_type=entity_type, entity_id=entity_id, grade="unavailable",
+                    candidate_grade=reference_grade if reference_grade not in {"unavailable", "no_sales"} else "",
+                    candidate_streak=0, revenue=amount, share=revenue_rank.get("share", ZERO),
+                    cumulative_share=revenue_rank.get("cumulative_share", ZERO), first_sale_date=first_sale,
                 )
-            entries.append(entry)
+            entry.revenue = amount
+            entry.share = revenue_rank.get("share", ZERO)
+            entry.cumulative_share = revenue_rank.get("cumulative_share", ZERO)
+            entry.evidence = {
+                **result.get("basis", {}),
+                "classification_basis": "composite",
+                "policy_version": ABC_POLICY_VERSION,
+                "revenue_grade": rev_grade,
+                "units_grade": unit_grade,
+                "units_total": int(units),
+                "units_share": str(units_rank.get("share", ZERO)),
+                "units_cumulative_share": str(units_rank.get("cumulative_share", ZERO)),
+                "continuity_label": (
+                    "suspected_concentration"
+                    if result.get("basis", {}).get("single_order_share_anomaly")
+                    or result.get("basis", {}).get("single_day_share_anomaly")
+                    else "sustained"
+                    if result.get("basis", {}).get("sustained")
+                    else "intermittent_or_unproven"
+                ),
+                "reasons": result.get("reason_codes", []),
+                "reference_grade": reference_grade,
+                "max_order_method": "exact_order_aggregate",
+                "continuity_window_days": continuity_days,
+                "continuity_lower_date": str(continuity_lower),
+            }
+            return entry
+
+        for sku_id in sku_ids:
+            amount = max(sku_revenue[sku_id], ZERO)
+            revenue_rank = sku_ranks.get(sku_id, {"grade": "no_sales", "share": ZERO, "cumulative_share": ZERO})
+            units_rank = sku_unit_ranks.get(sku_id, {"grade": "no_sales", "share": ZERO, "cumulative_share": ZERO})
+            entries.append(build_entry("sku", sku_id, amount, revenue_rank, units_rank,
+                                       sku_units[sku_id], sku_active_weeks[sku_id], sku_max_day[sku_id],
+                                       country_max_order_sku[sku_id], first_sale_dates.get(sku_id)))
         for spu_id in active_spus:
             amount = max(spu_revenue[spu_id], ZERO)
-            first_sale = spu_first_sale.get(spu_id)
-            rank = spu_ranks.get(spu_id, {"grade": "new", "share": ZERO, "cumulative_share": ZERO})
-            if is_complete:
-                entry = _ready_entry("spu", spu_id, amount, rank, previous, cutoff, stable_days,
-                                     first_sale_date=first_sale, new_observation_days=observation_days)
-            else:
-                entry = InventoryABCEntry(
-                    entity_type="spu", entity_id=spu_id, grade="unavailable",
-                    candidate_grade=rank["grade"] if rank["grade"] in {"A", "B", "C", "new"} else "",
-                    candidate_streak=0, revenue=amount, share=rank["share"],
-                    cumulative_share=rank["cumulative_share"],
-                    first_sale_date=first_sale,
-                )
-            entries.append(entry)
+            revenue_rank = spu_ranks.get(spu_id, {"grade": "no_sales", "share": ZERO, "cumulative_share": ZERO})
+            units_rank = spu_unit_ranks.get(spu_id, {"grade": "no_sales", "share": ZERO, "cumulative_share": ZERO})
+            entries.append(build_entry("spu", spu_id, amount, revenue_rank, units_rank,
+                                       spu_units[spu_id], spu_active_weeks[spu_id], spu_max_day[spu_id],
+                                       country_max_order_spu[spu_id], spu_first_sale.get(spu_id)))
 
         net_total = sum((max(value, ZERO) for value in sku_revenue.values()), ZERO)
         with transaction.atomic():
