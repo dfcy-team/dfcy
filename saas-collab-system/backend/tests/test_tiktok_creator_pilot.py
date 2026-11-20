@@ -10,7 +10,9 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.test import APIClient
 
 from apps.influencers.models import Influencer, InfluencerProfile, TikTokCreatorProfileSnapshot
+from apps.influencers.serializers import InfluencerPublicSerializer
 from apps.influencers.tiktok_creator_lookup import available_tiktok_lookup_stores, lookup_tiktok_creator
+from apps.influencers.verified_market import filter_display_market, with_verified_market
 from apps.integrations import automatic_refresh
 from apps.integrations.models import (
     ConnectionCapability, InternalAPIClient, MarketplaceStoreAuthorization, TikTokTokenLeaseAudit,
@@ -149,8 +151,10 @@ def test_creator_lookup_saves_projection_but_does_not_rewrite_identity(marketpla
         tenant=record.tenant, code="trusted-id", name="Old name", platform="TikTok", handle="creator.one",
         follower_count=7,
     )
+    legacy_market = "MY" if record.region != "MY" else "PH"
     profile = InfluencerProfile.objects.create(
-        tenant=record.tenant, influencer=creator, external_influencer_id="123456789", display_name="Old name",
+        tenant=record.tenant, influencer=creator, external_influencer_id="123456789",
+        display_name="Old name", market=legacy_market,
     )
     monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.get_runtime_platform_config", lambda platform: {
         "creator_query_bindings": [binding],
@@ -167,10 +171,24 @@ def test_creator_lookup_saves_projection_but_does_not_rewrite_identity(marketpla
     creator.refresh_from_db()
     profile.refresh_from_db()
     assert (creator.handle, creator.follower_count, profile.display_name) == ("creator.one", 7, "Old name")
+    assert profile.market == legacy_market
+    rows = with_verified_market(Influencer.objects.filter(pk=creator.pk).select_related("profile"))
+    market = InfluencerPublicSerializer(rows.get()).data["profile"]
+    assert market["market_source"] == "tiktok_verified"
+    assert filter_display_market(rows, record.region, record.tenant_id).exists()
+    assert filter_display_market(rows, market["market"], record.tenant_id).exists()
+    assert not filter_display_market(rows, legacy_market, record.tenant_id).exists()
+    profile.external_influencer_id = "999"
+    profile.save(update_fields=["external_influencer_id"])
+    assert rows.get()._verified_market is None
+    profile.external_influencer_id = "123456789"
+    profile.save(update_fields=["external_influencer_id"])
     fetch.return_value = {"username": "different", "nickname": "Fresh", "selection_region": record.region, "follower_count": 321}
     result = lookup_tiktok_creator(actor=actor, influencer_id=creator.pk, store_id=store.pk)
     assert result["snapshot"]["identity_status"] == "handle_mismatch"
     assert TikTokCreatorProfileSnapshot.objects.count() == 1
+    assert rows.get()._verified_market is None
+    assert filter_display_market(rows, legacy_market, record.tenant_id).exists()
 
 
 def test_creator_lookup_disabled_matrix_blocks_before_network(marketplace_callback, monkeypatch):
