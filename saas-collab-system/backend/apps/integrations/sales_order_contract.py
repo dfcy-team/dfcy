@@ -7,7 +7,7 @@ from .models import PlatformChoices
 
 SALES_ORDER_CONTRACT_VERSION = "sales_order.v1"
 SUPPORTED_PLATFORMS = {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
-NORMALIZED_ORDER_STATUSES = {"pending", "confirmed", "fulfilled", "completed", "cancelled"}
+NORMALIZED_ORDER_STATUSES = {"pending", "confirmed", "fulfilled", "completed", "cancellation_pending", "cancelled"}
 FORBIDDEN_CREDENTIAL_KEYS = {
     "app_secret",
     "access_token",
