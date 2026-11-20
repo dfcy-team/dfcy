@@ -65,7 +65,7 @@ const detailsOpen = ref(false), detailsLoading = ref(false), details = ref([]), 
 let applied = {}, controller, detailController;
 
 const auth = useAuthStore();
-watch(() => [auth.authorizationStale, auth.currentUser], () => { controller?.abort(); closeDetails(); state.value={}; countries.value=[]; filters.country_id=null; applied={}; loading.value=false; error.value=''; }, {deep:true,flush:'sync'});
+watch(() => [auth.authorizationStale, auth.currentUser], () => { controller?.abort(); closeDetails(); state.value={}; countries.value=[]; filters.country_id=null; applied={}; loading.value=false; error.value=''; if (!auth.authorizationStale && auth.currentUser) loadPage(1); }, {deep:true,flush:'sync'});
 function closeDetails() {
   detailController?.abort();
   detailsOpen.value = false;

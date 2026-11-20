@@ -12,7 +12,7 @@ const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {
 const mount=C=>shallowMount(C,{global:{stubs:{RouterLink:true,InventoryAbcStatus:true}}});
 beforeEach(()=>{m.auth=reactive({currentUser:{id:1,tenant_id:1},authorizationStale:false,hasPermission:()=>true,hasAllDataScopeFor:()=>true});m.request.mockReset();m.warnings.mockReset();});
 it('category clears existing evidence and rejects late initial country response on organization change',async()=>{
- const old=deferred();m.request.mockReturnValueOnce(old.promise);const w=mount(Category);
+ const old=deferred();m.request.mockReturnValueOnce(old.promise).mockResolvedValue({success:true,data:{countries:[]}});const w=mount(Category);
  const signal=m.request.mock.calls[0][0].signal;
  w.vm.rows=[{id:10,abc:{sku_grade:'A'}}];
  m.auth.currentUser.tenant_id=2;

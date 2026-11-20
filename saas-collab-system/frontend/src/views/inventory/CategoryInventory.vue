@@ -107,7 +107,7 @@ const detailCount = ref(0), detailPage = ref(1), detailLoading = ref(false), det
 let sequence = 0, detailSequence = 0, detailParams;
 let mainController, detailController;
 const auth = useAuthStore();
-watch(() => [auth.authorizationStale, auth.currentUser], () => { reset(); countries.value=[]; country.value=null; warehouses.value=[]; categories.value=[]; detailRows.value=[]; }, {deep:true, flush:'sync'});
+watch(() => [auth.authorizationStale, auth.currentUser], () => { reset(); countries.value=[]; country.value=null; warehouses.value=[]; categories.value=[]; detailRows.value=[]; if (!auth.authorizationStale && auth.currentUser) loadCountries(); }, {deep:true, flush:'sync'});
 
 const warehouses = ref([]), warehouse = ref(null), categories = ref([]), selectedCategories = ref([]);
 const categoryOptions = computed(() => {
@@ -253,7 +253,7 @@ async function loadDetail(next) {
     if (seq === detailSequence) detailLoading.value = false;
   }
 }
-onMounted(async () => {
+async function loadCountries() {
   const seq = ++sequence;
   mainController = new AbortController();
   try {
@@ -264,7 +264,8 @@ onMounted(async () => {
   } catch (err) {
     if (seq === sequence) error.value = err.message;
   }
-});
+}
+onMounted(loadCountries);
 onUnmounted(reset);
 </script>
 
