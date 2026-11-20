@@ -88,8 +88,9 @@ class WarehouseBillRow(models.Model):
 
 
 class WarehouseBillFormatRule(models.Model):
+    is_active = models.BooleanField(default=True)
     tenant = models.ForeignKey('tenants.Tenant', on_delete=models.PROTECT)
-    warehouse = models.ForeignKey('masterdata.WarehouseMaster', on_delete=models.PROTECT)
+    warehouse = models.ForeignKey('masterdata.WarehouseMaster', null=True, blank=True, on_delete=models.PROTECT)
     name = models.CharField(max_length=100)
     version = models.PositiveIntegerField(default=2)
     config = models.JSONField(default=dict)

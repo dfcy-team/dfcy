@@ -216,6 +216,8 @@ def refresh_preview(user, job, rows):
     if job.overrides.get('registration_mode') in {'cny_original_v1','file_settlement_v2'}:
         warehouse_ids = {row.data.get('warehouse_id') for row in rows}
         job.summary['settlement_warehouse_id'] = next(iter(warehouse_ids)) if len(warehouse_ids) == 1 else None
+        job.summary['warehouse_ids'] = sorted(pk for pk in warehouse_ids if pk is not None)
+        job.summary['mixed_warehouses'] = len(job.summary['warehouse_ids']) > 1
     if invoice.get('valid') and invoice.get('other_total') is not None:
         job.summary['corrected_other_difference'] = f"{Decimal(invoice['other_total']) - other_totals[invoice['currency']]:.6f}"
     missing = set(edits) - seen

@@ -84,6 +84,8 @@ class LocalOrderLookup:
         self.bookings = defaultdict(dict)
         self.booking_refs = defaultdict(set)
         self.booking_missing = set()
+        self.warehouse_results = {}
+        self.use_order_warehouse = any(source.get('order_warehouse') for _, source in rows)
         self.lookup_numbers = any(source.get('lookup_numbers') for _, source in rows)
         ids, tracking, bookings = set(), set(), set()
         for data, source in rows:
@@ -105,6 +107,15 @@ class LocalOrderLookup:
             bookings.difference_update(self.orders)
         if tracking or bookings:
             self.load_references(tracking, bookings)
+
+        if self.use_order_warehouse:
+            from apps.sales_management.warehouse_order_models import OrderWarehouseLookup
+            ids = {o.pk for index in [self.orders, self.tracking, self.bookings] for matches in index.values() for o in matches.values()}
+            ordered_ids = sorted(ids)
+            for offset in range(0, len(ordered_ids), 500):
+                for row in OrderWarehouseLookup.objects.filter(order_id__in=ordered_ids[offset:offset+500], order__tenant=user.tenant).select_related('warehouse'):
+                    if row.status == 'matched' and row.warehouse_id and row.warehouse.tenant_id == user.tenant_id:
+                        self.warehouse_results[row.order_id] = (row.warehouse_id, row.warehouse.country_code)
 
     def load_orders(self, ids):
         ids = sorted(ids)
@@ -224,6 +235,16 @@ class LocalOrderLookup:
 
 def apply_match(lookup, data, source):
     result = lookup.resolve(data, source)
+    if source.get('order_warehouse') and data['kind'] == 'order':
+        data['warehouse_id'] = None
+        if result['status'] in {'matched', 'booking_matched', 'reservation_matched'}:
+            warehouse = lookup.warehouse_results.get(result['order_id'])
+            if not warehouse or warehouse[1] != data['country']:
+                source['matching'] = result
+                data.update(store_id=result['store_id'], external_order_id=result['external_order_id'])
+                return '匹配订单的仓库尚未确认或国家不一致，请先在SaaS订单中核对仓库。'
+            data['warehouse_id'] = warehouse[0]
+            result['warehouse_id'] = warehouse[0]
     source['matching'] = result
     if result['status'] in {'matched', 'booking_matched', 'reservation_matched'}:
         data.update(store_id=result['store_id'], external_order_id=result['external_order_id'])
