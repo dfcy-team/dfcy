@@ -26,7 +26,7 @@ def validate_scope(user, value, previous):
     if StoreMaster.objects.filter(tenant=user.tenant, pk__in=ids).count() != len(ids):
         raise ValidationError('店铺不属于当前租户。')
     # A new batch replaces the active workspace; narrowing would hide history.
-    if start > date.fromisoformat(previous['from']) or end < date.fromisoformat(previous['to']) or not set(previous['stores']).issubset(ids):
+    if previous and (start > date.fromisoformat(previous['from']) or end < date.fromisoformat(previous['to']) or not set(previous['stores']).issubset(ids)):
         raise ValidationError('扩大范围必须保留已有账期和店铺；重算历史账期请使用原范围。')
     return {'from': start.isoformat(), 'to': end.isoformat(), 'stores': sorted(ids)}
 
@@ -36,6 +36,8 @@ def schedule_changed_summaries():
     from .summary_jobs import request_calculation
     from .summary_recent import recent_scope
     for dataset in FinanceSummaryDataset.objects.filter(active=True).select_related('accounting_state__updated_by'):
+        if dataset.metadata.get('automatic_update_enabled') is False:
+            continue
         scope = dataset.metadata.get('database_scope')
         if not scope or not cache.add(f'finance-summary-check:{dataset.pk}', True, 300):
             continue

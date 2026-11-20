@@ -65,8 +65,11 @@ def request_calculation(dataset, user, payload, *, kind='query'):
 
 
 def current_dataset(row):
+    bootstrap = row.kind == 'rebuild' and row.request.get('bootstrap') is True
     dataset = FinanceSummaryDataset.objects.select_related('accounting_state').filter(
-        pk=row.dataset_id, tenant_id=row.tenant_id, active=True).first()
+        pk=row.dataset_id, tenant_id=row.tenant_id, active=not bootstrap).first()
+    if bootstrap and dataset and not dataset.metadata.get('bootstrap_template'):
+        return None
     if not dataset or dataset.accounting_state.revision != row.revision:
         return None
     return dataset if calculation_key(dataset, row.kind, row.request) == row.cache_key else None
@@ -78,10 +81,11 @@ def job_data(row, user):
         raise PermissionDenied('财务计算任务不属于当前租户。')
     if row.status == 'ready' and row.kind == 'rebuild':
         dataset = FinanceSummaryDataset.objects.select_related('accounting_state').filter(
-            pk=row.result_dataset_id, tenant=user.tenant, active=True).first()
+            pk=row.result_dataset_id, tenant=user.tenant, active=not row.request.get('bootstrap', False)).first()
         if not dataset:
             return {'pending': False, 'job': {'id': row.pk, 'status': 'superseded', 'error_code': 'VERSION_CHANGED'}}
-        result = metadata(dataset, user, include_values=False)
+        result = metadata(dataset, user, include_values=False, checkpoint=False)
+        result['candidate'] = bool(row.request.get('bootstrap'))
     elif row.status == 'ready':
         if not current_dataset(row):
             return {'pending': False, 'job': {'id': row.pk, 'status': 'superseded', 'error_code': 'VERSION_CHANGED'}}
@@ -128,6 +132,8 @@ def run_calculation(pk):
                 if not current_dataset(row):
                     raise ValidationError('计算版本已变化，原批次保持有效。')
             options = {'publication_guard': publication_guard}
+            if row.request.get('bootstrap'):
+                options['bootstrap'] = True
             if 'scope' in row.request:
                 options['scope_override'] = row.request['scope']
             if 'automatic_scope' in row.request:

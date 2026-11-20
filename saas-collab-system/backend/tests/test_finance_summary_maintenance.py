@@ -38,6 +38,15 @@ def test_unattended_scheduler_queues_once_and_preserves_scope(scheduled):
     assert dataset.active
 
 
+def test_manual_only_batch_never_scans_or_schedules(scheduled, monkeypatch):
+    _, _, dataset, _ = scheduled
+    dataset.metadata['automatic_update_enabled'] = False
+    dataset.save()
+    monkeypatch.setattr('apps.finance.summary_maintenance.source_checkpoint', lambda ids: pytest.fail('manual batch source scan'))
+    schedule_changed_summaries()
+    assert not FinanceSummaryCalculation.objects.exists()
+
+
 def test_new_calendar_window_schedules_without_source_changes(scheduled, monkeypatch):
     _, _, dataset, _ = scheduled
     monkeypatch.setattr('apps.finance.summary_maintenance.source_checkpoint', lambda ids: {})

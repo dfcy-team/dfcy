@@ -3,6 +3,7 @@ import gzip
 import hashlib
 import json
 import re
+import time
 
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
@@ -62,10 +63,11 @@ def initialize_sources(dataset, user, scope):
     return created
 
 
-def rebuild(dataset, user, revision, *, publication_guard=None, scope_override=None, automatic_scope=None):
+def rebuild(dataset, user, revision, *, publication_guard=None, scope_override=None, automatic_scope=None, bootstrap=False):
     require_access(user, write=True)
+    started, cpu_started = time.perf_counter(), time.process_time()
     scope = dataset.metadata.get('database_scope')
-    if not scope:
+    if not scope and not bootstrap:
         raise ValidationError('尚未完成原始汇率及调整来源迁移，未用旧快照代替数据库数据。')
     if scope_override is not None:
         from .summary_maintenance import validate_scope
@@ -84,10 +86,17 @@ def rebuild(dataset, user, revision, *, publication_guard=None, scope_override=N
     # A consistent DB read; no provider requests, no source table writes.
     with transaction.atomic():
         initial_checkpoint = source_checkpoint(scope['stores'])
-        source = collect(user, read_scope)
+        source = collect(user, read_scope, allow_legacy_zero=False) if bootstrap else collect(user, read_scope)
         checkpoint = source_checkpoint(scope['stores'])
         if checkpoint != initial_checkpoint:
             raise ValidationError('读取期间来源数据变化，请重试；未生成混合批次。')
+    read_seconds = time.perf_counter() - started
+    source_checks = None
+    if bootstrap:
+        from .summary_source_checks import check_sources
+        if not source['raw']:
+            raise ValidationError('所选店铺和账期尚无平台结算来源，未生成空账。')
+        source_checks = check_sources(source)
     template = trusted_template(dataset)
     if automatic_scope is not None:
         source = preserve_history(template, source, read_scope['from'])
@@ -125,20 +134,29 @@ def rebuild(dataset, user, revision, *, publication_guard=None, scope_override=N
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied('执行用户已失效，原批次保持有效。')
         require_access(user, write=True)
-        if not FinanceSummaryDataset.objects.select_for_update().filter(pk=dataset.pk, tenant=user.tenant, active=True).exists():
+        if bootstrap:
+            from apps.tenants.models import Tenant
+            Tenant.objects.select_for_update().get(pk=user.tenant_id)
+            if FinanceSummaryDataset.objects.filter(tenant=user.tenant, active=True).exists():
+                return None
+        elif not FinanceSummaryDataset.objects.select_for_update().filter(pk=dataset.pk, tenant=user.tenant, active=True).exists():
             return None
         locked = FinanceSummaryState.objects.select_for_update().get(dataset=dataset)
         if locked.revision != revision or locked.values != original_values:
             return None
         if source_checkpoint(scope['stores']) != checkpoint:
             raise ValidationError('汇总期间来源数据发生变化，请重新汇总；原批次保持有效。')
-        FinanceSummaryDataset.objects.filter(tenant=user.tenant, active=True).update(active=False)
-        fresh = FinanceSummaryDataset.objects.create(tenant=user.tenant, created_by=user, source_hash=digest,
+        if not bootstrap:
+            FinanceSummaryDataset.objects.filter(tenant=user.tenant, active=True).update(active=False)
+        fresh = FinanceSummaryDataset.objects.create(tenant=user.tenant, created_by=user, source_hash=digest, active=not bootstrap,
             document_file=file.name, label='财务汇总 · SaaS数据库重汇总 · '+scope['to'][:7],
-            metadata={**info, 'data_origin': 'saas_database', 'database_scope': scope,
+            metadata={**info, **({'automatic_update_enabled': dataset.metadata['automatic_update_enabled']} if 'automatic_update_enabled' in dataset.metadata else {}),
+                **({'bootstrap_candidate': True, 'automatic_update_enabled': False, 'template_version': dataset.metadata.get('template_version')} if bootstrap else {}),
+                'performance': {'read_seconds': round(read_seconds, 3), 'elapsed_seconds': round(time.perf_counter()-started, 3), 'python_cpu_seconds': round(time.process_time()-cpu_started, 3)}, 'data_origin': 'saas_database', 'database_scope': scope,
                 'store_ids': scope['stores'], 'checkpoint': checkpoint, 'source_counts': source['source_counts'],
                 'basis': '全部金额、商品归属、成本、汇率来自SaaS数据库；点击重新汇总读取最新来源；缺项保留待核',
-                'automatic_scope': automatic_scope, 'previous_dataset': dataset.pk, 'reconciliation': reconciliation})
+                'automatic_scope': automatic_scope, 'previous_dataset': dataset.pk, 'reconciliation': reconciliation,
+                **({'source_checks': source_checks} if source_checks is not None else {})})
         FinanceSummaryState.objects.create(dataset=fresh, values=original_values, updated_by=user)
         FinanceAuditLog.objects.create(tenant=user.tenant, actor=user, action='summary_rebuild',
             object_type='finance_summary', object_id=str(fresh.pk),

@@ -22271,6 +22271,31 @@
       "owner": "finance"
     },
     {
+      "route": "api/finance/summary/<int:pk>/publish/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/publish/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
       "route": "api/finance/summary/<int:pk>/rebuild/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -22436,6 +22461,31 @@
         "IsFinanceViewer"
       ],
       "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/initialize/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/initialize/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
     },
     {
       "route": "api/finance/summary/jobs/<int:pk>/",
@@ -57246,5 +57296,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "05dfad83a4c9e176388c3f05871efc7d9d75f38b5975b1a83802bf3c282eed59"
+  "catalog_hash": "a9dfbd03c656fea22e73aed8fffcb631f62b0351bc5a7fd3196fd9eb3ecdcf46"
 }
