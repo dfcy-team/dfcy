@@ -84,6 +84,7 @@ SAFE_DEFAULTS = {
     },
     "platforms": {
         "jifeng_wms": {"contract_approved": False, "auto_refresh_enabled": False},
+        "best_ecapi": {"contract_approved": False},
         "lazada": {
             "contract_approved": False,
             "auto_refresh_enabled": False,
@@ -188,7 +189,7 @@ _FORBIDDEN_KEY_PARTS = (
 _ASSIGNMENT_PATTERN = re.compile(
     r"(?i)(password|passwd|access[_-]?token|refresh[_-]?token|api[_-]?secret|client[_-]?secret|app[_-]?secret)\s*[:=]"
 )
-_PLATFORM_KEYS = {"lazada", "shopee", "tiktok", "jifeng_wms"}
+_PLATFORM_KEYS = {"lazada", "shopee", "tiktok", "jifeng_wms", "best_ecapi"}
 _TOP_LEVEL_KEYS = {"modules", "network", "connection", "custody", "listing_write", "platforms"}
 _MODULE_KEYS = set(MODULE_CODES)
 _validated_snapshot_cache_lock = Lock()
@@ -224,6 +225,7 @@ _PLATFORM_COMMON_KEYS = {
 }
 _PLATFORM_KEYS_BY_NAME = {
     "jifeng_wms": {"contract_approved", "auto_refresh_enabled"},
+    "best_ecapi": {"contract_approved"},
     "lazada": _PLATFORM_COMMON_KEYS | {
         "auto_refresh_enabled",
         "auth_url", "api_host", "token_host", "token_path", "refresh_path",

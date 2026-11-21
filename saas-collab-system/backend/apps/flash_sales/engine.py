@@ -12,7 +12,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from .domain import TERMINAL, digest, item_bodies, reconcile, retry_delay, validate_items
 from .models import Activity, Batch, ExecutionPool, Intent, Notification, Preview, StoreConfig, StoreLock, StoreTask, WriteOperation
 from .permissions import require_stores
-from .provider import Deferred, RateLimited, Rejected, SERVER_ERRORS, SharedCooldown, ShopeeAdapter, UnknownWrite, rejections
+from .provider import CredentialWait, Deferred, RateLimited, Rejected, SERVER_ERRORS, SharedCooldown, ShopeeAdapter, UnknownWrite, rejections
 from .services import authorized_store
 
 
@@ -563,6 +563,7 @@ def run_step(task_id, *, adapter=None):
     read_failure = False
     cleanup_reason = None
     recovery_error = None
+    credential_wait = None
     try:
         adapter = adapter or ShopeeAdapter(task.store)
         if isinstance(adapter, ShopeeAdapter):
@@ -579,7 +580,9 @@ def run_step(task_id, *, adapter=None):
         recovery_error = exc
         status, message = "confirming" if isinstance(exc, UnknownWrite) else "waiting", str(exc)
         delay = retry_delay(task.retry_count, exc.retry_after)
-        shared_cooldown = isinstance(exc, (SharedCooldown, RateLimited))
+        shared_cooldown = isinstance(exc, (SharedCooldown, RateLimited, CredentialWait))
+        if isinstance(exc, CredentialWait):
+            credential_wait = exc.code
         read_failure = not isinstance(exc, UnknownWrite)
         if exc.retry_after:
             delay += random.uniform(1, 15)
@@ -602,6 +605,10 @@ def run_step(task_id, *, adapter=None):
         current = StoreTask.objects.select_for_update().get(pk=task.id)
         if current.fence != task.fence:
             return "lease_lost"
+        if credential_wait:
+            current.state["credential_wait"] = credential_wait
+        else:
+            current.state.pop("credential_wait", None)
         if cleanup_reason and current.batch.operation in {"run", "copy"}:
             active = current.intents.exclude(status__in={"succeeded", "failed"}).first()
             if active and active.owns_activity and active.platform_id and active.status != "cleaning":
