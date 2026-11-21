@@ -7,6 +7,8 @@ on:
       - '.github/workflows/v518-cloud-control-checks.yml'
       - '.github/workflows/v518-cloud-artifacts-build-only.yml'
       - 'saas-collab-system/deploy/production-control/ci/v518_cloud_build_only.py'
+      - 'saas-collab-system/deploy/production-control/ci/v518_sales_mysql_fixture.py'
+      - 'saas-collab-system/deploy/production-control/ci/tests/test_v518_sales_mysql_fixture.py'
       - 'saas-collab-system/deploy/production-control/ci/v518-cloud-build-only-identity.json'
       - 'saas-collab-system/deploy/production-control/ci/tests/test_v518_cloud_build_only.py'
 
@@ -30,7 +32,7 @@ jobs:
       - name: Test exact controller source without publishing or cloud access
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: python -m pytest saas-collab-system/deploy/production-control/ci/tests/test_v518_cloud_build_only.py -q --junitxml=test-artifacts/v518-controller-offline.xml
+        run: python -m pytest saas-collab-system/deploy/production-control/ci/tests/test_v518_cloud_build_only.py saas-collab-system/deploy/production-control/ci/tests/test_v518_sales_mysql_fixture.py -q --junitxml=test-artifacts/v518-controller-offline.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
