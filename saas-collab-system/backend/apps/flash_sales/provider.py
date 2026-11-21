@@ -10,7 +10,9 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from apps.integrations.custody import get_custody_backend
+from apps.integrations.credential_access import (
+    CredentialAccessError, checked_custody_backend, require_token_validity, retrieve_marketplace_credentials,
+)
 from apps.integrations.developer_transport import gateway_transport
 from apps.integrations.net_guard import PlatformHttpClient
 from apps.integrations.oauth_errors import OAuthFlowError, OAUTH_RATE_LIMITED
@@ -30,6 +32,13 @@ class Deferred(Exception):
     def __init__(self, message="平台暂不可用，等待后重试", retry_after=0):
         super().__init__(message)
         self.retry_after = retry_after
+
+
+class CredentialWait(Deferred):
+    """No platform request was sent; preserve the business retry budget."""
+    def __init__(self, error):
+        self.code = error.code
+        super().__init__(str(error), retry_after=60 if self.code == "TOKEN_REFRESH_REQUIRED" else 300)
 
 
 class UnknownWrite(Deferred):
@@ -138,9 +147,11 @@ class ShopeeAdapter:
         config = auth.integration_config
         if not config.network_enabled or config.status not in {"active", "verified"}:
             raise ValidationError("店铺连接未启用。")
-        if not auth.expires_at or auth.expires_at <= timezone.now() + timedelta(seconds=30):
-            # The established credential-refresh queue owns renewal; no second token refresher.
-            raise Deferred("等待既有凭据续期流程完成")
+        try:
+            require_token_validity(auth, minimum_validity_seconds=30)
+            custody = checked_custody_backend()
+        except CredentialAccessError as exc:
+            raise CredentialWait(exc) from None
         runtime = get_runtime_platform_config("shopee")
         host = str(runtime.get("api_host") or "").rstrip("/")
         if host not in {"https://partner.shopeemobile.com", "https://openplatform.shopee.cn"}:
@@ -149,9 +160,11 @@ class ShopeeAdapter:
         if not partner:
             raise ValidationError("开发者配置缺少 Partner ID。")
         self._pace(partner, shop=auth.platform_store_id, endpoint=endpoint)
-        custody = get_custody_backend()
-        secret = custody.retrieve_secret(config.credential_id or config.platform_config.get("app_secret_reference"))
-        token = custody.retrieve_access_token(auth.token_id)
+        try:
+            secret, token = retrieve_marketplace_credentials(
+                config, auth, custody=custody, minimum_validity_seconds=30)
+        except CredentialAccessError as exc:
+            raise CredentialWait(exc) from None
         path = "/api/v2/shop_flash_sale/" + endpoint
         stamp = int(time.time())
         params = {"partner_id": partner, "timestamp": stamp, "shop_id": auth.platform_store_id, "access_token": token}
