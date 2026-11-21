@@ -240,7 +240,8 @@ jobs:
           set -euo pipefail
           pip install -r requirements.txt 'django==5.2.17'
           mkdir -p "$GITHUB_WORKSPACE/mysql-sales-results"
-          sales_plugin=scripts.sales_mysql_fixture
+          export PYTHONPATH="$GITHUB_WORKSPACE/control/saas-collab-system/deploy/production-control/ci${PYTHONPATH:+:$PYTHONPATH}"
+          sales_plugin=v518_sales_mysql_fixture
           python -m pytest -q --collect-only --nomigrations --reuse-db -p "$sales_plugin" \
             tests/test_sales_read_range.py tests/test_sales_filter_catalog.py tests/test_sales_query_efficiency.py \
             tests/test_sku_report_projection.py tests/test_sales_management.py tests/test_sales_reports.py \
