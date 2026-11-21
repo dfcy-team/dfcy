@@ -25934,6 +25934,41 @@
       "owner": "sales_management"
     },
     {
+      "route": "api/internal/commerce/orders/<int:pk>/events/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.orders.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/orders/<int:pk>/events/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.orders.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/orders/<int:pk>/events/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "route": "api/internal/commerce/orders/<int:pk>/warehouse/",
       "method": "GET",
       "action": "read",
@@ -44742,6 +44777,41 @@
       "owner": "sales_management"
     },
     {
+      "route": "api/internal/sales-management/orders/<int:pk>/events/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.orders.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/orders/<int:pk>/events/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.orders.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/orders/<int:pk>/events/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "route": "api/internal/sales-management/orders/<int:pk>/warehouse/",
       "method": "GET",
       "action": "read",
@@ -54830,6 +54900,20 @@
     },
     {
       "route": "api/internal/supply-chain/v2/wms-inbound-movements/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/wms-inbound-movements/",
       "method": "HEAD",
       "action": "read",
       "permission_code": "supply.v2.view",
@@ -54841,6 +54925,33 @@
       ],
       "owner": "supply_chain",
       "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/wms-inbound-movements/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/wms-inbound-movements/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
     },
     {
       "route": "api/internal/supply-chain/v2/wms-inbound-movements/",
@@ -57316,6 +57427,33 @@
       "owner": "integrations"
     },
     {
+      "route": "api/platform/lazada/order-status/<int:config_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "function_callback_default_get",
+      "permission_classes": [],
+      "owner": "unknown"
+    },
+    {
+      "route": "api/platform/shopee/order-status/<int:config_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "function_callback_default_get",
+      "permission_classes": [],
+      "owner": "unknown"
+    },
+    {
+      "route": "api/platform/tiktok/order-status/<int:config_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "function_callback_default_get",
+      "permission_classes": [],
+      "owner": "unknown"
+    },
+    {
       "route": "api/report/analysis-jobs/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -58415,5 +58553,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "9f742927af0892929a56c6051c09feaa1fdc296e4223cc1e4e14c8989624bf1f"
+  "catalog_hash": "33ad505393d9d39a62fea499e31bb2621b87ca845e625c60a27796055ff7d0e5"
 }

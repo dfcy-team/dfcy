@@ -33,7 +33,7 @@
     "jsdom": "^26.1.0",
     "unplugin-auto-import": "^19.3.0",
     "unplugin-vue-components": "^28.8.0",
-    "vitest": "^3.2.6"
+    "vitest": "4.1.12"
   },
   "overrides": {
     "nanoid": "3.3.18",
