@@ -4687,7 +4687,7 @@
       "permission_type": "menu",
       "description": "显示换货登记入口",
       "risk": "normal",
-      "lifecycle": "active",
+      "lifecycle": "inactive",
       "menu_path": "/sales/pre-shipment-adjustments",
       "menu_code": "menu.sales_management.sales_pre_shipment_adjustments.view",
       "resource_code": "sales_pre_shipment_adjustments",
@@ -58553,5 +58553,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "33ad505393d9d39a62fea499e31bb2621b87ca845e625c60a27796055ff7d0e5"
+  "catalog_hash": "fc3660a88b42f57d0b87dba99e56f80b498aa477e35445b0b25f55b2ab9ee930"
 }

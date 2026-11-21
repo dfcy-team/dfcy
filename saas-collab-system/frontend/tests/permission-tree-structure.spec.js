@@ -36,7 +36,8 @@ describe('角色权限模块树', () => {
 
   it('菜单登记源为每个页面生成稳定菜单权限码，并把菜单与操作权限分开校验', () => {
     expect(menuPermissionRegistry.length).toBeGreaterThan(50);
-    expect(menuPermissionRegistry.every((item) => item.permission_type === 'menu' && item.code.startsWith('menu.') && item.metadata?.path && item.metadata?.status === 'active')).toBe(true);
+    expect(menuPermissionRegistry.every((item) => item.permission_type === 'menu' && item.code.startsWith('menu.') && item.metadata?.path
+      && item.metadata?.status === (item.code === 'menu.sales_management.sales_pre_shipment_adjustments.view' ? 'inactive' : 'active'))).toBe(true);
     const productionPath = '/integrations/production-settings';
     const productionMenu = menuPermissionRegistry.find((item) => item.metadata.path === productionPath);
     expect(productionMenu).toBeTruthy();

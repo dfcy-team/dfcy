@@ -85,7 +85,9 @@ describe('sales management routing contract', () => {
     const sidebarSales = (filterSidebarMenuItems(viewer)
       .find((item) => item.label === '销售管理')?.children || [])
       .filter((item) => item.path.startsWith('/sales-management/'));
-    expect(authorizedPaths).toEqual(expect.arrayContaining(salesRoutes));
+    expect(authorizedPaths).toEqual(expect.arrayContaining(salesRoutes.filter(path => path !== '/sales/pre-shipment-adjustments')));
+    expect(authorizedPaths).not.toContain('/sales/pre-shipment-adjustments');
+    expect(canAccessPath(viewer, '/sales/pre-shipment-adjustments')).toBe(false);
     expect(sidebarSales.map((item) => item.label)).toEqual([
       '销售工作台', '实时数据大屏', '销售订单', '运营订货单', '订单售后', '销售明细导出'
     ]);

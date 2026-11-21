@@ -88,6 +88,10 @@ function buildDefinition(item, ancestors = []) {
   const codes = menuPermissionCodesForItem(item);
   if (!item?.path || item.path === '/' || !codes.length) return [];
   const actions = actionCodes(item);
+  const status = item.menuPermissionStatus ?? 'active';
+  if (!['active', 'inactive', 'retired'].includes(status)) {
+    throw new Error(`Invalid menu permission lifecycle: ${status}`);
+  }
   return codes.map((code) => {
     const module = moduleFromPermission(code);
     return {
@@ -107,7 +111,8 @@ function buildDefinition(item, ancestors = []) {
         action_codes: Array.isArray(item.menuActionPermissions?.[code])
           ? unique(item.menuActionPermissions[code]) : actions,
         source: REGISTRY_SOURCE,
-        status: 'active',
+        status,
+        ...(status === 'active' ? {} : { registry_status: status, registry_source: REGISTRY_SOURCE }),
       },
     };
   });

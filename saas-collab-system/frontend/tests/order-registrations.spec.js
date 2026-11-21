@@ -103,7 +103,8 @@ describe('local order registration pages', () => {
     ['gcash', '/finance/gcash-refunds', 'GCash退款登记', '财务中心'],
   ])('registers the %s page with exact internal permission', (kind, path, label, parent) => {
     expect(menuItems.find(item => item.children?.some(child => child.path === path))?.label).toBe(parent);
-    expect(canAccessPath({ user_type: 'internal', permissions: [`${prefix[kind]}.view`] }, path)).toBe(true);
+    // The retained cloud exchange entry is inactive; other registration pages remain available.
+    expect(canAccessPath({ user_type: 'internal', permissions: [`${prefix[kind]}.view`] }, path)).toBe(kind !== 'exchange');
     expect(canAccessPath({ user_type: 'internal', permissions: ['sales_management.orders.view'] }, path)).toBe(false);
     expect(canAccessPath({ user_type: 'external', permissions: [`${prefix[kind]}.view`] }, path)).toBe(false);
   });

@@ -1050,7 +1050,9 @@
           "sales_management.exchange.view"
         ],
         "source": "frontend/src/router/menu.js",
-        "status": "active"
+        "status": "inactive",
+        "registry_status": "inactive",
+        "registry_source": "frontend/src/router/menu.js"
       }
     },
     {

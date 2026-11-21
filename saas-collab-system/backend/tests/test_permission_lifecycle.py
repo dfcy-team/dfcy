@@ -169,3 +169,34 @@ def test_reviewed_retired_orphan_is_audit_history_not_active_drift():
     assert report["potentially_affected_users"] == 1
     assert role.permissions.filter(pk=orphan.pk).exists()
     assert not get_field_permission_map(actor, [orphan.code], default=True)[orphan.code]
+
+
+def test_cloud_exchange_menu_stays_inactive_after_repeated_sync_with_history_links():
+    code = "menu.sales_management.sales_pre_shipment_adjustments.view"
+    call_command("sync_permissions", stdout=io.StringIO())
+    menu = Permission.objects.get(code=code)
+    view = Permission.objects.get(code="sales_management.exchange.view")
+    actor, role = actor_with_role(menu, view)
+    original_pk = menu.pk
+    for _ in range(2):
+        call_command("sync_permissions", stdout=io.StringIO())
+        menu.refresh_from_db()
+        assert menu.pk == original_pk
+        assert menu.metadata["status"] == "inactive"
+        assert menu.metadata["registry_status"] == "inactive"
+        assert menu.metadata["registry_source"] == "frontend/src/router/menu.js"
+        assert role.permissions.filter(pk=original_pk).exists()
+        assert role.permissions.filter(pk=view.pk).exists()
+    assert not effective_permissions().filter(pk=menu.pk).exists()
+    assert check_user_permission(actor, view.code)
+    call_command("sync_permissions", "--check", stdout=io.StringIO())
+
+
+def test_cloud_exchange_inactive_menu_is_not_auto_granted_from_view_action():
+    call_command("sync_permissions", stdout=io.StringIO())
+    view = Permission.objects.get(code="sales_management.exchange.view")
+    actor, role = actor_with_role(view)
+    call_command("sync_permissions", stdout=io.StringIO())
+    assert not role.permissions.filter(code="menu.sales_management.sales_pre_shipment_adjustments.view").exists()
+    assert role.permissions.filter(pk=view.pk).exists()
+    assert check_user_permission(actor, view.code)

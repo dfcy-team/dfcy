@@ -24,7 +24,12 @@ def test_frontend_sidebar_is_the_auditable_menu_registration_source():
     assert all(item["permission_type"] == "menu" for item in menus)
     assert all(item["code"].startswith("menu.") for item in menus)
     assert all(item["metadata"]["source"] == "frontend/src/router/menu.js" for item in menus)
-    assert all(item["metadata"]["status"] == "active" for item in menus)
+    assert all(
+        item["metadata"]["status"] == (
+            "inactive" if item["code"] == "menu.sales_management.sales_pre_shipment_adjustments.view" else "active"
+        )
+        for item in menus
+    )
 
 
 def test_backend_registry_read_does_not_require_node(monkeypatch):
