@@ -16,13 +16,13 @@ BASE='cd7c991d222703cec4f7d7eb6cc1237664217908'
 VM_BASE='9728c548cce4c21d9cbc99aea7407298b4056fc7'
 SECURITY='08569188173edbe93524d6fe33a8c6ca39dfb13c'
 SURFACE='e4b32bf9e0c1168c6396e5f0399d8c0e41abccc0'
-PARENT='fb9ba5fa9f060265a6300cbd11628269747ee9a6'
-SOURCE='e81811e855db166c53137aaf5ec3d1b68b9743c9'
-TREE='a7fd993fbffc6acfc3e0d4aecf06b208fc900d7e'
-SOURCE_CHAIN=[(SOURCE,PARENT),(PARENT,SURFACE),(SURFACE,SECURITY),(SECURITY,BASE),(BASE,VM_BASE)]
+PARENT='e81811e855db166c53137aaf5ec3d1b68b9743c9'
+SOURCE='13233654721edf6a8f405099266d3001c99ec1e8'
+TREE='1116ee5064287d79b7acd50bc68bf5e8099c7756'
+SOURCE_CHAIN=[(SOURCE,PARENT),(PARENT,'fb9ba5fa9f060265a6300cbd11628269747ee9a6'),('fb9ba5fa9f060265a6300cbd11628269747ee9a6',SURFACE),(SURFACE,SECURITY),(SECURITY,BASE),(BASE,VM_BASE)]
 MIGRATION_SHA='f3db9d6d425020506c084fe46a7bf4e105e2f86f05606471e43b2189d9499239'
-NOTES_SHA='1ce9dc4e02754f0fb4cbcc68dac2c092a2865dc1337e1d1732543059db1dfd73'
-MATERIAL_SHA='ce437b3d03005564a7da307d90808d384848ab5e362789769ef3961fdbcac7a3'
+NOTES_SHA='77791a9fd987409866afa3798b476c32d8e128c75e0dcba3e26f54741ab20c4d'
+MATERIAL_SHA='9298077a5cb7bfa9fb903213e8e459c8c36fe0b3f0805bf53eb5b6503541a5a7'
 REDIS='redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99'
 PHASES={
  'phase2-ci.yml':['Repository safety and file guard','Django and pytest','Frontend build observation gate','Docker Compose configuration','RPA samples and required documents'],
@@ -44,8 +44,11 @@ saas-collab-system/backend/tests/test_flash_pacing_lease.py
 saas-collab-system/backend/tests/test_flash_rate_scope.py
 saas-collab-system/backend/tests/test_menu_permission_registry.py
 saas-collab-system/backend/tests/test_permission_lifecycle.py
+saas-collab-system/deploy/pilot/application/Dockerfile.frontend
+saas-collab-system/deploy/sandbox/application/Dockerfile.frontend
 saas-collab-system/frontend/package-lock.json
 saas-collab-system/frontend/package.json
+saas-collab-system/frontend/src/data/releaseNotes.json
 saas-collab-system/frontend/src/router/menu.js
 saas-collab-system/frontend/src/router/menuRegistry.js
 saas-collab-system/frontend/tests/cloud-exchange-menu-retirement.spec.js
@@ -53,7 +56,7 @@ saas-collab-system/frontend/tests/order-registrations.spec.js
 saas-collab-system/frontend/tests/permission-tree-structure.spec.js
 saas-collab-system/frontend/tests/ui-p11-sales-management-routing.spec.js
 '''.split())
-FIXED={'schema_version':1,'repository':REPOSITORY,'controller_base':'eaa1d6fa6d50b266cc1302151e144700efcc6b9c','source_sha':SOURCE,'source_tree':TREE,'source_parent':PARENT,'reconciled_base':BASE,'vm_base':VM_BASE,'source_material_sha256':MATERIAL_SHA,'migration_sha256':MIGRATION_SHA,'migration_files':556,'release_notes_sha256':NOTES_SHA,'release_version':'2.44.518','release_date':'2026-11-21','redis_image':REDIS,'source_pr':622,'source_ref':'release/v518-cloud-reconciled-20261121','notes_exception_approved':True,'bounded_minimatch_risk_accepted':True}
+FIXED={'schema_version':1,'repository':REPOSITORY,'controller_base':'f4c1307a286bc7899dc6e4a916a3e8d50aed6957','source_sha':SOURCE,'source_tree':TREE,'source_parent':PARENT,'reconciled_base':BASE,'vm_base':VM_BASE,'source_material_sha256':MATERIAL_SHA,'migration_sha256':MIGRATION_SHA,'migration_files':556,'release_notes_sha256':NOTES_SHA,'release_version':'2.44.518','release_date':'2026-11-22','redis_image':REDIS,'source_pr':622,'source_ref':'release/v518-cloud-reconciled-20261121','notes_exception_approved':True,'bounded_minimatch_risk_accepted':True}
 FIXED.update(source_chain=[list(pair) for pair in SOURCE_CHAIN],reviewed_source_files=SAFETY_FILES,exchange_menu_inactive=True,source_pr_do_not_merge=True,cloud_cutover_authorized=False,formal_registration_authorized=False)
 
 def require(condition,message):

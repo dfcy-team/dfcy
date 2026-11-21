@@ -60,6 +60,7 @@ jobs:
         name: Require reviewed identity and exact manual source CI
         run: |
           set -euo pipefail
+          python control/saas-collab-system/deploy/production-control/ci/v518_docker_input_check.py --source-root business/saas-collab-system
           python control/saas-collab-system/deploy/production-control/ci/v518_cloud_build_only.py validate --source-root business --control-root control
           echo "release_sha=$REQUESTED_SHA" >> "$GITHUB_OUTPUT"
           echo 'migration_sha=f3db9d6d425020506c084fe46a7bf4e105e2f86f05606471e43b2189d9499239' >> "$GITHUB_OUTPUT"
@@ -423,7 +424,7 @@ jobs:
           grep -Eq '^Redis server v=[0-9]+\.[0-9]+\.[0-9]+' build-evidence/redis-version.txt
           notes_path=/usr/share/nginx/html/release-notes.json
           notes_digest="$(docker run --rm --network none --entrypoint sha256sum "$FRONTEND_IMAGE" "$notes_path")"
-          [[ "$notes_digest" == "1ce9dc4e02754f0fb4cbcc68dac2c092a2865dc1337e1d1732543059db1dfd73  $notes_path" ]]
+          [[ "$notes_digest" == "77791a9fd987409866afa3798b476c32d8e128c75e0dcba3e26f54741ab20c4d  $notes_path" ]]
           [[ "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$BACKEND_IMAGE")" == "$RELEASE_SHA" ]]
           [[ "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$FRONTEND_IMAGE")" == "$RELEASE_SHA" ]]
           docker run --rm --network none --entrypoint python "$BACKEND_IMAGE" -c 'import django,redis; assert django.get_version() == "5.2.17"; assert redis.__version__'
