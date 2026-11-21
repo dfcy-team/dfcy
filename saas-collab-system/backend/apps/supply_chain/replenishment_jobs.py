@@ -702,7 +702,7 @@ def run_replenishment_calculation(job_id):
                 has_submitted_demand=Decimal(str(line.get("submitted_demand") or "0")) > 0,
                 # Internal view calls bypass response rendering; evidence may contain
                 # datetime/date/Decimal values that JSONField cannot encode itself.
-                payload=json.loads(json.dumps(line, cls=DjangoJSONEncoder))))
+                payload=json.loads(json.dumps({**line, "legacy_reference": _legacy_replenishment_reference(line)}, cls=DjangoJSONEncoder))))
         with transaction.atomic():
             _restore_actor(job)
             if (_scope_signature(actor, business_day=job.business_date if _daily_calculation(job) else None) != job.permission_signature or

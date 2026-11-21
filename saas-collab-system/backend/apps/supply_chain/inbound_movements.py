@@ -86,7 +86,7 @@ def inbound_movements(actor, params):
         temporal = Q(pk__in=[])
         for country in countries:
             zone = ZoneInfo(COUNTRY_ZONES[country])
-            country_rows = Q(site_code=country)
+            country_rows = Q(site_code__iexact=country)
             if start_date:
                 country_rows &= Q(received_at_utc__gte=_local_day_bounds(start_date, zone)[0])
             if end_date:
@@ -148,6 +148,16 @@ def outbound_movements(actor, params):
     duplicates = source.filter(warehouse_id=OuterRef("warehouse_id"), document_key=OuterRef("document_key")).exclude(
         lookup_id=OuterRef("lookup_id"))
     rows = filter_inventory_queryset(actor, "sales_management.view", source, outbound=True).filter(~Exists(duplicates))
+    # Historical facts are immutable, but dates outside the supported local
+    # calendar cannot be rendered safely (for example Manila conversion of
+    # 9999-12-31T18:00Z overflows). Apply the guard before list/aggregate/CSV.
+    renderable = Q(pk__in=[])
+    for country, zone_name in COUNTRY_ZONES.items():
+        zone = ZoneInfo(zone_name)
+        renderable |= Q(site_code__iexact=country,
+            shipped_at__gte=datetime(1000, 1, 1, tzinfo=ZoneInfo("UTC")),
+            shipped_at__lt=datetime(9999, 1, 1, tzinfo=zone).astimezone(ZoneInfo("UTC")))
+    rows = rows.filter(renderable)
     site = params.get("site_code", "").strip().upper()
     if site and site not in COUNTRY_ZONES:
         raise ValidationError({"site_code": "国家代码仅支持 PH、TH、MY。"})
@@ -155,7 +165,7 @@ def outbound_movements(actor, params):
     search = params.get("search", "").strip()[:160]
     if warehouse:
         rows = rows.filter(Q(warehouse__code__icontains=warehouse) | Q(warehouse__name__icontains=warehouse))
-    coverage_rows = rows.filter(site_code__in=[site] if site else COUNTRY_ZONES)
+    coverage_rows = rows.filter(site_code__iexact=site) if site else rows
     document = params.get("document")
     warehouse_id = params.get("warehouse_id")
     if document and warehouse_id:
@@ -174,7 +184,7 @@ def outbound_movements(actor, params):
     period = Q(pk__in=[])
     for country in ([site] if site else COUNTRY_ZONES):
         zone = ZoneInfo(COUNTRY_ZONES[country])
-        condition = Q(site_code=country)
+        condition = Q(site_code__iexact=country)
         if start:
             condition &= Q(shipped_at__gte=_local_day_bounds(start, zone)[0])
         if end:
@@ -183,7 +193,7 @@ def outbound_movements(actor, params):
     rows = rows.filter(period).select_related("warehouse").order_by("-shipped_at", "-pk")
 
     def item(row):
-        country = row.site_code
+        country = row.site_code.upper()
         return dict(id=row.pk, site_code=country, warehouse=row.warehouse_id, warehouse_name=row.warehouse.name, document=row.document,
                     shipped_at_local=timezone.localtime(row.shipped_at, ZoneInfo(COUNTRY_ZONES[country])).isoformat(),
                     warehouse_sku=row.warehouse_sku, source_sku=row.source_sku, quantity=row.quantity)

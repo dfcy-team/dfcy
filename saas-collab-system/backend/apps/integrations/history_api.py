@@ -59,7 +59,7 @@ def collection(request):
     from django.db.models import Q
     eligible = jobs.filter(
         Q(integration_config__platform="shopee", resource_type__in=["sales_order", "refund_return", "settlement_bill", "advertising_report"], store_authorization__isnull=False)
-        | Q(integration_config__platform="tiktok", resource_type__in=["sales_order", "refund_return", "settlement_bill"], store_authorization__isnull=False)
+        | Q(integration_config__platform="tiktok", resource_type__in=["sales_order", "refund_return", "settlement_bill", "affiliate_order", "video_metrics"], store_authorization__isnull=False)
         | Q(integration_config__platform="tiktok", resource_type="advertising_report", ads_mapping__isnull=False),
     )
     options = []
@@ -94,7 +94,7 @@ def collection(request):
                                       "execution": history_task_gate(batch, ids[0])}
         records.append(record)
     return success_response({"batches": records, "jobs": options,
-                             "features": ["advertising_backfill", "tiktok_backfill", "task_controls", "night_windows", "segment_recovery"]})
+                             "features": ["advertising_backfill", "tiktok_backfill", "tiktok_collection_backfill", "task_controls", "night_windows", "segment_recovery"]})
 
 
 @api_view(["POST"])

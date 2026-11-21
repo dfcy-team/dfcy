@@ -14,23 +14,32 @@ _OBSERVED_SCOPE = " 仅统计同店铺、同币种具有广告观测值的销售
 
 
 def attach_operations_advertising(request, params, orders, period, previous, groups, rows,
-                                  ad_expenses, ad_permission_reason):
+                                  ad_expenses, ad_permission_reason, *, store_groups=None):
     """Attach ROI without repeating the scoped advertising query or restricting sales."""
     if params["view"] != "stores":
         return
 
-    current_sales = period & ~Q(normalized_status="cancelled")
-    previous_sales = previous & ~Q(normalized_status="cancelled")
-    conflict = ~Q(region="") & ~Q(region__iexact=F("store__country_code"))
-    sales_by_pair = {
-        (item["store_id"], item["currency"]): item
-        for item in orders.order_by().values("store_id", "currency").annotate(
-            current=Sum("order_total_amount", filter=current_sales),
-            previous=Sum("order_total_amount", filter=previous_sales),
-            current_conflicts=Count("pk", filter=current_sales & conflict),
-            previous_conflicts=Count("pk", filter=previous_sales & conflict),
-        )
-    }
+    if store_groups is None:
+        current_sales = period & ~Q(normalized_status="cancelled")
+        previous_sales = previous & ~Q(normalized_status="cancelled")
+        conflict = ~Q(region="") & ~Q(region__iexact=F("store__country_code"))
+        sales_by_pair = {
+            (item["store_id"], item["currency"]): item
+            for item in orders.order_by().values("store_id", "currency").annotate(
+                current=Sum("order_total_amount", filter=current_sales),
+                previous=Sum("order_total_amount", filter=previous_sales),
+                current_conflicts=Count("pk", filter=current_sales & conflict),
+                previous_conflicts=Count("pk", filter=previous_sales & conflict),
+            )
+        }
+    else:
+        sales_by_pair = {
+            (row["store_id"], row["currency"]): {
+                "current": row["sales"], "previous": row["prev_sales"],
+                "current_conflicts": row["current_conflicts"], "previous_conflicts": row["previous_conflicts"],
+            }
+            for row in store_groups
+        }
 
     # A country-conflict store/currency pair is excluded wholly from ROI, even
     # when it has advertising facts; ordinary sales totals remain untouched.

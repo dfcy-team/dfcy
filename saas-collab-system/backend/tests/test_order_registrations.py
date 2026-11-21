@@ -277,12 +277,13 @@ def test_api_cross_tenant_and_sensitive_evidence(context):
     assert client_for(user).get(f"/api/internal/commerce/registrations/gcash/{row.pk}/").status_code == 404
 
 
-def test_api_approval_rejects_stale_registration_version(context):
+def test_retired_exchange_api_rejects_even_a_stale_approval(context):
     creator, reviewer, _, _, _ = context
     row = registration_action(creator, "exchange", exchange(context).pk, "submit")
     api = client_for(reviewer)
     response = api.post(f"/api/internal/commerce/registrations/exchange/{row.id}/approve/", {"version": row.version - 1}, format="json")
-    assert response.status_code == 409
+    assert response.status_code == 400
+    assert "换货登记已停用" in str(response.data)
     row.refresh_from_db()
     assert row.status == "pending"
 

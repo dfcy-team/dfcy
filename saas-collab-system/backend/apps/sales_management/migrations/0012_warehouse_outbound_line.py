@@ -18,9 +18,6 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('document', models.CharField(max_length=191)),
-                ('site_code', models.CharField(max_length=8)),
-                ('document_key', models.CharField(max_length=64)),
-                ('identity_key', models.CharField(max_length=64)),
                 ('shipped_at', models.DateTimeField()),
                 ('warehouse_sku', models.CharField(blank=True, max_length=191)),
                 ('source_sku', models.CharField(blank=True, max_length=191)),
@@ -32,10 +29,9 @@ class Migration(migrations.Migration):
             options={
                 'indexes': [
                     models.Index(fields=['tenant', 'warehouse', 'shipped_at'], name='wh_outbound_scope_time_idx'),
-                    models.Index(fields=['tenant', 'warehouse', 'document_key'], name='wh_outbound_scope_doc_idx'),
-                    models.Index(fields=['tenant', 'site_code', 'shipped_at'], name='wh_outbound_site_time_idx'),
+                    models.Index(fields=['tenant', 'warehouse', 'document'], name='wh_outbound_scope_doc_idx'),
                 ],
-                'constraints': [models.UniqueConstraint(fields=('lookup', 'identity_key'), name='uniq_wh_outbound_lookup_line')],
+                'constraints': [models.UniqueConstraint(fields=('lookup', 'document', 'warehouse_sku', 'source_sku'), name='uniq_wh_outbound_lookup_line')],
             },
         ),
     ]

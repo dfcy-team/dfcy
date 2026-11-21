@@ -46,3 +46,5 @@ confirm 校验部署凭证和 HTTPS 线上内容逐字节一致，才生成可�
 2026-10-28 开发验证：上述 3 个测试文件共 18 项通过；生产构建通过；菜单权限快照一致（118 项菜单、152 项路由）；`git diff --check` 通过。构建仅有依赖注释警告。未做真实浏览器视觉验收，未部署阿里云。
 
 开发分支：`feat/release-notes-20261028`；基线为上文 V315 运行提交。合并到后续发布版本时保留该版本的其他功能，并在确定发布编号和日期后追加本次更新记录。
+
+V518 同版本补充说明仅可使用 `release_notes.py prepare/check` 与 `aliyun_notes.py build/confirm` 的成对参数 `--reconciliation-binding`、`--reconciliation-authorization`。门禁要求显式 `REVIEWED_SAME_VERSION_RECONCILIATION` 绑定及 `AUTHORIZED`、scope=`V518_SAME_VERSION_NOTES_APPEND` 授权，校验绑定原始字节、固定历史、源码清单和最终 notes 字节；草稿/预览不构成授权，代码不能验证人的身份或签名。绑定需逐次反映实际版本、日期、基线、源码和追加内容；源码冻结后，正式构建仍应绑定实际提交/CI。V518 门禁测试位于 backend/tests，纳入默认 pytest 自动发现。

@@ -14,7 +14,7 @@ export function checkInfluencerHotfixes({ frontendRoot, backendRoot }) {
     [frontendRoot, 'src/views/influencers/InfluencerRequirements.vue', ['type="file"', 'new FormData()', "data.append('images'", 'fetchApiFile(']],
     [backendRoot, 'apps/influencers/requirement_feedback.py', ['class InfluencerRequirementImageView', 'scoped_requirements(request.user)', 'transaction.atomic()', 'image_content(upload)']],
     [backendRoot, 'apps/influencers/views.py', ['"priority_only"', '"priority_tasks"']],
-    [backendRoot, 'apps/influencers/migrations/0051_requirement_images.py', ['InfluencerRequirementImage']],
+    [backendRoot, 'apps/influencers/migrations/0049_requirement_images.py', ['InfluencerRequirementImage']],
   ];
   for (const [base, name, markers] of required) {
     const source = readFileSync(resolve(base, name), 'utf8');

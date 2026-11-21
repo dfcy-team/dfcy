@@ -8,7 +8,7 @@ from apps.masterdata.models import CountrySiteMaster, StoreMaster, WarehouseMast
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.sales_management.outbound_movements import replace_shipment_lines, shipment_projection
 from apps.sales_management.scopes import filter_inventory_queryset
-from apps.sales_management.warehouse_order_models import OrderWarehouseLookup
+from apps.sales_management.warehouse_order_models import OrderWarehouseLookup, WarehouseOutboundLine
 from tests.test_order_warehouse_lookup import setup_order
 from tests.test_sales_management import client_for, create_order, create_run, create_scope, grant, user_for
 
@@ -121,6 +121,17 @@ def test_projection_quarantines_time_that_cannot_be_displayed_in_fact_country():
     assert reasons == {'shipped_at_out_of_range':3}
 
 
+def test_projection_keeps_zero_quantity_item_alongside_positive_items():
+    rows, reasons = shipment_projection([{
+        'warehouse_order_no':'mixed-zero', 'status':'SHIPPED', 'shipped_at_utc':'2026-01-01T00:00:00Z',
+        'items':[{'warehouse_sku':'ZERO','sku':'Z','quantity':0},
+                 {'warehouse_sku':'POS','sku':'P','quantity':2},
+                 {'warehouse_sku':'ZERO-STRING','sku':'ZS','quantity':'0'}],
+    }], site_code='PH')
+    assert reasons == {}
+    assert rows == [('mixed-zero', datetime(2026,1,1,tzinfo=dt_timezone.utc), 'POS', 'P', 2)]
+
+
 @pytest.mark.parametrize('extra_key', ['platform_ids','supplier_ids'])
 @pytest.mark.parametrize('sibling_role', [False, True])
 def test_unimplemented_restriction_is_not_dropped_from_country_branch(movements, extra_key, sibling_role):
@@ -162,3 +173,51 @@ def test_unrenderable_inbound_time_is_isolated_from_all_read_projections(movemen
     exported = api.get(url, {'direction':'inbound','export':'csv'})
     assert exported.status_code == 200 and 'PH-IN' not in exported.content.decode('utf-8-sig')
     assert list(original.values_list('pk',flat=True)) == ids
+
+
+def test_unrenderable_outbound_time_is_isolated_from_all_read_projections(movements):
+    order, admin, *_ = movements
+    original = WarehouseOutboundLine.objects.filter(tenant=order.tenant, site_code='PH')
+    ids = list(original.values_list('pk', flat=True))
+    QuerySet.update(original, shipped_at=datetime(9999, 12, 31, 18, tzinfo=dt_timezone.utc))
+    api = client_for(admin)
+    url = '/api/internal/supply-chain/v2/wms-inbound-movements/'
+    response = api.get(url, {'direction':'outbound'})
+    assert response.status_code == 200, response.data
+    data = response.data['data']
+    assert data['total'] == 1 and data['quantity'] == 2
+    assert {row['site_code'] for row in data['items']} == {'TH'}
+    assert {row['site_code'] for row in data['coverage']} == {'TH'}
+    exported = api.get(url, {'direction':'outbound', 'export':'csv'})
+    assert exported.status_code == 200 and 'PH-DOC' not in exported.content.decode('utf-8-sig')
+    assert list(original.values_list('pk', flat=True)) == ids
+
+
+def test_lowercase_historical_outbound_site_renders_and_filters_by_local_date(movements):
+    order, admin, *_ = movements
+    original = WarehouseOutboundLine.objects.filter(tenant=order.tenant, site_code='PH')
+    QuerySet.update(original, site_code='ph')
+    api = client_for(admin)
+    url = '/api/internal/supply-chain/v2/wms-inbound-movements/'
+    response = api.get(url, {'direction':'outbound', 'site_code':'PH', 'start_date':'2025-12-31'})
+    assert response.status_code == 200, response.data
+    data = response.data['data']
+    assert data['total'] == 1 and {row['site_code'] for row in data['items']} == {'PH'}
+    assert {row['site_code'] for row in data['coverage']} == {'PH'}
+    exported = api.get(url, {'direction':'outbound', 'site_code':'PH', 'start_date':'2025-12-31', 'export':'csv'})
+    assert exported.status_code == 200 and 'PH-DOC' in exported.content.decode('utf-8-sig')
+
+
+def test_lowercase_historical_inbound_site_filters_by_local_date_and_exports(movements):
+    order, admin, *_ = movements
+    original = InboundRecord.objects.filter(tenant=order.tenant, site_code='PH')
+    QuerySet.update(original, site_code='ph')
+    api = client_for(admin)
+    url = '/api/internal/supply-chain/v2/wms-inbound-movements/'
+    response = api.get(url, {'direction':'inbound', 'site_code':'PH', 'start_date':'2025-12-31'})
+    assert response.status_code == 200, response.data
+    data = response.data['data']
+    assert data['total'] == 1 and {row['site_code'] for row in data['items']} == {'PH'}
+    assert {row['site_code'] for row in data['coverage']} == {'PH'}
+    exported = api.get(url, {'direction':'inbound', 'site_code':'PH', 'start_date':'2025-12-31', 'export':'csv'})
+    assert exported.status_code == 200 and 'PH-IN' in exported.content.decode('utf-8-sig')

@@ -175,10 +175,7 @@ def _payload(request):
     base = _orders(request, p)
     orders, period, previous = _aggregated_orders(request, base, p)
     current_valid = ~Q(normalized_status="cancelled")
-    if p["view"] == "stores":
-        ad_expenses, ad_permission_reason = shop_roi_fields(request, orders, p)
-    else:
-        ad_expenses, ad_permission_reason = {}, None
+    ad_expenses, ad_permission_reason = {}, None
     product_items = None
     if p["view"] == "products":
         product_items = SalesOrderItem.objects.filter(sales_order__in=orders).exclude(
@@ -197,6 +194,8 @@ def _payload(request):
             prev_sales=Sum("order_total_amount", filter=previous & current_valid),
             order_count=Count("pk", filter=period & current_valid),
             previous_orders=Count("pk", filter=previous & current_valid),
+            current_conflicts=Count("pk", filter=period & current_valid & ~Q(region="") & ~Q(region__iexact=F("store__country_code"))),
+            previous_conflicts=Count("pk", filter=previous & current_valid & ~Q(region="") & ~Q(region__iexact=F("store__country_code"))),
         ).filter(Q(sales__isnull=False) | Q(prev_sales__isnull=False))
     else:
         grouped = product_items.values(
@@ -211,56 +210,6 @@ def _payload(request):
             tenant_id=Max("sales_order__tenant_id"), platform_id=Max("sales_order__platform_id"),
             image_variant_id=Max("platform_variant_id"), variant_count=Count("platform_variant_id", distinct=True),
         ).filter(Q(sales__isnull=False) | Q(prev_sales__isnull=False))
-
-    currency_groups = []
-    if product_items is None:
-        totals = {}
-        for store in grouped:
-            total = totals.setdefault(store["currency"], {
-                "currency": store["currency"], "sales": None, "prev_sales": None,
-                "order_count": 0, "roi_gmv": None, "previous_roi_gmv": None,
-            })
-            current_spend, previous_spend = ad_expenses.get((store["store_id"], store["currency"]), (None, None))
-            for field, roi_field, expense in (
-                ("sales", "roi_gmv", current_spend), ("prev_sales", "previous_roi_gmv", previous_spend),
-            ):
-                amount = store[field]
-                if amount is not None:
-                    total[field] = (total[field] or ZERO) + amount
-                    if expense is not None and expense > ZERO:
-                        total[roi_field] = (total[roi_field] or ZERO) + amount
-            total["order_count"] += store["order_count"]
-        currency_query = [totals[code] for code in sorted(totals)]
-    else:
-        currency_query = product_items.values("sales_order__currency").annotate(
-            sales=Sum("line_total_amount", filter=item_period),
-            prev_sales=Sum("line_total_amount", filter=item_previous),
-        ).filter(Q(sales__isnull=False) | Q(prev_sales__isnull=False)).order_by("sales_order__currency")
-    for agg in currency_query:
-        cur, prev = agg["sales"], agg["prev_sales"]
-        currency = agg.get("currency", agg.get("sales_order__currency"))
-        group_expenses = (None, None)
-        if product_items is None:
-            current_expenses = [values[0] for (sid, cur), values in ad_expenses.items() if cur == currency and values[0] is not None]
-            previous_expenses = [values[1] for (sid, cur), values in ad_expenses.items() if cur == currency and values[1] is not None]
-            group_expenses = (
-                sum(current_expenses, ZERO) if current_expenses else None,
-                sum(previous_expenses, ZERO) if previous_expenses else None,
-            )
-            spend, roi, roi_delta, ad_reason = roi_values(agg["roi_gmv"], agg["previous_roi_gmv"], group_expenses)
-            if roi is not None:
-                ad_reason += '；汇总ROI仅采用已有广告费的店铺GMV，不等于全部店铺GMV除以部分广告费。'
-            if ad_permission_reason:
-                ad_reason = ad_permission_reason
-        else:
-            spend, roi, roi_delta, ad_reason = None, None, None, "商品级广告费未采集，无法计算 ROI。"
-        currency_groups.append({
-            "currency": currency, "sales_amount": None if cur is None else _decimal_string(cur),
-            "previous_sales_amount": None if prev is None else _decimal_string(prev),
-            "order_count": int(agg.get("order_count") or 0) if product_items is None else None,
-            "change_percent": _percent(cur, prev), "ad_spend": spend, "roi": roi,
-            "roi_delta": roi_delta, "ad_reason": ad_reason,
-        })
 
     grouped = grouped.annotate(sales_delta=F("sales") - F("prev_sales"), loss_amount=F("prev_sales") - F("sales"))
     if p["view"] == "products":
@@ -303,7 +252,42 @@ def _payload(request):
     grouped = grouped.order_by(*ordering)
 
     start = (p["page"] - 1) * p["page_size"]
-    page_rows = list(grouped[start:start + p["page_size"] + 1])
+    store_groups = list(grouped) if p["view"] == "stores" else None
+    if store_groups is not None:
+        ad_expenses, ad_permission_reason = shop_roi_fields(
+            request, orders, p, store_ids={row["store_id"] for row in store_groups},
+        )
+    source_rows = store_groups if store_groups is not None else grouped
+    page_rows = list(source_rows[start:start + p["page_size"] + 1])
+    currency_groups = []
+    if product_items is None:
+        totals = {}
+        for store in store_groups:
+            total = totals.setdefault(store["currency"], {"currency": store["currency"], "sales": None,
+                "prev_sales": None, "order_count": 0})
+            for field in ("sales", "prev_sales"):
+                if store[field] is not None:
+                    total[field] = (total[field] or ZERO) + store[field]
+            total["order_count"] += store["order_count"]
+        currency_query = [totals[code] for code in sorted(totals)]
+    else:
+        currency_query = product_items.values("sales_order__currency").annotate(
+            sales=Sum("line_total_amount", filter=item_period),
+            prev_sales=Sum("line_total_amount", filter=item_previous),
+        ).filter(Q(sales__isnull=False) | Q(prev_sales__isnull=False)).order_by("sales_order__currency")
+    for agg in currency_query:
+        cur, prev = agg["sales"], agg["prev_sales"]
+        currency = agg.get("currency", agg.get("sales_order__currency"))
+        spend, roi, roi_delta = None, None, None
+        ad_reason = "商品级广告费未采集，无法计算 ROI。" if product_items is not None else None
+        currency_groups.append({
+            "currency": currency, "sales_amount": None if cur is None else _decimal_string(cur),
+            "previous_sales_amount": None if prev is None else _decimal_string(prev),
+            "order_count": int(agg.get("order_count") or 0) if product_items is None else None,
+            "change_percent": _percent(cur, prev), "ad_spend": spend, "roi": roi,
+            "roi_delta": roi_delta, "ad_reason": ad_reason,
+        })
+
     has_next = len(page_rows) > p["page_size"]
     page_rows = page_rows[:p["page_size"]]
     from apps.listings.models import PlatformProductDetail
@@ -379,7 +363,7 @@ def _payload(request):
     from .observed_advertising import attach_operations_advertising
     attach_operations_advertising(
         request, p, orders, period, previous, currency_groups, rows,
-        ad_expenses, ad_permission_reason,
+        ad_expenses, ad_permission_reason, store_groups=store_groups,
     )
     from .tiktok_spend import attach_tiktok_basis
     attach_tiktok_basis(request, rows, currency_groups)
@@ -397,10 +381,6 @@ def _payload(request):
     if not p["currency"]:
         notices.append("金额按人民币折算后排序，无法折算的金额排在末尾。")
     summary_groups = currency_groups
-    if p["view"] == "stores":
-        # ROI numerator is scoped to stores with an observed expense.
-        for group in summary_groups:
-            group["ad_sales_amount"] = _decimal_string(totals[group["currency"]].get("roi_gmv"))
     return {
         "filters": {"date_from": p["date_from"].isoformat(), "date_to": p["date_to"].isoformat(),
                     "previous_from": p["previous_from"].isoformat(), "previous_to": p["previous_to"].isoformat(),

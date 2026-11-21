@@ -7,7 +7,9 @@ SECRET_KEY = "synthetic-settlement-tests-not-a-production-key"
 ALLOWED_HOSTS = ["testserver", "localhost"]
 DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:",
                          "TEST": {"NAME": ":memory:"}}}
-PLATFORM_NETWORK_MODE = "mock"
+# Empty is the validated closed mode. The historical "mock" value is not a
+# valid production-runtime document and masks otherwise valid callback tests.
+PLATFORM_NETWORK_MODE = ""
 LIVE_PLATFORM_SECURITY_APPROVED = False
 LIVE_READONLY_SYNC_ENABLED = False
 LIVE_CUSTODY_BACKEND = "refuse"

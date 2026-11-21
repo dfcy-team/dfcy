@@ -1,3 +1,4 @@
+# Generated manually for the captured production code baseline.
 from django.db import migrations, models
 
 
@@ -8,6 +9,6 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="inventoryabcentry",
             name="evidence",
-            field=models.JSONField(blank=True, default=dict, db_default={}),
+            field=models.JSONField(blank=True, default=dict),
         ),
     ]

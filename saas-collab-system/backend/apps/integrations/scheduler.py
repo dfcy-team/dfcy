@@ -258,7 +258,7 @@ def dispatch_due_jobs(enqueue, now=None, limit=20, admission=None, resource_type
             due = job.next_run_at
             ads_scope = None
             ads_error = False
-            if job.ads_mapping_id:
+            if job.ads_mapping_id and job.resource_type == "advertising_report":
                 from .ads_sync import resolve_scope
                 try:
                     ads_scope = resolve_scope(job.ads_mapping, job.sync_scope, now=now)

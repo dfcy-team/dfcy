@@ -90,9 +90,13 @@ def normalize_refund_return_record(platform, record):
             for item in items
         ],
     }
-    if platform == PlatformChoices.SHOPEE and isinstance(payload.get('platform_logistics'), dict):
+    if isinstance(payload.get('platform_logistics'), dict):
         from .shopee_logistics import safe_snapshot
         if payload['platform_logistics'].get('return_sn') != result['external_return_id']:
-            raise ValidationError('Shopee reverse logistics return identity does not match the refund.')
+            raise ValidationError('Reverse logistics return identity does not match the refund.')
+        if payload['platform_logistics'].get('platform', platform) != platform:
+            raise ValidationError('Reverse logistics platform identity does not match the refund.')
+        if payload['platform_logistics'].get('order_sn', result['external_order_id']) != result['external_order_id']:
+            raise ValidationError('Reverse logistics order identity does not match the refund.')
         result['platform_logistics'] = safe_snapshot(payload['platform_logistics'])
     return result

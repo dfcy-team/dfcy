@@ -31,6 +31,7 @@ def test_explicit_lines_create_multiple_inbounds_and_reserve_until_cancel(world)
     progress = api.get(BASE + f"dispatch-batches/{batch['id']}/")
     assert progress.status_code == 200, progress.data
     candidate = progress.data['data']['inbound_candidates'][0]
+    assert candidate['sku_id'] == source.sku_id
     assert candidate['reserved_quantity'] == 2 and candidate['available_quantity'] == 2
 
     over_reservation = create_partial(api, batch, warehouse, source, 3, 'partial-over-reserved')

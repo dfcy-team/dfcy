@@ -256,6 +256,32 @@ class BestGlinkClient:
                 "country": str(row.get("country") or ""), "time_zone": str(row.get("timeZone") or "")})
         return warehouses
 
+    def fetch_catalogue_page(self, offset, sku_codes):
+        """Fetch a bounded batch of warehouse catalogue records by known SKU."""
+        if type(offset) is not int or offset < 0 or offset % 100 or offset >= len(sku_codes):
+            raise ValidationError("Invalid GLINK catalogue offset.")
+        batch = sku_codes[offset:offset + 100]
+        expected = {code.casefold() for code in batch}
+        if len(expected) != len(batch):
+            raise ValidationError("Duplicate GLINK catalogue SKU.")
+        result = self.query("GLINK_QUERY_ITEM_NOTIFY", {"skus": batch, "page": 1, "pageSize": 100})
+        rows = result.get("itemList")
+        if not isinstance(rows, list) or type(result.get("total")) is not int or result["total"] != len(rows):
+            raise ValidationError("Incomplete GLINK catalogue page.")
+        customer = self.config.platform_config["customer_code"]
+        found = set()
+        for row in rows:
+            sku = row.get("sku") if isinstance(row, dict) else None
+            if not isinstance(sku, str) or sku.casefold() not in expected or sku.casefold() in found:
+                raise ValidationError("Unexpected or duplicate GLINK catalogue SKU.")
+            if row.get("customerCode") != customer:
+                raise ValidationError("GLINK catalogue customer mismatch.")
+            found.add(sku.casefold())
+        if found != expected:
+            raise ValidationError("GLINK catalogue SKU coverage is incomplete.")
+        next_offset = offset + len(batch)
+        return rows, next_offset if next_offset < len(sku_codes) else None
+
     def fetch_inventory(self, cursor, scope):
         codes = scope.get("sku_codes")
         if (not isinstance(codes, list) or not codes

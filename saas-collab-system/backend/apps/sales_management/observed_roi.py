@@ -40,7 +40,7 @@ def _amount(value):
     return rendered.rstrip("0").rstrip(".") if "." in rendered else rendered
 
 
-def shop_roi_fields(request, sales_orders, params):
+def shop_roi_fields(request, sales_orders, params, *, store_ids=None):
     """Return (store,currency) fields from an analytics and sales scope intersection."""
     from apps.permissions.services import check_user_permission
 
@@ -49,7 +49,11 @@ def shop_roi_fields(request, sales_orders, params):
     ):
         return {}, "暂无广告数据查看权限。"
 
-    store_ids = sales_orders.order_by().values("store_id").distinct()
+    # Materialize the scoped store keys once to keep the order scan out of the ad query.
+    if store_ids is None:
+        store_ids = list(sales_orders.order_by().values_list("store_id", flat=True).distinct())
+    if not store_ids:
+        return {}, None
     filters = {
         "date_from": params["previous_from"], "date_to": params["date_to"],
     }
@@ -75,6 +79,8 @@ def shop_roi_fields(request, sales_orders, params):
         return {}, "暂无当前广告数据范围查看权限，无法计算 ROI。"
     except (DatabaseError, ValidationError):
         return {}, "广告数据暂不可用，无法计算 ROI。"
+    if params.get("platform") not in (None, "", "tiktok"):
+        return data, None
     from .tiktok_spend import tiktok_spend
     try:
         expenses, request._tiktok_ad_metadata = tiktok_spend(request, sales_orders, params)

@@ -34,8 +34,6 @@ def queue_for_run(job_id, key):
     if SyncRun.objects.filter(
         sync_job_id=job_id, idempotency_key=key, history_segment__isnull=False).exists():
         return "sync-history"
-    if SyncJob.objects.filter(pk=job_id, resource_type="video_metrics").exists():
-        return "sync-video"
     return "sync"
 
 
@@ -124,7 +122,7 @@ class DispatchAdmission:
 
     def _occupy(self, job, lane):
         self.occupied[lane] += 1
-        if lane == "daily" and job.resource_type == "video_metrics":
+        if job.resource_type == "video_metrics":
             self.video_occupied += 1
         if job.resource_type == "warehouse_order_lookup":
             self.warehouse_occupied += 1

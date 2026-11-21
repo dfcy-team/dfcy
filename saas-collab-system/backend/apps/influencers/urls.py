@@ -1,4 +1,5 @@
 from django.urls import path
+from .requirement_feedback import InfluencerRequirementView, InfluencerRequirementImageView
 from .sample_import import SampleImportConfirmView, SampleImportPreviewView
 from .requirement_feedback import InfluencerRequirementView, InfluencerRequirementImageView
 from .tiktok_dataset_api import TikTokDatasetQualityView

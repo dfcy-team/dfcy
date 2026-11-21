@@ -194,6 +194,7 @@ urlpatterns = [
     path("inbound-orders/<int:pk>/cancel/", la.CancelInbound.as_view(), name="sc2-inbound-cancel"),
     path("inbound-orders/<int:pk>/confirm/", la.ConfirmInbound.as_view(), name="sc2-inbound-confirm"),
     path("wms-inbound-documents/", la.WmsInboundDocuments.as_view(), name="sc2-wms-inbound-documents"),
+    path("wms-inbound-movements/", la.WmsInboundMovements.as_view(), name="sc2-wms-inbound-movements"),
     path("wms-inbound-documents/<int:pk>/", la.WmsInboundDocument.as_view(), name="sc2-wms-inbound-document"),
     path("inbound-orders/<int:pk>/wms-reconciliation/", la.WmsReconciliation.as_view(), name="sc2-wms-reconciliation"),
     path("wms-inbound-movements/", la.WmsInboundMovements.as_view(), name="sc2-wms-inbound-movements"),

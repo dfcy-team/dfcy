@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 from django.db import connection
-from django.test.utils import CaptureQueriesContext
+from django.test.utils import CaptureQueriesContext, override_settings
 from django.utils import timezone
 
 from apps.commerce.models import InventorySnapshot
@@ -11,7 +11,7 @@ from apps.commerce.country_decisions import decision_rows, sales_windows, permis
 from apps.commerce.supply_pipeline import pipeline_for, open_demand
 from apps.integrations.models import (HistorySyncBatch, HistorySyncSegment, SyncJob, SyncRun,
     MarketplaceStoreAuthorization, marketplace_identity_key, marketplace_store_binding_key,
-    authorization_service_write)
+    authorization_service_write, WarehouseAuthorization)
 from apps.masterdata.models import CountrySiteMaster, WarehouseMaster
 from apps.products.models import ProductSPU, ProductSKU
 from apps.permissions.models import DataScope, UserRole, RoleResourcePolicy
@@ -62,13 +62,50 @@ def history_coverage(tenant, store, owner, *, lower=None, upper=None, status='su
 
 
 def stock(tenant, warehouse, sku, *, quantity=40, suffix='stock', provided=True, source=None, hours=1):
-    run = create_run(tenant, 'inventory_snapshot', suffix, platform='jifeng_wms')
-    run.status = 'success'; run.save()
+    # A current published inventory fact needs its actual warehouse binding and
+    # complete-run receipt, not only a success label on an unbound test job.
+    authorization = WarehouseAuthorization.objects.filter(tenant=tenant, warehouse=warehouse,
+        provider='jifeng_wms').first()
+    previous = None
+    if authorization:
+        job = SyncJob.objects.get(tenant=tenant, warehouse_authorization=authorization,
+                                 resource_type='inventory_snapshot')
+        previous = job.runs.filter(status='success', finished_at__lte=NOW).order_by('-finished_at', '-pk').first()
+        run = SyncRun.objects.create(tenant=tenant, sync_job=job,
+            run_id='run-'+suffix, idempotency_key='key-'+suffix)
+    else:
+        run = create_run(tenant, 'inventory_snapshot', suffix, platform='jifeng_wms')
+        owner = run.sync_job.integration_config.created_by
+        authorization = WarehouseAuthorization.objects.create(
+            tenant=tenant, integration_config=run.sync_job.integration_config, warehouse=warehouse,
+            provider='jifeng_wms', external_warehouse_code=warehouse.code,
+            external_warehouse_region=warehouse.country_code, status='active',
+            created_by=owner, updated_by=owner,
+        )
+        run.sync_job.warehouse_authorization = authorization
+        run.sync_job.save(update_fields=['warehouse_authorization'])
+    run.status = 'success'
+    run.finished_at = min(NOW, NOW - timedelta(hours=hours) + timedelta(seconds=1))
+    run.masked_log = {'decision_source': {'started_from_initial_cursor': True,
+        'ended_without_cursor': True, 'all_records_valid': True}}
+    run.save(update_fields=['status', 'finished_at', 'masked_log'])
+    # A synthetic full batch includes unchanged source identities as well as
+    # the identity changed by this call. Reuse the warehouse authorization.
+    timestamp = NOW-timedelta(hours=hours)
+    while InventorySnapshot.objects.filter(tenant=tenant, warehouse=warehouse, snapshot_at_utc=timestamp).exists():
+        timestamp -= timedelta(microseconds=1)  # Frozen clock: never create a future fact.
+    source_sku = source or sku.sku_code
+    if previous:
+        for old in InventorySnapshot.objects.filter(source_run=previous).exclude(source_sku=source_sku):
+            values = {field.attname: getattr(old, field.attname)
+                      for field in old._meta.fields if not field.primary_key}
+            values.update(source_run_id=run.pk, snapshot_at_utc=timestamp)
+            InventorySnapshot.objects.create(**values)
     return InventorySnapshot.objects.create(tenant=tenant, warehouse=warehouse, source_run=run,
-        site_code=warehouse.country_code, source_sku=source or sku.sku_code, internal_sku=sku,
+        site_code=warehouse.country_code, source_sku=source_sku, internal_sku=sku,
         on_hand_qty=quantity+10, available_qty=quantity, reserved_qty=10, in_transit_qty=8,
         provided_quantity_fields=['available_qty', 'in_transit_qty'] if provided else [],
-        snapshot_at_utc=NOW-timedelta(hours=hours), payload_hash='a'*64)
+        snapshot_at_utc=timestamp, payload_hash='a'*64)
 
 
 def sale(tenant, store, sku, suffix, days, quantity, *, currency=None, paid=True, status='completed'):
@@ -189,11 +226,14 @@ def test_missing_quantity_zero_stale_failed_and_alias_ambiguity(facts):
     assert current()['available_stock'] == '0'
     newer=stock(f['tenant'],f['warehouse'],f['sku'],quantity=20,suffix='failed-latest',hours=0)
     newer.source_run.status='failed'; newer.source_run.save()
-    assert current()['available_stock'] is None  # Never fall back to the older success.
+    # A failed new batch never replaces the previously published complete one.
+    assert current()['available_stock'] == '0'
+    with override_settings(INVENTORY_COMPLETE_BATCH_READS_ENABLED=False):
+        assert current()['available_stock'] is None  # Legacy raw-reader contract.
     newer.source_run.status='success'; newer.source_run.save()
-    other=stock(f['tenant'],f['warehouse'],f['sku'],quantity=30,suffix='old-code',source='P2-OLD',hours=0.5)
+    other=stock(f['tenant'],f['warehouse'],f['sku'],quantity=30,suffix='old-code',source='P2-OLD',hours=0)
     assert 'ambiguous_inventory_aliases' in current()['issues']
-    assert current()['available_stock'] is None  # Cross-run aliases are not silently discarded.
+    assert current()['available_stock'] is None  # Aliases within the published batch stay ambiguous.
     other.internal_sku=None; other.save()
     assert 'unmapped_inventory' in current()['issues']
 

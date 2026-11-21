@@ -2796,9 +2796,10 @@ def _validate_advertising_policy(job, values):
 def _set_job_scope(job, values):
     if "warehouse_order_limit" in values and job.resource_type != SyncJob.ResourceType.WAREHOUSE_ORDER_LOOKUP:
         raise ValidationError({"warehouse_order_limit": "仅仓库查询任务支持订单处理上限。"})
-    if 'include_logistics' in values and (job.integration_config.platform != 'shopee'
-            or job.resource_type not in {'sales_order', 'refund_return'}):
-        raise ValidationError({'include_logistics': '仅 Shopee 订单／售后任务支持独立物流采集。'})
+    if 'include_logistics' in values and not (job.integration_config.platform == 'shopee'
+            and job.resource_type in {'sales_order', 'refund_return'}
+            or job.integration_config.platform in {'lazada', 'tiktok'} and job.resource_type == 'sales_order'):
+        raise ValidationError({'include_logistics': '独立物流采集支持 Shopee 订单／售后及 Lazada、TikTok 订单。'})
     scope = dict(job.sync_scope or {})
     if "warehouse_order_limit" in values:
         scope["warehouse_order_limit"] = values["warehouse_order_limit"]
@@ -2869,7 +2870,6 @@ def _validated_job_policy(data, *, warehouse_order=False):
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
     from django.utils.dateparse import parse_datetime
     allowed = {
-        "warehouse_order_limit",
         "include_logistics",
         "advertising_datasets",
         "schedule_type", "max_retry_count", "backoff_base_seconds", "execution_mode",

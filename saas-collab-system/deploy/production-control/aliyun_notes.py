@@ -3,6 +3,8 @@
 Does not deploy, allocate release numbers, or modify the official production ledger.
 """
 import argparse
+from datetime import datetime
+from datetime import timezone, timedelta
 import hashlib
 import json
 import os
@@ -24,9 +26,20 @@ def main():
     parser.add_argument('--deployment-receipt')
     parser.add_argument('--url')
     parser.add_argument('--output')
+    parser.add_argument('--reconciliation-binding')
+    parser.add_argument('--reconciliation-authorization')
     args = parser.parse_args()
-    subprocess.run([sys.executable, str(HERE/'release_notes.py'), 'check', '--notes', str(NOTES), '--history', str(Path(args.history).resolve()), '--version', args.version], check=True)
+    gate_args = []
+    if args.reconciliation_binding or args.reconciliation_authorization:
+        if not (args.reconciliation_binding and args.reconciliation_authorization):
+            parser.error('--reconciliation-binding and --reconciliation-authorization must be supplied together')
+        gate_args = ['--reconciliation-binding', str(Path(args.reconciliation_binding).resolve()), '--reconciliation-authorization', str(Path(args.reconciliation_authorization).resolve())]
+    subprocess.run([sys.executable, str(HERE/'release_notes.py'), 'check', '--notes', str(NOTES), '--history', str(Path(args.history).resolve()), '--version', args.version, *gate_args], check=True)
     if args.command == 'build':
+        if gate_args:
+            binding = json.loads(Path(args.reconciliation_binding).read_text(encoding='utf-8'))
+            if datetime.now(timezone(timedelta(hours=8))).date().isoformat() != binding.get('release_date'):
+                raise ValueError('V518 reconciliation build must run on the binding Beijing release date')
         env = {**os.environ, 'VITE_USE_MOCK': 'false', 'VITE_API_BASE_URL': ''}
         subprocess.run([shutil.which('npm.cmd' if os.name == 'nt' else 'npm') or 'npm', 'run', 'build'], cwd=FRONTEND, env=env, check=True)
         assert (FRONTEND/'dist/release-notes.json').read_bytes() == NOTES.read_bytes()

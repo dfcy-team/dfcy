@@ -85,7 +85,7 @@ def resolve_job_scope(job):
         return {'warehouse_order_limit': limit,
                 'warehouse_country_code': job.warehouse_authorization.warehouse.country_code.upper()
                 if job.warehouse_authorization_id else ''}
-    if getattr(job, "ads_mapping_id", None):
+    if getattr(job, "ads_mapping_id", None) and job.resource_type == "advertising_report":
         from .ads_sync import resolve_scope
         return resolve_scope(job.ads_mapping, job.sync_scope)
     from .readonly_clients import default_sync_scope
@@ -119,6 +119,8 @@ def resolve_job_scope(job):
     if bootstrap:
         scope["product_full_sync"] = True
     resolved = default_sync_scope(job.integration_config, scope, job.resource_type, job.store_authorization)
+    if platform == "best_ecapi" and job.resource_type == "inventory_snapshot":
+        resolved["sku_codes"] = query.get("sku_codes")
     notice = "保持现有回看范围。"
     effective_anchor = "lookback"
     if bootstrap:

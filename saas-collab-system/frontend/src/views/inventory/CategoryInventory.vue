@@ -1,5 +1,5 @@
 <template>
-  <AppPage  :title="embedded ? '仓库库存明细查询' : '分类库存查询'" subtitle="按国家查看各类商品最近一次同步的库存和店铺销量。">
+  <AppPage  :title="embedded ? '仓库库存明细' : '分类库存查询'" subtitle="按国家查看各类商品最近一次同步的库存和店铺销量。">
     <el-form inline @submit.prevent="apply">
       <el-form-item label="国家">
         <el-select v-model="country" filterable style="width:180px" @change="changeCountry">
@@ -42,7 +42,7 @@
       <div v-for="[label, value] in metrics" :key="label"><span>{{ label }}</span><strong>{{ format(value) }}</strong></div>
     </div>
     <el-table v-loading="loading" :data="rows" :empty-text="applied ? '当前条件暂无数据' : '请选择国家并点击查询'">
-      <el-table-column :label="level === 'category' ? '类目' : level === 'spu' ? '商品 / SPU' : '商品规格 / SKU'" min-width="240">
+      <el-table-column v-if="level !== 'unmapped'" :label="level === 'category' ? '类目' : level === 'spu' ? '商品 / SPU' : '商品规格 / SKU'" min-width="240">
         <template #default="{row}">
           <el-button v-if="level !== 'sku'" link type="primary" @click="enter(row)">{{ row.name }}</el-button>
           <div v-else>{{ row.specification || row.name }}</div>
@@ -51,19 +51,39 @@
         </template>
       </el-table-column>
       <el-table-column v-if="level === 'category'" label="商品款数"><template #default="{row}">{{ row.spu_count }}</template></el-table-column>
-      <el-table-column v-if="level !== 'sku'" label="规格数"><template #default="{row}">{{ row.sku_count }}</template></el-table-column>
-      <el-table-column v-if="level !== 'category'" label="ABC 等级">
+      <el-table-column v-if="level === 'unmapped'" prop="source_sku" label="来源 SKU" />
+      <el-table-column v-if="level === 'unmapped'" prop="seller_sku" label="店铺 SKU" />
+      <el-table-column v-if="level === 'unmapped'" prop="warehouse__name" label="仓库" />
+      <el-table-column v-if="level === 'unmapped'" label="在手库存"><template #default="{row}">{{ format(row.on_hand_qty) }}</template></el-table-column>
+      <el-table-column v-if="level === 'unmapped'" label="可用库存"><template #default="{row}">{{ format(row.available_qty) }}</template></el-table-column>
+      <el-table-column v-if="level !== 'sku' && level !== 'unmapped'" label="规格数"><template #default="{row}">{{ row.sku_count }}</template></el-table-column>
+      <el-table-column v-if="level !== 'category' && level !== 'unmapped'" label="ABC 等级">
         <template #default="{row}"><InventoryAbcBadges :row="row" :entity-type="level" /></template>
       </el-table-column>
-      <el-table-column label="最近同步可售库存"><template #default="{row}">{{ format(row.available) }}</template></el-table-column>
-      <el-table-column :label="'近 ' + (applied?.days || days) + ' 天销量'"><template #default="{row}">{{ format(row.sales) }}<small v-if="row.unlisted_stock_sku_count">{{ row.unlisted_stock_sku_count }} 个有库存无销售（未关联平台商品）</small></template></el-table-column>
-      <el-table-column label="查看明细" min-width="165">
+      <el-table-column v-if="level !== 'unmapped'" label="最近同步可售库存"><template #default="{row}">{{ format(row.available) }}</template></el-table-column>
+      <el-table-column v-if="level !== 'unmapped'" :label="'近 ' + (applied?.days || days) + ' 天销量'"><template #default="{row}">{{ format(row.sales) }}<small v-if="row.unlisted_stock_sku_count">{{ row.unlisted_stock_sku_count }} 个有库存无销售（未关联平台商品）</small></template></el-table-column>
+      <el-table-column v-if="level !== 'unmapped'" label="查看明细" min-width="165">
         <template #default="{row}">
           <el-button v-if="level === 'category'" link type="primary" @click="enter(row, true)">查看本类商品</el-button>
           <template v-else>
             <el-button link type="primary" @click="openDetail(row, 'stores')">店铺销售</el-button>
             <el-button v-if="level === 'sku'" link type="primary" @click="openDetail(row, 'warehouses')">仓库库存</el-button>
           </template>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="level === 'spu'" label="规格">
+        <template #default="{row}">
+          <el-button link type="primary" @click="toggleVariants(row)">{{ expandedVariants.has(row.id) ? '收起规格' : `展开 ${row.sku_count || row.variants?.length || 0} 个规格` }}</el-button>
+          <el-table v-if="expandedVariants.has(row.id)" :data="row.variants || []" size="small" row-key="id">
+            <el-table-column label="规格 / SKU" min-width="210"><template #default="{row: variant}">
+              <span>{{ variant.specification || variant.name || '未命名规格' }}</span><small>{{ variant.code }}<span v-if="variant.legacy"> · 旧 SKU {{ variant.legacy }}</span></small>
+              <DocumentProductImageV2 v-if="variant.image_preview_url" :image-path="variant.image_preview_url" :alt="variant.name || variant.code" />
+            </template></el-table-column>
+            <el-table-column label="ABC 等级"><template #default="{row: variant}"><InventoryAbcBadges :row="variant" entity-type="sku" /></template></el-table-column>
+            <el-table-column label="最近同步可售库存"><template #default="{row: variant}">{{ format(variant.available) }}</template></el-table-column>
+            <el-table-column :label="'近 ' + (applied?.days || days) + ' 天销量'"><template #default="{row: variant}">{{ format(variant.sales) }}</template></el-table-column>
+            <el-table-column label="明细"><template #default="{row: variant}"><el-button link type="primary" @click="openDetail(variant, 'stores', true)">店铺销售</el-button><el-button link type="primary" @click="openDetail(variant, 'warehouses', true)">仓库库存</el-button></template></el-table-column>
+          </el-table>
         </template>
       </el-table-column>
     </el-table>
@@ -102,6 +122,7 @@ defineProps({ embedded: Boolean });
 const countries = ref([]), country = ref(null), days = ref(30), search = ref('');
 const applied = ref(null), trail = ref([]), spu = ref(null), level = ref('category');
 const rows = ref([]), summary = ref(null), count = ref(0), page = ref(1), loading = ref(false), error = ref('');
+const expandedVariants = ref(new Set());
 const detailOpen = ref(false), detailTitle = ref(''), detailLevel = ref(''), detailRows = ref([]);
 const detailCount = ref(0), detailPage = ref(1), detailLoading = ref(false), detailError = ref('');
 let sequence = 0, detailSequence = 0, detailParams;
@@ -145,6 +166,7 @@ function reset() {
   detailOpen.value = false;
   applied.value = null;
   rows.value = [];
+  expandedVariants.value = new Set();
   count.value = 0;
   summary.value = null;
   trail.value = [];
@@ -178,7 +200,7 @@ function goCategory(index) {
   const node = trail.value[index];
   trail.value = trail.value.slice(0, index + 1);
   spu.value = null;
-  level.value = node.has_children ? 'category' : 'spu';
+  level.value = node.id === -1 ? 'unmapped' : node.has_children ? 'category' : 'spu';
   changePage(1);
 }
 function showProducts() {
@@ -188,6 +210,7 @@ function showProducts() {
 }
 function enter(row, products = false) {
   if (level.value === 'category') {
+    if (row.id === -1) { trail.value = [{ id: -1, name: row.name }]; level.value = 'unmapped'; changePage(1); return; }
     trail.value = [...trail.value, row];
     level.value = row.has_children && !products ? 'category' : 'spu';
   } else {
@@ -198,9 +221,15 @@ function enter(row, products = false) {
 }
 function scope() {
   const category = trail.value.at(-1);
-  return { ...applied.value, ...(category && { category_id: category.id }) };
+  return { ...applied.value, ...(category && category.id !== -1 && { category_id: category.id }), ...(level.value === 'unmapped' && { category_id: -1 }) };
+}
+function toggleVariants(row) {
+  const next = new Set(expandedVariants.value);
+  if (next.has(row.id)) next.delete(row.id); else next.add(row.id);
+  expandedVariants.value = next;
 }
 async function changePage(next) {
+  expandedVariants.value = new Set();
   const seq = ++sequence;
   mainController?.abort();
   mainController = new AbortController();
@@ -225,11 +254,11 @@ async function changePage(next) {
     if (seq === sequence) loading.value = false;
   }
 }
-function openDetail(row, kind) {
+function openDetail(row, kind, variant = false) {
   detailLevel.value = kind;
   detailTitle.value = row.name + (kind === 'stores' ? ' · 店铺销售' : ' · 仓库库存');
   detailParams = { ...scope(), level: kind,
-    ...(level.value === 'spu' ? { spu_id: row.id } : { sku_id: row.id }) };
+    ...(variant ? { sku_id: row.id } : level.value === 'spu' ? { spu_id: row.id } : { sku_id: row.id }) };
   detailOpen.value = true;
   loadDetail(1);
 }

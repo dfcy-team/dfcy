@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('supply_chain', '0060_paymentplanrecord'),
+        ('supply_chain', '0065_paymentplanrecord'),
         ('tenants', '0002_department_leader_and_more'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]

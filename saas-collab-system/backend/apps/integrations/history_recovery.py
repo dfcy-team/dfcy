@@ -31,6 +31,12 @@ def failure_kind(run):
         return "missing_run", "运行记录缺失，先核对原任务与分段关联。"
     code, message = run.error_code or "", run.masked_error_message or ""
     lower = message.lower()
+    if code == "VIDEO_HISTORY_DAY_EXPIRED":
+        return "date_range", "目标日期已超出店铺当地最近30个完整自然日，平台已无法按原日期补采。"
+    if code == "AFFILIATE_DATA_CONTRACT" or message.startswith("AFFILIATE_DATA_CONTRACT:"):
+        return "data_or_runtime", "平台返回未通过联盟订单结构校验。核对响应字段及分页证据后再重试。"
+    if code == "RUN_TIMEOUT" and run.sync_job.resource_type == "video_metrics":
+        return "execution_timeout", "视频采集超时。已落库整日结果保留，未完成日期当前需重新分页。"
     if code == "RUN_TIMEOUT":
         return "execution_timeout", "执行超时。按已保存的页内断点续采；重复超时请核对单次请求耗时和工作进程。"
     if any(word in lower for word in ("timed out", "timeout", "超时")) and "1205" not in message:
@@ -50,9 +56,12 @@ def failure_kind(run):
 
 def retry_block_reason(job, segment):
     from .history_sync import history_validation_job
+    from .history_tiktok_collection import video_history_day_expired
     from .sync_services import validate_manual_sync_job
     if segment.status != "failed":
         return "仅可重试失败分段。"
+    if video_history_day_expired(job, segment.scope, timezone.now()):
+        return "目标日期已超出店铺当地最近30个完整自然日。"
     if not job.is_enabled or job.status == "disabled":
         return "请先启用当前同步任务，再重试补采。"
     if not is_module_enabled("api_integrations"):

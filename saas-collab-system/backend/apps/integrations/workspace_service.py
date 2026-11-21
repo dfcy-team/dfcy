@@ -36,6 +36,7 @@ RESOURCE_DESTINATIONS = {
     "sales_order": ("销售订单", "sales_order / sales_order_item"),
     "settlement_bill": ("财务流水", "platform_finance_transaction"),
     "advertising_report": ("Shopee 广告数据", "shopee_advertising_record"),
+    "gmv_max_report": ("TikTok GMV Max", "integrations_sharedadvertisingrawpayload"),
     "refund_return": ("退款退货", "refund_return / refund_return_item"),
     "inventory_snapshot": ("库存分析", "inventory_snapshot"),
     "warehouse_order_lookup": ("订单仓库查询结果", "sales_order_warehouse_lookup"),
@@ -324,9 +325,9 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None, context=None
             or scope.get("time_basis")
             or ("created" if str(query_scope.get("mode") or scope.get("query_mode") or "incremental") == "range" else "updated")
         ) if job.resource_type == "sales_order" else None,
-        "lookback_days": int(query_scope.get("lookback_days") or scope.get("lookback_days") or (job.integration_config.platform_config or {}).get("sync_scope", {}).get("lookback_days") or (7 if job.resource_type == "advertising_report" else 1)),
+        "lookback_days": 2 if job.resource_type == "gmv_max_report" else int(query_scope.get("lookback_days") or scope.get("lookback_days") or (job.integration_config.platform_config or {}).get("sync_scope", {}).get("lookback_days") or (7 if job.resource_type == "advertising_report" else 1)),
         "overlap_minutes": int(query_scope.get("overlap_minutes") if query_scope.get("overlap_minutes") is not None else scope.get("overlap_minutes") or 5),
-        "query_page_size": int(query_scope.get("page_size") or scope.get("query_page_size") or 50),
+        "query_page_size": 100 if job.resource_type == "gmv_max_report" else int(query_scope.get("page_size") or scope.get("query_page_size") or 50),
         "max_pages": int(query_scope.get("max_pages") or scope.get("max_pages") or 100),
         "max_records": int(query_scope.get("max_records") or scope.get("max_records") or 50000),
         "warehouse_order_limit": int(scope.get("warehouse_order_limit", 50)) if job.resource_type == "warehouse_order_lookup" else None,

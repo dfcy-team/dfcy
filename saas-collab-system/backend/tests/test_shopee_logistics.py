@@ -134,9 +134,18 @@ def test_scope_and_checkpoint_change_when_logistics_is_requested():
     a = {'time_from': 1, 'time_to': 2}
     assert ShopeeReadonlyClient._detail_scope_fingerprint(a, 'returns', 4) != (
         ShopeeReadonlyClient._detail_scope_fingerprint({**a, 'include_logistics': True}, 'returns', 4))
-    job = SimpleNamespace(integration_config=SimpleNamespace(platform='lazada'), resource_type='sales_order')
+    job = SimpleNamespace(integration_config=SimpleNamespace(platform='lazada'), resource_type='affiliate_order', sync_scope={})
     with pytest.raises(ValidationError):
         _set_job_scope(job, {'include_logistics': True})
+
+
+@pytest.mark.parametrize('platform',['shopee','lazada','tiktok'])
+def test_order_logistics_policy_preserves_supported_cloud_platforms(platform):
+    from apps.integrations.views import _set_job_scope
+    job=SimpleNamespace(integration_config=SimpleNamespace(platform=platform),resource_type='sales_order',
+                        sync_scope={},schedule_type='daily',ads_mapping_id=None)
+    _set_job_scope(job,{'include_logistics':True})
+    assert job.sync_scope['query']['include_logistics'] is True
 
 
 def test_provider_failure_is_explicit_and_never_replaced_with_fake_tracking():

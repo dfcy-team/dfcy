@@ -13,7 +13,7 @@ const sourceFiles = [
   ['frontend', 'src/views/influencers/InfluencerRequirements.vue'],
   ['backend', 'apps/influencers/requirement_feedback.py'],
   ['backend', 'apps/influencers/views.py'],
-  ['backend', 'apps/influencers/migrations/0051_requirement_images.py'],
+  ['backend', 'apps/influencers/migrations/0049_requirement_images.py'],
 ];
 
 function fixture(layout) {
@@ -55,8 +55,10 @@ describe('formal source hotfix preservation', () => {
       expect(() => checkInfluencerHotfixes(roots)).toThrow('Hotfix preservation failed');
       writeFileSync(imagePage, imageSource);
 
-      rmSync(resolve(roots.backendRoot, 'apps/influencers/migrations/0051_requirement_images.py'));
-      expect(() => checkInfluencerHotfixes(roots)).toThrow();
+      const imageMigration = resolve(roots.backendRoot, 'apps/influencers/migrations/0049_requirement_images.py');
+      const migrationSource = readFileSync(imageMigration, 'utf8');
+      writeFileSync(imageMigration, migrationSource.replace('InfluencerRequirementImage', 'RemovedImageModel'));
+      expect(() => checkInfluencerHotfixes(roots)).toThrow('Hotfix preservation failed');
     } finally {
       if (dirname(roots.root) !== resolve(tmpdir()) || !basename(roots.root).startsWith('influencer-gate-')) throw new Error('Unsafe fixture cleanup path');
       rmSync(roots.root, { recursive: true });

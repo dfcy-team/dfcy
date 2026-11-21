@@ -115,7 +115,7 @@ def test_new_my_bill_uses_settlement_column_and_order_detail(tmp_path):
     assert not rows[0]['issues'] and summary['order_difference'] == '0.000000'
 
 
-@pytest.mark.parametrize('raw, fragment', [(ph_bill(total=4.01), '差额'), (ph_bill(duplicate=True, total=8), '重复'), (ph_bill(missing=True), '金额缺失')])
+@pytest.mark.parametrize('raw, fragment', [(ph_bill(total=4.01), '差额'), (ph_bill(duplicate=True, total=8), '重复'), (ph_bill(missing=True), '金额缺失')], ids=['bad-total', 'duplicate-order', 'uncached-formula'])
 def test_bad_totals_duplicate_orders_and_uncached_formulas_are_held(tmp_path, raw, fragment):
     rows, _ = read(tmp_path, raw)
     assert any(fragment in issue for r in rows if r['kind'] == 'order' for issue in r['issues'])

@@ -115,7 +115,7 @@ def validate_mapping(mapping, *, require_enabled=True, lock=False):
 
 
 def load_mapping(job, *, lock=False):
-    if (job.resource_type != RESOURCE or not job.ads_mapping_id
+    if (job.resource_type not in {RESOURCE, "gmv_max_report"} or not job.ads_mapping_id
             or job.store_authorization_id or job.warehouse_authorization_id):
         raise ValidationError("Ads jobs require an exclusive advertiser mapping.")
     query = TikTokAdsAdvertiserMapping.objects

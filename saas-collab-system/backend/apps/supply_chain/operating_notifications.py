@@ -31,7 +31,7 @@ class ConfigAPI(InternalAPI):
             'enabled': bool(rule and rule.enabled),
             'recipient_user_ids': rule.config.get('recipient_user_ids', []) if rule else [],
             'can_manage': can_manage(request.user),
-            'users': [{'id': user.pk, 'name': user.get_full_name() or user.username} for user in users],
+            'users': [{'id': user.pk, 'name': user.full_name or user.username} for user in users],
         }})
 
     @transaction.atomic

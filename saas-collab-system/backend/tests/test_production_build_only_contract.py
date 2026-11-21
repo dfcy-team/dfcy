@@ -1,6 +1,7 @@
 """Offline fail-closed contract tests; no registry or database connection."""
 from pathlib import Path
 from hashlib import sha256
+import subprocess
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -10,6 +11,7 @@ from scripts.production_build_only import (
     make_manifest, migration_digest, verify_reports, verify_sales_reports,
     verify_sync_workspace_report,
 )
+from tests.build_only_frozen_migrations import frozen_migration_digest
 
 
 def valid_args():
@@ -68,330 +70,34 @@ def test_manifest_rejects_unapproved_or_movable_inputs(index, bad):
         make_manifest(*args)
 
 
-def test_archive_migrations_cannot_reuse_registered_release():
-    archived_migration_sha = "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838"
+def test_archive_migrations_cannot_reuse_registered_release(tmp_path):
+    repo_root = Path(__file__).resolve().parents[3]
     root = Path(__file__).resolve().parents[1]
-    unregistered_migrations = {
-        # Local increments and alignment-only merge nodes are not archived releases.
-        "apps/alerts/migrations/0008_inventory_warning_snapshot.py",
-        "apps/masterdata/migrations/0025_inventory_observation_settings.py",
-        "apps/masterdata/migrations/0026_inventory_abc.py",
-        "apps/products/migrations/0032_productsku_first_sale_date.py",
-        "apps/sales_management/migrations/0011_operating_order_deleted_status.py",
-        "apps/supply_chain/migrations/0079_replenishment_sku_policies.py",
-        "apps/supply_chain/migrations/0080_optional_fee_revision_reason.py",
-        "apps/integrations/migrations/0061_creator_video_capability_choices.py",
-        "apps/integrations/migrations/0062_developer_platform_scope.py",
-        "apps/integrations/migrations/0063_developer_endpoint_rollback_default.py",
-        "apps/influencers/migrations/0046_affiliate_awaiting_payment.py",
-        "apps/integrations/migrations/0064_native_collection_receipts.py",
-        'apps/integrations/migrations/0066_warehouse_order_lookup_jobs_vm.py',
-        'apps/supply_chain/migrations/0074_inbound_cancelled_status.py',
-        'apps/supply_chain/migrations/0075_manual_partial_inbounds.py',
-        'apps/supply_chain/migrations/0076_shipment_payable_tax.py',
-        'apps/supply_chain/migrations/0077_supplier_deposit_ledger.py',
-        'apps/supply_chain/migrations/0078_freight_channel_load_type.py',
-        "apps/finance/migrations/0015_warehouse_bill_format_rule.py",
-        "apps/flash_sales/migrations/__init__.py",
-            "apps/flash_sales/migrations/0001_initial.py",
-        "apps/flash_sales/migrations/0002_permissions.py",
-        "apps/flash_sales/migrations/0003_dispatch_watermark.py",
-        "apps/flash_sales/migrations/0004_slot_reservation_history.py",
-        "apps/flash_sales/migrations/0005_plan_deleted_at.py",
-        "apps/integrations/migrations/0059_developer_warehouse_account.py",
-        "apps/integrations/migrations/0060_best_ecapi_platform.py",
-        "apps/integrations/migrations/0061_best_platform_master.py",
-        "apps/integrations/migrations/0062_merge_warehouse_gmv_branches.py",
-        "apps/integrations/migrations/0065_merge_warehouse_native_collection.py",
-        "apps/masterdata/migrations/0023_platform_connector_fields.py",
-        "apps/masterdata/migrations/0024_backfill_platform_connectors.py",
-        "apps/sales_management/migrations/0008_order_warehouse_lookup.py",
-        "apps/sales_management/migrations/0009_order_warehouse_schedule.py",
-        "apps/sales_management/migrations/0010_aftersales_warehouse_return_no.py",
-        "apps/supply_chain/migrations/0072_payee_account_deleted.py",
-        "apps/supply_chain/migrations/0060_shipment_inbound_counted_at.py",
-        "apps/supply_chain/migrations/0060_paymentplanrecord.py",
-        "apps/supply_chain/migrations/0061_paymentclassification.py",
-        "apps/supply_chain/migrations/0061_payment_request_attachments.py",
-        "apps/supply_chain/migrations/0062_payableclassificationrecord.py",
-        "apps/supply_chain/migrations/0063_paymentcurrencyconfirmation.py",
-        "apps/supply_chain/migrations/0064_paymentrequest_currency.py",
-        "apps/supply_chain/migrations/0065_payment_plan_request_links.py",
-        "apps/supply_chain/migrations/0066_merge_payment_plans_attachments.py",
-        "apps/supply_chain/migrations/0062_inbound_notification.py",
-        "apps/supply_chain/migrations/0067_merge_payment_plans_inbound_notification.py",
-        "apps/supply_chain/migrations/0063_inbound_extra_received_skus.py",
-        "apps/supply_chain/migrations/0064_inbound_extra_unit_price.py",
-        "apps/supply_chain/migrations/0068_merge_inbound_extra_and_payment_plans.py",
-        "apps/supply_chain/migrations/0071_fee_revision_cost_exchange.py",
-        "apps/commerce/migrations/0011_salesorder_internal_sync_batch_and_more.py",
-        "apps/commerce/migrations/0012_refundreturnitem_source_details.py",
-        "apps/finance/migrations/0009_businesssyncidentity_businesssyncsource_and_more.py",
-        "apps/finance/migrations/0010_warehouse_fee_pending_warehouse.py",
-        "apps/finance/migrations/0011_platform_wallet.py",
-        "apps/finance/migrations/0012_financial_summary_batch.py",
-        "apps/finance/migrations/0013_financesummaryinput.py",
-        "apps/finance/migrations/0014_financesummarycalculation.py",
-        "apps/integrations/migrations/0052_warehouse_api_attempt.py",
-        "apps/integrations/migrations/0053_lazadaapisnapshot.py",
-        "apps/integrations/migrations/0054_merge_lazada_warehouse.py",
-        "apps/integrations/migrations/0055_lazadaadvertisingdailyspend.py",
-        "apps/integrations/migrations/0056_merge_lazada_ads_warehouse.py",
-        "apps/integrations/migrations/0058_merge_local_increment_vm370.py",
-        "apps/listings/migrations/0006_platformproductdetail_platform_image_source.py",
-        "apps/listings/migrations/0005_platformproductdetail_platform_image_url.py",
-        "apps/masterdata/migrations/0019_daily_exchange_rate_snapshot.py",
-        "apps/masterdata/migrations/0022_merge_local_fx_vm370.py",
-        "apps/commerce/migrations/0008_order_source_details.py",
-        "apps/commerce/migrations/0010_merge_local_order_fields_vm_v289.py",
-        "apps/finance/migrations/0006_warehouse_fee_registration.py",
-        "apps/finance/migrations/0007_warehouse_fee_permissions.py",
-        "apps/finance/migrations/0008_warehouse_bill_uploads.py",
-        "apps/sales_management/migrations/0006_registration_and_aftersales.py",
-        "apps/sales_management/migrations/0007_registration_and_aftersales_permissions.py",
-        "apps/sales_management/migrations/0002_operating_permissions.py",
-        "apps/sales_management/migrations/0003_operatingorder_campaign_operatingorder_demand_end_and_more.py",
-        "apps/sales_management/migrations/0004_supply_summary_permission.py",
-        "apps/commerce/migrations/0006_salesorder_delivered_at_utc.py",
-        "apps/commerce/migrations/0009_merge_tiktok_delivery_main.py",
-        "apps/influencers/migrations/0027_tiktok_creator_profile_snapshot.py",
-        "apps/influencers/migrations/0028_tiktok_dataset_staging.py",
-        "apps/influencers/migrations/0030_merge_platform_accounts_and_tiktok_staging.py",
-        "apps/influencers/migrations/0038_tiktok_video_unknown_type.py",
-        "apps/influencers/migrations/0039_affiliate_payment_unknown.py",
-        "apps/influencers/migrations/0040_merge_tiktok_api_main.py",
-        "apps/integrations/migrations/0036_tiktokadsadvertisermapping_tiktokadsdailyspend_and_more.py",
-        "apps/integrations/migrations/0042_merge_tiktok_pilot_20261007.py",
-        "apps/integrations/migrations/0043_internal_api_tiktok_token_store.py",
-        "apps/integrations/migrations/0044_syncjob_affiliate_order.py",
-        "apps/integrations/migrations/0045_adsoauthsession.py",
-        "apps/integrations/migrations/0046_syncjob_ads_mapping.py",
-        "apps/integrations/migrations/0046_syncjob_ads_mapping_compatible.py",
-        "apps/integrations/migrations/0047_merge_tiktok_main_integration.py",
-        "apps/integrations/migrations/0048_alter_syncjob_resource_type.py",
-        # Later releases add migrations outside this historical build-only baseline.
-        # It must not alter the archived hash or make its manifest reusable.
-        "apps/integrations/migrations/0049_feishubusinessreminder_and_more.py",
-        "apps/integrations/migrations/0050_tiktok_shop_binding.py",
-        "apps/integrations/migrations/0051_ads_authorization_cleanup.py",
-        "apps/integrations/migrations/0052_alter_historysyncsegment_status.py",
-        "apps/integrations/migrations/0053_syncrawenvelope_external_payload.py",
-        "apps/integrations/migrations/0054_daily_ads_shared_raw.py",
-        "apps/tenants/migrations/0002_department_leader_and_more.py",
-        "apps/integrations/migrations/0045_feishu_binding_session.py",
-        "apps/integrations/migrations/0046_history_task_controls_detail_state.py",
-        "apps/permissions/migrations/0052_history_task_recovery_description.py",
-        "apps/permissions/migrations/0053_register_sales_realtime_board_menu.py",
-        "apps/permissions/migrations/0054_role_permissions_customized.py",
-        "apps/finance/migrations/0005_finance_query_indexes.py",
-        "apps/influencers/migrations/0028_influencer_platform_account.py",
-        "apps/influencers/migrations/0029_primary_identity_indexes.py",
-        "apps/influencers/migrations/0031_influence_archive_associations.py",
-        "apps/influencers/migrations/0032_profile_reference_plain_text.py",
-        "apps/influencers/migrations/0033_affiliate_estimated_commission_base.py",
-        "apps/influencers/migrations/0034_affiliate_settlement_status.py",
-        "apps/influencers/migrations/0035_seed_bd_exchange_rates.py",
-        "apps/influencers/migrations/0036_affiliate_actual_ads_commission.py",
-        "apps/influencers/migrations/0037_bd_exchange_rates_direct_save.py",
-        "apps/influencers/migrations/0038_affiliate_business_identity.py",
-        "apps/influencers/migrations/0039_sample_business_numbers.py",
-        "apps/alerts/migrations/0003_inventory_alert_followup.py",
-        "apps/alerts/migrations/0004_inventorydecisionassessment.py",
-        "apps/alerts/migrations/0005_inventorydecisionrow_inventorydecisionview_and_more.py",
-        "apps/alerts/migrations/0006_inventorydecisionassessment_membership_id_and_more.py",
-        "apps/alerts/migrations/0007_remove_inventorydecisionrow_idx_inventory_row_state_and_more.py",
-        "apps/commerce/migrations/0007_inventorysnapshot_provided_quantity_fields.py",
-        "apps/commerce/migrations/0008_inventorysnapshot_latest_cover_idx.py",
-        "apps/masterdata/migrations/0015_suppliermaster_city_suppliermaster_factory_address_and_more.py",
-        "apps/masterdata/migrations/0016_supplier_payment_terms.py",
-        "apps/masterdata/migrations/0017_warehouse_business_metadata.py",
-        "apps/masterdata/migrations/0018_archive_code_rule.py",
-        "apps/reports/migrations/0010_reportanalysisjob.py",
-        "apps/reports/migrations/0011_reportaggregateblock.py",
-        "apps/reports/migrations/0012_worker_active.py",
-        "apps/reports/migrations/0013_export_storage_metadata.py",
-        "apps/products/migrations/0028_legacy_import_spu_group.py",
-        "apps/supply_chain/migrations/0031_settlementrevision_payee_allocations_payeeaccount.py",
-        "apps/supply_chain/migrations/0038_payment_item_profiles.py",
-        "apps/supply_chain/migrations/0039_fee_item_breakdown.py",
-        "apps/supply_chain/migrations/0040_inbound_payment_owner.py",
-        "apps/supply_chain/migrations/0041_payment_terms_adjustments.py",
-        "apps/supply_chain/migrations/0042_freightcompany_payment_reminder_days_and_more.py",
-        "apps/supply_chain/migrations/0043_payment_terms_kind_idempotency.py",
-        "apps/supply_chain/migrations/0044_batch_freight_terms_snapshot.py",
-        "apps/supply_chain/migrations/0045_domestic_terms_snapshot.py",
-        "apps/supply_chain/migrations/0046_payment_terms_ranges.py",
-        "apps/supply_chain/migrations/0047_purchase_contracts.py",
-        "apps/supply_chain/migrations/0048_purchase_contract_signatures.py",
-        "apps/supply_chain/migrations/0049_payment_requests.py",
-        "apps/supply_chain/migrations/0050_payment_item_tax_rate.py",
-        "apps/supply_chain/migrations/0051_contract_payable_tax.py",
-        "apps/supply_chain/migrations/0052_contract_tax_cost_treatment.py",
-        "apps/integrations/migrations/0055_product_mapping_history.py",
-        "apps/products/migrations/0029_productskualias_identity_correction_source.py",
-        # V358 developer-center migrations postdate this frozen archive.
-        "apps/integrations/migrations/0056_developer_apps.py",
-        "apps/integrations/migrations/0057_developer_requested_expiry.py",
-        "apps/integrations/migrations/0059_shopee_advertising_order_index.py",
-        "apps/integrations/migrations/0060_gmv_max_audit_lookup_index.py",
-        "apps/products/migrations/0030_productsku_product_type.py",
-        "apps/permissions/migrations/0055_register_developer_app_permissions.py",
-        # TK video migrations postdate the archived release fingerprint.
-        "apps/influencers/migrations/0041_video_nullable_metrics_and_receipts.py",
-        "apps/influencers/migrations/0042_video_reported_ctor.py",
-        "apps/influencers/migrations/0043_video_native_click_ratio.py",
-        "apps/influencers/migrations/0050_requirement_feedback.py",
-        "apps/influencers/migrations/0051_requirement_images.py",
-        "apps/influencers/migrations/0047_outreach_paused_choice.py",
-        "apps/influencers/migrations/0048_influencer_username_alias.py",
-        "apps/influencers/migrations/0049_outreachtask_dispatch_requirements.py",
-        "apps/masterdata/migrations/0027_inventory_abc_composite.py",
-        "apps/sales_management/migrations/0012_warehouse_outbound_line.py",
-        "apps/tenants/migrations/0003_payment_approval.py",
-        "apps/commerce/migrations/0013_salesorder_cancellation_pending.py",
-        "apps/finance/migrations/0016_generic_bill_format_rules.py",
-        "apps/finance/migrations/0017_archive_bill_format_rules.py",
-        "apps/flash_sales/migrations/0006_notification_disabled.py",
-        "apps/supply_chain/migrations/0053_fee_item_query_projection.py",
-        "apps/supply_chain/migrations/0054_contract_history.py",
-        "apps/supply_chain/migrations/0055_contract_signature_versions.py",
-        "apps/masterdata/migrations/0021_seed_russia.py",
-        "apps/supply_chain/migrations/0056_supply_payment_batches.py",
-        # Freight container records postdate this frozen archive.
-        "apps/supply_chain/migrations/0057_freightchannel_container_records.py",
-        "apps/supply_chain/migrations/0058_shipment_discount_adjustment.py",
-            "apps/supply_chain/migrations/0059_fee_revision_quantity_method.py",
-            "apps/products/migrations/0031_empty_bundle_skus_to_standard.py",
-            "apps/influencers/migrations/0044_influencer_archive_soft_delete.py",
-            "apps/influencers/migrations/0045_influencer_shopee_platform.py",
-        "apps/permissions/migrations/0055_payment_flow_manage_permission.py",
-        "apps/permissions/migrations/0056_merge_20261103_0536.py",
-        "apps/workflows/migrations/0004_approval_designated_reviewer.py",
-        "apps/workflows/migrations/0005_paymentapprovalflow.py",
-        "apps/workflows/migrations/0006_paymentapprovalflow_department_keys_and_more.py",
-        "apps/masterdata/migrations/0019_suppliermaster_payment_reminder_days_and_more.py",
-        "apps/masterdata/migrations/0020_supplier_default_tax_rate.py",
-        "apps/sales_management/migrations/0001_initial.py",
-        "apps/sales_management/migrations/0005_salesninesnapshot.py",
-        "apps/supply_chain/migrations/0001_initial.py",
-        "apps/supply_chain/migrations/0002_register_permissions.py",
-        "apps/supply_chain/migrations/0003_purchaseline_is_active_supplierproductprice_and_more.py",
-        "apps/supply_chain/migrations/0004_procurement_menu.py",
-        "apps/supply_chain/migrations/0005_boxinfoattachment_is_active_shipmentline_is_active_and_more.py",
-        "apps/supply_chain/migrations/0006_supplier_shipments_menu.py",
-        "apps/supply_chain/migrations/0007_inbound_receipt_fields.py",
-        "apps/supply_chain/migrations/0008_internal_stock_receipts.py",
-        "apps/supply_chain/migrations/0009_logistics_menu.py",
-        "apps/supply_chain/migrations/0010_dispatchbatch_status_and_more.py",
-        "apps/supply_chain/migrations/0011_operatingallocation_operating_line_and_more.py",
-        "apps/supply_chain/migrations/0012_costversion_costentry_costadjustment_feerecord_and_more.py",
-        "apps/supply_chain/migrations/0013_costs_menu.py",
-        "apps/supply_chain/migrations/0014_alter_costentry_clearance_fee_and_more.py",
-        "apps/supply_chain/migrations/0015_notificationthrottle_and_more.py",
-        "apps/supply_chain/migrations/0016_notifications_permissions.py",
-        "apps/supply_chain/migrations/0017_alter_notificationoutbox_blocked_reason.py",
-        "apps/supply_chain/migrations/0018_dispatchbatch_carrier_quote_snapshots.py",
-        "apps/supply_chain/migrations/0019_supplier_shipment_delivery_modes.py",
-        "apps/supply_chain/migrations/0020_archive_navigation.py",
-        "apps/supply_chain/migrations/0021_document_number_rules.py",
-        "apps/supply_chain/migrations/0022_number_rules_menu.py",
-        "apps/supply_chain/migrations/0023_freight_channels_planned_warehouses.py",
-        "apps/supply_chain/migrations/0024_warehouse_archive_menu.py",
-        "apps/supply_chain/migrations/0025_dispatchbatch_expected_warehouse_date_and_more.py",
-        "apps/supply_chain/migrations/0026_dispatch_line_allocations.py",
-        "apps/supply_chain/migrations/0027_paymentvoucher.py",
-        "apps/supply_chain/migrations/0028_dashboard_menu.py",
-        "apps/supply_chain/migrations/0029_replenishment_strategy.py",
-        "apps/supply_chain/migrations/0030_replenishmentcalculationjob_and_more.py",
-        "apps/supply_chain/migrations/0032_payment_records.py",
-        "apps/supply_chain/migrations/0033_payment_applications.py",
-        "apps/supply_chain/migrations/0034_payment_vouchers.py",
-        "apps/supply_chain/migrations/0035_payment_reversal_snapshot.py",
-        "apps/supply_chain/migrations/0036_domestic_carrier_fields.py",
-        "apps/supply_chain/migrations/0037_payment_purpose.py",
-        "apps/supply_chain/migrations/0038_payment_item_profiles.py",
-        "apps/supply_chain/migrations/0039_fee_item_breakdown.py",
-        "apps/supply_chain/migrations/0040_inbound_payment_owner.py",
-        "apps/supply_chain/migrations/0041_payment_terms_adjustments.py",
-        "apps/supply_chain/migrations/0042_freightcompany_payment_reminder_days_and_more.py",
-        "apps/supply_chain/migrations/0043_payment_terms_kind_idempotency.py",
-        "apps/supply_chain/migrations/0044_batch_freight_terms_snapshot.py",
-        "apps/supply_chain/migrations/0045_domestic_terms_snapshot.py",
-        "apps/supply_chain/migrations/0046_payment_terms_ranges.py",
-        "apps/supply_chain/migrations/0047_purchase_contracts.py",
-        "apps/supply_chain/migrations/0048_purchase_contract_signatures.py",
-        "apps/supply_chain/migrations/0049_payment_requests.py",
-        "apps/supply_chain/migrations/0050_payment_item_tax_rate.py",
-        "apps/supply_chain/migrations/0051_contract_payable_tax.py",
-        "apps/supply_chain/migrations/0052_contract_tax_cost_treatment.py",
-        "apps/integrations/migrations/0055_product_mapping_history.py",
-        "apps/products/migrations/0029_productskualias_identity_correction_source.py",
-        # V358 developer-center migrations postdate this frozen archive.
-        "apps/integrations/migrations/0056_developer_apps.py",
-        "apps/integrations/migrations/0057_developer_requested_expiry.py",
-        "apps/integrations/migrations/0059_shopee_advertising_order_index.py",
-        "apps/integrations/migrations/0060_gmv_max_audit_lookup_index.py",
-        "apps/products/migrations/0030_productsku_product_type.py",
-        "apps/permissions/migrations/0055_register_developer_app_permissions.py",
-        # TK video migrations postdate the archived release fingerprint.
-        "apps/influencers/migrations/0041_video_nullable_metrics_and_receipts.py",
-        "apps/influencers/migrations/0042_video_reported_ctor.py",
-        "apps/influencers/migrations/0043_video_native_click_ratio.py",
-        "apps/influencers/migrations/0050_requirement_feedback.py",
-        "apps/influencers/migrations/0051_requirement_images.py",
-        "apps/supply_chain/migrations/0053_fee_item_query_projection.py",
-        "apps/supply_chain/migrations/0054_contract_history.py",
-        "apps/supply_chain/migrations/0055_contract_signature_versions.py",
-        "apps/masterdata/migrations/0021_seed_russia.py",
-        "apps/supply_chain/migrations/0056_supply_payment_batches.py",
-        # Freight container records postdate this frozen archive.
-        "apps/supply_chain/migrations/0057_freightchannel_container_records.py",
-        "apps/supply_chain/migrations/0058_shipment_discount_adjustment.py",
-            "apps/supply_chain/migrations/0059_fee_revision_quantity_method.py",
-            "apps/products/migrations/0031_empty_bundle_skus_to_standard.py",
-            "apps/influencers/migrations/0044_influencer_archive_soft_delete.py",
-            "apps/influencers/migrations/0045_influencer_shopee_platform.py",
-        "apps/permissions/migrations/0055_payment_flow_manage_permission.py",
-        "apps/permissions/migrations/0056_merge_20261103_0536.py",
-        "apps/workflows/migrations/0004_approval_designated_reviewer.py",
-        "apps/workflows/migrations/0005_paymentapprovalflow.py",
-        "apps/workflows/migrations/0006_paymentapprovalflow_department_keys_and_more.py",
-        "apps/masterdata/migrations/0019_suppliermaster_payment_reminder_days_and_more.py",
-        "apps/masterdata/migrations/0020_supplier_default_tax_rate.py",
-        "apps/supply_chain/migrations/__init__.py",
-        "apps/demo_sync/migrations/__init__.py",
-        "apps/demo_sync/migrations/0001_initial.py",
-        "apps/demo_sync/migrations/0002_register_permissions.py",
-        "apps/demo_sync/migrations/0003_importedsnapshotreceipt.py",
-        "apps/demo_sync/migrations/0004_snapshotbatch_heartbeat_at.py",
-    }
-    assert all((root / name).is_file() for name in unregistered_migrations)
-    registered_digest = sha256()
-    for path in sorted(root.glob("apps/*/migrations/*.py")):
-        name = path.relative_to(root).as_posix()
-        if name not in unregistered_migrations:
-            registered_digest.update(name.encode())
-            contents = path.read_bytes().replace(b"\r\n", b"\n")
-            if name == "apps/development/migrations/0002_product_sales_summary_view.py":
-                # Preserve the archived bytes while allowing only the reviewed
-                # transaction metadata fix, never a view SQL or state change.
-                reviewed_metadata = (
-                    b"class Migration(migrations.Migration):\n"
-                    b"    # MySQL cannot execute view DDL inside RunPython's default transaction.\n"
-                    b"    atomic = False\n"
-                )
-                assert contents.count(reviewed_metadata) == 1
-                contents = contents.replace(
-                    reviewed_metadata, b"class Migration(migrations.Migration):\n", 1
-                )
-            registered_digest.update(contents)
-    assert registered_digest.hexdigest() == archived_migration_sha
     current_digest = migration_digest(root)
-    assert current_digest != archived_migration_sha
+    assert frozen_migration_digest(
+        repo_root, "9fa0d8ac4906c260801541d34585cb2e93eab8d6", tmp_path
+    ) == MIGRATION_SHA
+    assert current_digest != MIGRATION_SHA
     args = valid_args()
     args[-1] = current_digest
-    with pytest.raises(ValueError, match="Unapproved"):
+    with pytest.raises(ValueError):
         make_manifest(*args)
+
+
+def test_development_0002_only_has_reviewed_atomic_metadata_change():
+    repo_root = Path(__file__).resolve().parents[3]
+    release_sha = "9fa0d8ac4906c260801541d34585cb2e93eab8d6"
+    relative = "saas-collab-system/backend/apps/development/migrations/0002_product_sales_summary_view.py"
+    original = subprocess.run(
+        ["git", "show", f"{release_sha}:{relative}"],
+        cwd=repo_root, check=True, capture_output=True,
+    ).stdout.replace(b"\r\n", b"\n")
+    current_path = Path(__file__).resolve().parents[1] / "apps/development/migrations/0002_product_sales_summary_view.py"
+    current = current_path.read_bytes().replace(b"\r\n", b"\n")
+    marker = b"class Migration(migrations.Migration):\n"
+    reviewed = marker + b"    # MySQL cannot execute view DDL inside RunPython's default transaction.\n    atomic = False\n"
+    assert original.count(marker) == 1
+    assert current == original.replace(marker, reviewed, 1)
 
 
 @pytest.mark.parametrize("line_endings", [(b"\n", b"\n"), (b"\r\n", b"\r\n"), (b"\r\n", b"\n")])

@@ -16,7 +16,7 @@ from .models import (CostAdjustment, CostEntry, CostVersion, FeeRecord, FeeRevis
                      InboundOrder, InternalStockReceiptLine, PurchaseContract, PurchaseOrder, SettlementRecord,
                      SettlementRevision, ShipmentLine, SupplierShipment, ShipmentDiscountAdjustment,
                      BusinessEvent, PayeeAccount, domain_write)
-from .cost_models import FeeRevisionItem, PaymentRecord, PaymentApplication
+from .cost_models import FeeRevisionItem, PaymentRecord, PaymentApplication, ShipmentPayableTax
 from .document_time import document_time
 from .payment_item_models import PaymentItem
 from .permissions import MANAGE, VIEW, internal_orders
@@ -380,7 +380,7 @@ def prepare_target_financials(kind, rows):
         for item in line_data:
             if item['shipment_id'] in valid_shipments:
                 due[item['shipment_id']] = None if item['missing'] else (item['total'] or ZERO) + taxes.get(
-                    item['shipment_id'], ZERO) - discounts.get(item['shipment_id'], ZERO)
+                    item['shipment_id'], confirmed_taxes.get(item['shipment_id'], ZERO)) - discounts.get(item['shipment_id'], ZERO)
     elif kind == 'batch':
         active_batches = {row.pk for row in rows if row.status == 'active'}
         for item in FeeRecord.objects.filter(tenant_id=rows[0].tenant_id, batch_id__in=ids).select_related('current_revision'):
@@ -1008,7 +1008,7 @@ def settlement_amount(kind, obj):
             return None
         with localcontext() as ctx:
             ctx.prec = 60
-            gross = sum((money(line.unit_price * line.quantity) for line in lines), ZERO) + contract_payable_tax(obj)
+            gross = sum((money(line.unit_price * line.quantity) for line in lines), ZERO) + shipment_added_tax(obj)
             due = gross - shipment_discount_total(obj)
             if due < ZERO:
                 raise ValidationError('发货单优惠合计超过原应付金额。')
@@ -1246,7 +1246,7 @@ def payment_summary(actor, kind, pk):
         for line in obj.lines.filter(is_active=True).select_related('purchase_line'):
             source_id = line.purchase_line.order_id if line.purchase_line_id else obj.order_id
             source_caps[source_id] = source_caps.get(source_id, ZERO) + (line.quantity * line.unit_price if line.unit_price is not None else ZERO)
-        source_caps = _allocate_source_tax(source_caps, contract_payable_tax(obj))
+        source_caps = _allocate_source_tax(source_caps, shipment_added_tax(obj))
         cross_allocations = dict(BusinessEvent.objects.filter(tenant_id=actor.tenant_id,
             aggregate_type='paymentapplication', action='prepayment_applied',
             aggregate_id__in=[row.pk for row in effective_applications],

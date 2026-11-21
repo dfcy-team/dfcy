@@ -28,7 +28,7 @@ from apps.reports.scopes import report_scope
 from apps.masterdata.models import StoreMaster, WarehouseMaster
 from .advertising_dataset import ADVERTISING_DATASET, ADVERTISING_FILTERS, advertising_queryset
 
-VERSION = "reports-v6-observed-partial-metrics"
+VERSION = "reports-v7-order-and-inventory-coverage"
 MAX_GROUPS = 500
 CACHE_SECONDS = 60
 
@@ -39,8 +39,8 @@ STORE = {"platform": field("平台", "platform__platform_type"), "store_id": fie
 DATASETS = {
     "sales": {"name": "订单销售分析", "module": "销售管理", "permissions": ["sales_management.view", "analytics.view", "sales_management.stores.view"], "report_type": "sales_details", "path": "/sales-management/orders",
         "dimensions": {**STORE, "country": field("国家代码", "region"), "date": field("订单业务日期", "business_date"), "status": field("订单状态", "normalized_status")},
-        "metrics": {"order_count": field("订单总量", Count("pk"), "count"), "valid_order_count": field("非取消订单量", Count("pk", filter=~Q(normalized_status="cancelled")), "count"), "cancelled_order_count": field("取消订单量", Count("pk", filter=Q(normalized_status="cancelled")), "count"), "gross_sales": field("非取消订单销售额", Sum("order_total_amount", filter=~Q(normalized_status="cancelled"), default=Decimal(0)), "money", "订单总金额，不含取消订单；不等于商品行销售额。")},
-        "defaults": {"dimensions": ["store_id", "currency"], "metrics": ["order_count", "valid_order_count", "gross_sales"]}, "note": "订单按店铺时区筛选，金额按原币分组。销售额包含订单运费和税费，不用于计算完整利润。"},
+        "metrics": {"order_count": field("订单总量", Count("pk"), "count"), "valid_order_count": field("非取消订单量", Count("pk", filter=~Q(normalized_status="cancelled")), "count"), "cancelled_order_count": field("取消订单量", Count("pk", filter=Q(normalized_status="cancelled")), "count"), "gross_sales": field("非取消订单金额（含待处理）", Sum("order_total_amount", filter=~Q(normalized_status="cancelled"), default=Decimal(0)), "money", "订单总金额包含待处理等非取消状态，以及订单运费和税费。")},
+        "defaults": {"dimensions": ["store_id", "currency"], "metrics": ["order_count", "valid_order_count", "gross_sales", "pending_order_amount"]}, "note": "订单按店铺时区筛选，金额按原币分组。非取消订单金额包含待处理订单，待处理金额是其中的子集。"},
     "sales_skus": {"name": "SKU 商品销售分析", "module": "销售管理", "permissions": ["sales_management.skus.view", "sales_management.view", "analytics.view"], "report_type": "sales_details", "path": "/sales-management/orders",
         "dimensions": {"platform": field("平台", "sales_order__platform__platform_type"), "store_id": field("店铺", "sales_order__store_id"), "region": field("站点", "sales_order__region"), "country": field("国家代码", "sales_order__region"), "currency": field("币种", "currency"), "date": field("订单业务日期", "sales_order__business_date"), "sku": field("平台 SKU", "seller_sku"), "internal_sku": field("内部 SKU", "internal_sku__sku_code")},
         "metrics": {"order_count": field("非取消订单量", Count("sales_order_id", distinct=True), "count"), "units_sold": field("非取消商品销量", Sum("quantity"), "count"), "gross_sales": field("非取消商品销售额", Sum("line_total_amount"), "money", "商品行金额；不同于订单总金额。"), "unmapped_count": field("未关联商品行数", Count("pk", filter=Q(internal_sku__isnull=True)), "count")},
@@ -62,6 +62,13 @@ DATASETS = {
         "metrics": {"transaction_count": field("流水条数", Count("pk"), "count"), "signed_amount": field("流水净额", Sum("signed_amount"), "money", "保留来源正负号；不是完整利润。"), "unmatched_count": field("未匹配流水数", Count("pk", filter=Q(match_status__in=["unmatched", "conflict"])), "count"), "unknown_count": field("未分类流水数", Count("pk", filter=Q(fee_category="other")), "count")},
         "defaults": {"dimensions": ["fee_category", "currency"], "metrics": ["transaction_count", "signed_amount", "unmatched_count", "unknown_count"]}, "note": "只分析已采集流水，不代表完整结算收入、利润或银行回款。未分类流水须核对来源名称与收支方向后分类。未匹配计数包含匹配冲突。"},
 }
+DATASETS["sales"]["metrics"]["pending_order_amount"] = field(
+    "待处理订单金额",
+    Sum("order_total_amount", filter=Q(normalized_status="pending"), default=Decimal(0)),
+    "money",
+    "仅统计待处理状态，已包含在非取消订单金额中。",
+)
+
 DATASETS["inventory_value"] = {**DATASETS["inventory"], "name": "库存估值与成本覆盖", "module": "财务中心", "report_type": "finance_summary", "extra_permissions": ["finance.view", "products.cost.view"],
     "dimensions": {**DATASETS["inventory"]["dimensions"], "currency": field("成本币种", "cost_currency")},
     "metrics": {**DATASETS["inventory"]["metrics"], "valued_count": field("有已确认成本 SKU 数", Count("pk", filter=Q(unit_cost__isnull=False)), "count"), "missing_cost_count": field("缺已确认成本 SKU 数", Count("pk", filter=Q(unit_cost__isnull=True)), "count"), "zero_cost_count": field("已确认零成本 SKU 数", Count("pk", filter=Q(unit_cost=0)), "count"), "inventory_value": field("已覆盖库存货值", Sum(ExpressionWrapper(F("on_hand_qty") * F("unit_cost"), output_field=DecimalField(max_digits=24, decimal_places=4))), "money", "在手数量乘截止时点、对应仓库的已确认成本；缺成本单列，不按零补齐。")},
@@ -71,6 +78,15 @@ for _metric, _quantity, _label in (("provided_on_hand", "on_hand_qty", "已核�
     _provided = Q(provided_quantity_fields__regex=f'"{_quantity}"')
     DATASETS["inventory"]["metrics"][_metric] = field(_label, Case(When(Exact(Count("pk", filter=_provided), Count("pk")), then=Sum(_quantity)), default=Value(None), output_field=DecimalField(max_digits=24, decimal_places=4)), "count", "仅当该分组全部来源快照提供此数量时显示合计；缺失不补零。")
 DATASETS["inventory"]["metrics"]["provided_out_count"] = field("已核验缺货 SKU 数", Case(When(Exact(Count("pk", filter=Q(provided_quantity_fields__regex='"available_qty"')), Count("pk")), then=Count("pk", filter=Q(available_qty__lte=0))), default=Value(None), output_field=DecimalField(max_digits=24, decimal_places=4)), "count")
+DATASETS["inventory"]["metrics"]["missing_available_count"] = field("缺可用数量的 SKU 数", Count("pk", filter=~Q(provided_quantity_fields__regex='"available_qty"')), "count", "来源未提供可用数量的 SKU 数；真实零值仍视为已提供。")
+DATASETS["inventory"]["metrics"]["missing_on_hand_count"] = field("缺在手数量的 SKU 数", Count("pk", filter=~Q(provided_quantity_fields__regex='"on_hand_qty"')), "count", "来源未提供在手数量的 SKU 数；真实零值仍视为已提供。")
+DATASETS["inventory"]["metrics"]["provided_confirmed_out_count"] = field(
+    "已确认缺货 SKU 数",
+    Count("pk", filter=Q(provided_quantity_fields__regex='"available_qty"', available_qty__lte=0)),
+    "count",
+    "仅统计来源已提供可用量且可用量小于或等于零的 SKU。",
+)
+DATASETS["inventory"]["defaults"]["metrics"] = ["provided_on_hand", "provided_available", "provided_confirmed_out_count", "missing_on_hand_count", "missing_available_count", "unmapped_count"]
 
 FILTER_KEYS = {"date_from", "date_to", "platform", "platforms", "store_id", "store_ids", "region", "currency", "sku", "warehouse_id", "site_code", "include_virtual", "unmapped_only", "inventory_type", "raw_fee_name", "status", "fee_category", "match_status", "external_order_id"}
 DATASET_FILTERS = {

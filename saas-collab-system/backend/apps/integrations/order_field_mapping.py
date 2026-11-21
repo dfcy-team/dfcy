@@ -105,6 +105,8 @@ def enrich_order_fields(platform, raw, canonical):
         observed['raw_status'] = text(raw_status, 80)
     for target, key in (('paid_at_utc', 'pay_time' if platform == 'shopee' else 'paid_time'),
                         ('cancelled_at_utc', 'cancel_time'), ('completed_at_utc', 'complete_time')):
+        if platform == 'tiktok' and target == 'completed_at_utc':
+            continue  # Not present in the verified 202309 order detail contract.
         value = timestamp(raw.get(key))
         if value:
             observed[target] = value
@@ -116,10 +118,28 @@ def enrich_order_fields(platform, raw, canonical):
         observed['shipping_carrier'] = text(carrier, 160)
     if isinstance(raw.get('package_list'), list):
         observed['packages'] = packages(raw['package_list'])
+    if platform in {'shopee', 'lazada', 'tiktok'} and isinstance(raw.get('_platform_logistics'), dict):
+        from .shopee_logistics import safe_snapshot
+        observed['platform_logistics'] = safe_snapshot(raw['_platform_logistics'])
+    if platform == 'lazada':
+        grouped = {}
+        for item in raw.get('order_items') or []:
+            if not isinstance(item, dict):
+                continue
+            package_id = text(item.get('package_id'), 191)
+            tracking = text(item.get('tracking_code'), 191)
+            if not package_id and not tracking:
+                continue
+            key = (package_id, tracking, text(item.get('shipment_provider'), 160))
+            pack = grouped.setdefault(key, {'package_id': package_id, 'tracking_number': tracking,
+                'shipping_carrier': key[2], 'items': []})
+            pack['items'].append({'order_item_id': text(item.get('order_item_id'), 191)})
+        if grouped:
+            observed['packages'] = list(grouped.values())
+            carriers = {pack['shipping_carrier'] for pack in grouped.values() if pack['shipping_carrier']}
+            if len(carriers) == 1:
+                observed['shipping_carrier'] = next(iter(carriers))
     if platform == 'shopee':
-        if isinstance(raw.get('_platform_logistics'), dict):
-            from .shopee_logistics import safe_snapshot
-            observed['platform_logistics'] = safe_snapshot(raw['_platform_logistics'])
         # Platform pickup and shipping deadline are not warehouse outbound facts.
         for target, key in (('platform_pickup_at_utc', 'pickup_done_time'), ('ship_by_at_utc', 'ship_by_date')):
             value = timestamp(raw.get(key))
@@ -131,6 +151,34 @@ def enrich_order_fields(platform, raw, canonical):
         for key in ('split_up', 'actual_shipping_fee_confirmed'):
             if type(raw.get(key)) is bool:
                 observed[key] = raw[key]
+    if platform == 'tiktok':
+        # Official Get Order Detail 202309: SLA deadlines are not event times.
+        for target, key in (('platform_pickup_at_utc', 'collection_time'),
+                            ('platform_shipped_at_utc', 'rts_time'),
+                            ('platform_delivered_at_utc', 'delivery_time')):
+            value = timestamp(raw.get(key))
+            if value:
+                observed[target] = value
+        for target, key in (('payment_method', 'payment_method_name'),
+                            ('shipping_carrier', 'shipping_provider')):
+            if text(raw.get(key), 160):
+                observed[target] = text(raw[key], 160)
+        if type(raw.get('is_buyer_request_cancel')) is bool:
+            observed['is_buyer_request_cancel'] = raw['is_buyer_request_cancel']
+        grouped = {text(row['id'], 191): {'package_id': text(row['id'], 191), 'items': []}
+                   for row in (raw.get('packages') or [])
+                   if isinstance(row, dict) and text(row.get('id'), 191)}
+        for item in raw.get('line_items') or []:
+            if not isinstance(item, dict) or not text(item.get('package_id'), 191):
+                continue
+            identity = text(item['package_id'], 191)
+            pack = grouped.setdefault(identity, {'package_id': identity, 'items': []})
+            if text(item.get('tracking_number'), 191):
+                pack['tracking_number'] = text(item['tracking_number'], 191)
+            if text(item.get('id'), 191):
+                pack['items'].append({'order_item_id': text(item['id'], 191)})
+        if grouped:
+            observed['packages'] = list(grouped.values())
     summary = recipient_summary(raw.get('recipient_address') or raw.get('address_shipping'))
     if summary:
         observed['recipient_summary'] = summary

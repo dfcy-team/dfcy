@@ -1,5 +1,6 @@
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from django.test import override_settings
 from tests.test_country_inventory_decisions import facts, clock
 from apps.commerce.country_decisions import decision_rows
 
@@ -9,7 +10,9 @@ def test_country_read_query_profile(facts):
     assert len(rows) == 1
     assert sum('integrations_historysyncsegment' in q['sql'] for q in queries) == 1
     assert sum('WITH scoped AS' in q['sql'] for q in queries) == 1
-    assert not any('ROW_NUMBER' in q['sql'] for q in queries)
+    # The cloud complete-batch contract selects one latest valid run per
+    # warehouse once, rather than independently ranking every SKU.
+    assert sum('ROW_NUMBER' in q['sql'] for q in queries) == 1
 
 
 def test_full_page_reuses_authorization_branches(facts):
@@ -32,6 +35,7 @@ from django.utils import timezone
 
 
 @pytest.mark.parametrize('run_count,warehouse_count,joined', [(2000,1000,False),(2001,1,True),(1,1001,True)])
+@override_settings(INVENTORY_COMPLETE_BATCH_READS_ENABLED=False)
 def test_country_dimension_thresholds_never_truncate(facts, monkeypatch, run_count, warehouse_count, joined):
     runs = list(range(1, run_count + 1))
     warehouses = list(range(1, warehouse_count + 1))
@@ -46,6 +50,7 @@ def test_country_dimension_thresholds_never_truncate(facts, monkeypatch, run_cou
         assert 'platformintegrationconfig' in sql and 'country_code' in sql
 
 
+@override_settings(INVENTORY_COMPLETE_BATCH_READS_ENABLED=False)
 def test_empty_country_source_ids_do_not_read_inventory(facts, monkeypatch):
     monkeypatch.setattr(SyncRun.objects, 'filter', lambda **kw: SimpleNamespace(values_list=lambda *a, **k: []))
     with CaptureQueriesContext(connection) as queries:

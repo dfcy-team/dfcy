@@ -568,7 +568,7 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mappe
                 for pair in sources & inventory_context['unmapped']) for branch in branches)
         if relevant_unmapped:
             issues.append('unmapped_inventory')
-        complete = bool(warehouse_rows) and (mapped_only or not relevant_unmapped) and all(not r['issues'] for r in warehouse_rows)
+        complete = bool(warehouse_rows) and all(not r['issues'] for r in warehouse_rows)
         available = sum((r.available_qty for r in selected), Decimal(0)) if complete else None
         transit = (sum((r.in_transit_qty for r in selected), Decimal(0)) if selected and
                    all('in_transit_qty' in r.provided_quantity_fields

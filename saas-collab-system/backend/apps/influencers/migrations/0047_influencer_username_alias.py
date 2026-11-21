@@ -3,7 +3,7 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-    dependencies = [("influencers", "0047_outreach_paused_choice")]
+    dependencies = [("influencers", "0046_affiliate_awaiting_payment")]
 
     operations = [
         migrations.CreateModel(

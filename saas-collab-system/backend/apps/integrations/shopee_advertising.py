@@ -288,7 +288,8 @@ class ShopeeAdvertisingAdapter(ProductionReadonlyAdapter):
             row.record_key: row for row in ShopeeAdvertisingRecord.objects.filter(
                 tenant=sync_job.tenant, store=store,
                 record_key__in={record["record_key"] for record in records},
-            )
+            ).only("record_key", "kind", "report_date", "campaign_id", "currency",
+                   "report_timezone", "data", "dimensions")
         }
         return [self._persist_record(sync_job, record, existing) for record in records]
 

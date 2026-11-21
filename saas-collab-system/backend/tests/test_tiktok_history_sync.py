@@ -50,12 +50,31 @@ def test_tiktok_contiguous_bounded_frozen_scope_and_idempotency(tkctx, resource)
     with pytest.raises(ValidationError):
         create_history_batch(user,{**data,'idempotency_key':'different'})
 
-@pytest.mark.parametrize('resource',['advertising_report','platform_product','affiliate_order'])
+@pytest.mark.parametrize('resource',['advertising_report','platform_product'])
 def test_tiktok_unsupported_resource_atomic(tkctx,resource):
     user,job,_=tkctx;job.resource_type=resource;job.save(update_fields=['resource_type'])
     with patch('apps.integrations.history_sync.validate_manual_sync_job'),pytest.raises(ValidationError):
         create_history_batch(user,payload([job]))
     assert not HistorySyncBatch.objects.exists()
+
+
+def test_tiktok_affiliate_history_uses_frozen_store_day_segments(tkctx):
+    user,job,_=tkctx
+    job.resource_type='affiliate_order'
+    job.save(update_fields=['resource_type'])
+    original=job.sync_scope.copy()
+    data=payload([job])
+    data.update(start_date='2026-09-01',end_date='2026-09-02')
+    with patch('apps.integrations.history_sync.validate_manual_sync_job'):
+        batch=create_history_batch(user,data)
+    segments=list(batch.segments.order_by('sequence'))
+    assert len(segments)==2
+    assert [row.scope['tiktok_day_history']['day'] for row in segments]==['2026-09-01','2026-09-02']
+    assert all(row.scope['tiktok_day_history']['authorization']==job.store_authorization_id for row in segments)
+    assert all(row.scope['tiktok_day_history']['store']==job.store_authorization.store_id for row in segments)
+    assert segments[0].scope['time_to']+1==segments[1].scope['time_from']
+    job.refresh_from_db()
+    assert job.sync_scope==original
 
 def test_tiktok_api_capability_and_job_option(tkctx):
     user,job,_=tkctx

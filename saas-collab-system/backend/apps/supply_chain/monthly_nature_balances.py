@@ -6,7 +6,8 @@ from decimal import Decimal, ROUND_HALF_UP
 from .cost_models import ShipmentPayableTax
 from .models import PurchaseContract
 from .cost_models import (PayableClassificationRecord, PaymentClassification, PaymentPlanRecord,
-                          FeeRecord, SettlementRecord, PaymentCurrencyConfirmation)
+                          FeeRecord, SettlementRecord, PaymentCurrencyConfirmation, ShipmentPayableTax)
+from .models import PurchaseContract
 
 ZERO = Decimal('0')
 UNKNOWN = '币种未记录'
@@ -88,7 +89,10 @@ def nature_balances(actor, kind, query, docs, display_payments, purchase_docs, s
     if kind in ('batch','domestic_freight'):
         field = 'freight_terms_snapshot' if kind == 'batch' else 'domestic_terms_snapshot'
         source_currencies = {pk:currency((snapshot or {}).get('currency')) for pk,snapshot in query.values_list('pk',field)}
+    tax_by_id = corporate_tax_breakdown(actor.tenant_id, ids) if kind == 'shipment' else {}
+    zero_rate_ids = set(query.filter(order__supplier__default_tax_rate=0).values_list('pk', flat=True)) if kind == 'shipment' else set()
     grouped = {}
+    corporate_month = {}
     review_parties = set()
 
     def party(obj):
@@ -129,6 +133,14 @@ def nature_balances(actor, kind, query, docs, display_payments, purchase_docs, s
         else: split=[('unknown',due)]
         for nature,amount in split:
             add(obj,cur,nature,'opening_net' if day < start else 'new_payable',amount,obj['number'])
+            if kind == 'shipment' and nature == 'corporate' and day >= start and amount > ZERO:
+                key = (*party(obj), cur, nature, obj['number'] if cur == UNKNOWN else '')
+                net, gross = corporate_month.get(key, (ZERO, ZERO))
+                tax, known_gross = tax_by_id.get(pk, (ZERO, True) if pk in zero_rate_ids else (None, False))
+                corporate_month[key] = (
+                    net + amount - tax if net is not None and tax is not None and tax <= amount else None,
+                    gross + amount if gross is not None and known_gross else None,
+                )
 
     payment_rows = list(display_payments.filter(date__lt=end).select_related('reverses', 'supplier_deposit_transfer'))
     payment_ids = {p.reverses_id or p.pk for p in payment_rows}
@@ -205,9 +217,12 @@ def nature_balances(actor, kind, query, docs, display_payments, purchase_docs, s
                 add(obj,monthly_currency(kind, plan.currency),line.get('nature') if line.get('nature') in NATURES else 'unknown',
                     'current_plan_amount',balance['remaining_amount'],obj['number'])
     result=[]
-    for row in grouped.values():
+    for key, row in grouped.items():
         if all(row[field] == ZERO for field in FIELDS):
             continue
+        if kind == 'shipment' and row['nature'] == 'corporate':
+            net, gross = corporate_month.get(key, (ZERO, ZERO))
+            row.update(corporate_net_amount=net, corporate_gross_amount=gross)
         opening=row.pop('opening_net')
         ending=opening+row['new_payable']-row['paid_amount']-row['historical_paid_amount']-row['transferred_prepayment_amount']
         uncertain=(row['party_type'],row['party_id']) in review_parties

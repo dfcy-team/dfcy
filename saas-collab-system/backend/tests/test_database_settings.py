@@ -7,6 +7,9 @@ from pathlib import Path
 def run_prod_settings_import(env_overrides, python_code=None):
     env = os.environ.copy()
     env.update(env_overrides)
+    # The child verifies production settings, not the pytest parent's local
+    # SQLite module. Direct import alone does not select django.setup()'s module.
+    env["DJANGO_SETTINGS_MODULE"] = "config.settings.prod"
     for name in (
         "DB_ENGINE",
         "DB_NAME",

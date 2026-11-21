@@ -107,6 +107,7 @@ LOCAL_SETTINGS_MODULES = {
     "config.settings.local",
     "config.settings.test",
     "config.settings.testing",
+    "config.settings.settlement_test",
 }
 BLOCKED_SETTINGS_MARKERS = ("prod", "production", "pilot", "sandbox")
 PNG_1X1 = base64.b64decode(

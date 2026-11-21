@@ -3,7 +3,7 @@ import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
-    dependencies = [("integrations", "0063_developer_endpoint_rollback_default")]
+    dependencies = [("integrations", "0062_developer_platform_scope")]
     operations = [
         migrations.AlterField(
             model_name="syncjob", name="resource_type",

@@ -79,7 +79,7 @@ def apply_verified_rename(*, user, influencer_id, token):
 
     Tenant.objects.select_for_update().get(pk=user.tenant_id)
     influencer = get_object_or_404(filter_queryset(
-        user, Influencer.objects.select_for_update().filter(tenant_id=user.tenant_id),
+        user, Influencer.objects.select_for_update().filter(tenant_id=user.tenant_id, is_deleted=False),
         "influencers.manage",
     ), pk=influencer_id)
     if influencer.updated_at.isoformat() != proof["version"] or normalize_tiktok_username(influencer.handle) != proof["old_username"]:

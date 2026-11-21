@@ -9,11 +9,11 @@ from functools import wraps
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
-from django.db.models import Sum
+from django.db.models import Exists, OuterRef, Sum
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from apps.commerce.models import InventorySnapshot, RefundReturn, SalesOrder
+from apps.commerce.models import InventorySnapshot, RefundReturn, SalesOrder, SalesOrderItem
 from apps.commerce.services import upsert_inventory_snapshot
 from apps.sales_management.services import upsert_normalized_order, upsert_normalized_refund
 
@@ -789,28 +789,30 @@ class MarketplaceOrderAdapter(ProductionReadonlyAdapter):
 
     def persist_records(self, sync_job, records):
         run = self._require_run()
+        if not records:
+            return []
         keys = [(str(record["store_id"]), record["source_order_id"]) for record in records]
-        existing_hashes = {
-            (str(store_id), external_id): payload_hash
-            for store_id, external_id, payload_hash in SalesOrder.objects.filter(
+        items = SalesOrderItem.objects.filter(sales_order_id=OuterRef("pk"))
+        existing_orders = {
+            (str(store_id), external_id): (payload_hash, has_items and not has_unmapped_items)
+            for store_id, external_id, payload_hash, has_items, has_unmapped_items in SalesOrder.objects.filter(
                 tenant=sync_job.tenant,
                 store_id__in={store_id for store_id, _external_id in keys},
                 external_order_id__in={external_id for _store_id, external_id in keys},
-            ).values_list("store_id", "external_order_id", "payload_hash")
+            ).annotate(
+                has_items=Exists(items),
+                has_unmapped_items=Exists(items.filter(internal_sku__isnull=True)),
+            ).values_list("store_id", "external_order_id", "payload_hash", "has_items", "has_unmapped_items")
         }
         results = []
-        unmapped_keys = set(SalesOrder.objects.filter(tenant=sync_job.tenant,
-            store_id__in={store_id for store_id, _external_id in keys},
-            external_order_id__in={external_id for _store_id, external_id in keys},
-            items__internal_sku__isnull=True).values_list('store_id', 'external_order_id'))
         for record, key in zip(records, keys):
             payload_hash = str(record.get("payload_hash") or _canonical_payload_hash(record))
-            if existing_hashes.get(key) == payload_hash and (int(key[0]), key[1]) not in unmapped_keys:
+            before_hash, can_skip = existing_orders.get(key, (None, False))
+            if before_hash == payload_hash and can_skip:
                 results.append({"action": "skipped", "idempotency_key": f"{sync_job.id}:{key[1]}"})
                 continue
-            before_hash = existing_hashes.get(key)
             saved = upsert_normalized_order(tenant=sync_job.tenant, payload=record, source_run=run)
-            existing_hashes[key] = saved.payload_hash
+            existing_orders[key] = (saved.payload_hash, can_skip or before_hash is None)
             action = "created" if before_hash is None else "skipped" if before_hash == saved.payload_hash and not getattr(saved, '_sku_link_count', 0) else "updated"
             results.append({"action": action, "idempotency_key": f"{sync_job.id}:{key[1]}"})
         return results
@@ -1397,16 +1399,49 @@ def get_adapter_for_config(config, resource_type=None):
         PlatformChoices.TIKTOK,
     }:
         return MarketplaceRefundAdapter(config)
-    if resource_type == SyncJob.ResourceType.INVENTORY_SNAPSHOT and config.platform == PlatformChoices.JIFENG_WMS:
-        return JifengInventoryAdapter(config)
     if config.platform == PlatformChoices.JIFENG_WMS and resource_type == SyncJob.ResourceType.INBOUND:
         from .jifeng_inbound import JifengInboundAdapter
         return JifengInboundAdapter(config)
+    if resource_type == SyncJob.ResourceType.INVENTORY_SNAPSHOT and config.platform == PlatformChoices.JIFENG_WMS:
+        return JifengInventoryAdapter(config)
+    if resource_type == "warehouse_catalogue" and config.platform == PlatformChoices.BEST_ECAPI:
+        return BestWarehouseCatalogueAdapter(config)
     if resource_type == SyncJob.ResourceType.INVENTORY_SNAPSHOT and config.platform == PlatformChoices.BEST_ECAPI:
         return BestInventoryAdapter(config)
     if resource_type == SyncJob.ResourceType.INBOUND and config.platform == PlatformChoices.BEST_ECAPI:
         return BestInboundAdapter(config)
     return DisabledProductionAdapter()
+
+
+class BestWarehouseCatalogueAdapter(ProductionReadonlyAdapter):
+    """Synchronize provider records into warehouse-scoped catalogue facts."""
+
+    def fetch_page(self, sync_job, cursor_value=None):
+        codes = ((sync_job.sync_scope or {}).get("query") or {}).get("sku_codes")
+        if not isinstance(codes, list) or not codes:
+            raise ValidationError("Warehouse catalogue SKU scope is required.")
+        offset = int(cursor_value or 0)
+        rows, next_offset = self._client().fetch_catalogue_page(offset, codes)
+        return {
+            "records": rows,
+            "next_cursor": str(next_offset) if next_offset is not None else "",
+        }
+
+    def normalize_record(self, record):
+        return record
+
+    def persist_records(self, sync_job, records):
+        from apps.commerce.warehouse_catalogue import upsert_warehouse_catalogue_page
+
+        upsert_warehouse_catalogue_page(
+            authorization=self.warehouse_authorization,
+            rows=records,
+            observed_at=self._require_run().started_at,
+        )
+        return [
+            {"action": "updated", "idempotency_key": f"{sync_job.pk}:{row['sku'].casefold()}"}
+            for row in records
+        ]
 
 
 class BestInventoryAdapter(JifengInventoryAdapter):

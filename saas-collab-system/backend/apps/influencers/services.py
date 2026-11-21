@@ -1,3 +1,4 @@
+from rest_framework.exceptions import PermissionDenied
 import hashlib
 import json
 import logging

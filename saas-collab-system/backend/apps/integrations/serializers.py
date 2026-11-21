@@ -1138,11 +1138,11 @@ class SyncJobSerializer(serializers.ModelSerializer):
             config.platform != "shopee" or (config.platform_config or {}).get("api_type") != "advertising"
         ):
             raise serializers.ValidationError("Shopee 广告任务须选择 Shopee 广告 API 配置。")
-        if "sku_codes" in attrs and (config.platform != "best_ecapi" or resource_type != "inventory_snapshot"):
+        if "sku_codes" in attrs and (config.platform != "best_ecapi" or resource_type not in {"inventory_snapshot", "warehouse_catalogue"}):
             raise serializers.ValidationError({"sku_codes": "此字段仅用于百世库存查询。"})
         if self.instance and "sku_codes" in attrs:
             raise serializers.ValidationError({"sku_codes": "SKU范围与任务游标绑定；请停用原任务并新建范围任务。"})
-        if config.platform == "best_ecapi" and resource_type == "inventory_snapshot":
+        if config.platform == "best_ecapi" and resource_type in {"inventory_snapshot", "warehouse_catalogue"}:
             codes = attrs.get("sku_codes", ((getattr(self.instance, "sync_scope", {}) or {}).get("query") or {}).get("sku_codes"))
             if not codes or len(codes) != len(set(codes)):
                 raise serializers.ValidationError({"sku_codes": "须提供不重复的百世库存SKU范围。"})
@@ -1188,6 +1188,11 @@ class SyncJobSerializer(serializers.ModelSerializer):
         )
         if resource_type == 'warehouse_order_lookup' and (store_authorization_id is not None or warehouse_authorization_id is None):
             raise serializers.ValidationError('订单仓库查询必须绑定具体WMS仓库授权，不绑定平台店铺授权。')
+        if resource_type == "warehouse_catalogue" and (
+            config.platform != "best_ecapi" or config.contract_version != "glink"
+            or config.environment != "production" or not warehouse_authorization_id
+        ):
+            raise serializers.ValidationError("Warehouse catalogue requires a production GLINK warehouse authorization.")
         if store_authorization_id is not None and warehouse_authorization_id is not None:
             raise serializers.ValidationError("A sync job can bind either a store or warehouse authorization, not both.")
         if (

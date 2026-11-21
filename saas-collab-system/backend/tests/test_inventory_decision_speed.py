@@ -99,7 +99,9 @@ def test_inventory_menu_and_calculation_benchmark(facts):
         'paired_baseline_row_fetch_ms':round(median(fetch_baseline)*1000,3),
         'indexed_row_fetch_ms':round(median(fetch_indexed)*1000,3),
         'page_size':20, 'page_median_ms':round(median(timings_page)*1000,3), 'page_sql':counts_page,
-        'page_plan':plan, 'calculation_query_counts': dict(Counter(
+        'page_plan':plan, 'page_query_counts': dict(Counter(
+            sql.split(' FROM ')[-1].split(' ')[0] for sql in page_queries if ' FROM ' in sql)),
+        'calculation_query_counts': dict(Counter(
             sql.split(' FROM ')[-1].split(' ')[0] for sql in calculation_queries if ' FROM ' in sql))}
     target = os.getenv('INVENTORY_SPEED_ARTIFACT')
     if target:
@@ -110,7 +112,11 @@ def test_inventory_menu_and_calculation_benchmark(facts):
     assert max(counts) <= 52
     # A cached page rechecks both supported platform mapping tables in bulk.
     assert sum('integrations_marketplaceproductmapping' in sql or 'listings_platformproductdetail' in sql for sql in page_queries) == 2
-    assert max(counts_page) <= 37
+    # The reconciled cloud ABC contract also reads the tenant's current
+    # observation settings, so disabled/config-pending grades are never stale.
+    # This is one bounded read, not a per-row query allowance.
+    assert sum('masterdata_inventoryobservationsettings' in sql for sql in page_queries) == 1
+    assert max(counts_page) <= 38
     if connection.vendor == 'sqlite':
         assert not any('TEMP B-TREE' in str(row) for row in plan)
         positive_plan = InventoryDecisionRow.objects.filter(view=view,revision=view.revision,

@@ -110,7 +110,7 @@ def test_campaign_endpoint_requires_visible_store_and_reads_real_snapshot(monkey
 
     response = client.get(url, {"report_type": "gmv_max_campaigns", "store_id": mapping.store_id,
         "date_from": "2026-11-01", "date_to": "2026-11-01"})
-    assert response.status_code == 200
+    assert response.status_code == 200, response.data
     assert response.data["data"]["campaigns"][0]["campaign_id"] == "300"
     assert response.data["data"]["campaigns"][0]["cost"] == "7"
 

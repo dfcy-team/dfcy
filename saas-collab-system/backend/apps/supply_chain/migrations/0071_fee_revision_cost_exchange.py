@@ -2,7 +2,7 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-    dependencies = [('supply_chain', '0068_merge_inbound_extra_and_payment_plans')]
+    dependencies = [('supply_chain', '0070_payment_plan_request_links')]
 
     operations = [
         migrations.AddField(

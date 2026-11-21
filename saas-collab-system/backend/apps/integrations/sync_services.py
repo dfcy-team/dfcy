@@ -25,7 +25,7 @@ def _freeze_adapter_scope(adapter_scope):
         "time_from", "time_to", "page_size", "product_full_sync", "product_order_backfill",
         "time_basis", "statuses", "_sync_policy", "_refund_daily_pilot", "start_date", "end_date",
         "report_timezone", "advertising_datasets", "affiliate_plan", "ads_mapping_id",
-        "advertiser_id", "advertiser_timezone", "report_scope", "collection_plan",
+        "advertiser_id", "advertiser_timezone", "report_scope", "collection_plan", "gmv_max_plan",
         "warehouse_order_limit", "warehouse_country_code",
     )
     return {
@@ -210,7 +210,7 @@ def enqueue_sync_run(sync_job, idempotency_key=None):
         ), now).exists():
             raise ValidationError("任务正在排队或运行，请勿重复提交。")
         ads_log = {}
-        if locked_job.ads_mapping_id:
+        if locked_job.ads_mapping_id and locked_job.resource_type == "advertising_report":
             from .ads_sync import resolve_scope
             ads_log = {"runtime_budget": {"resolved_scope": resolve_scope(locked_job.ads_mapping, locked_job.sync_scope)}}
         run = SyncRun.objects.create(
@@ -259,8 +259,15 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
     )
     if history_segment:
         from .history_sync import history_validation_job
+        from .history_tiktok_collection import TIKTOK_DAY_RESOURCES
+
         adapter.validate_configuration(history_validation_job(sync_job, history_segment))
-        if not sync_job.ads_mapping_id:
+        if sync_job.resource_type in TIKTOK_DAY_RESOURCES:
+            # Preserve the adapter's collection plan and record its actual day.
+            adapter.scope.update({
+                key: history_segment.scope[key] for key in ("time_from", "time_to", "time_basis")
+            })
+        elif not sync_job.ads_mapping_id:
             adapter.scope = dict(history_segment.scope)
     else:
         if sync_job.resource_type == "video_metrics":
@@ -315,12 +322,16 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             if locked_dispatch.status != "running":
                 raise ValidationError("派发已终止或已创建执行，不能重复执行。")
 
-        checkpoint = None if history_segment else SyncCheckpoint.objects.filter(tenant=locked_job.tenant, sync_job=locked_job).first()
+        gmv_job = locked_job.resource_type == "gmv_max_report"
+        if gmv_job and not idempotency_key:
+            idempotency_key = uuid.uuid4().hex
+        checkpoint = None if history_segment or gmv_job else SyncCheckpoint.objects.filter(tenant=locked_job.tenant, sync_job=locked_job).first()
         checkpoint_cursor = (checkpoint.cursor_json or {}).get("default", "") if checkpoint else ""
         cursor, _created = SyncCursor.objects.get_or_create(
             tenant=locked_job.tenant,
             sync_job=locked_job,
-            cursor_key=f"history:{history_segment.pk}" if history_segment else "default",
+            cursor_key=(f"history:{history_segment.pk}" if history_segment else
+                        "gmv:" + hashlib.sha256(idempotency_key.encode()).hexdigest() if gmv_job else "default"),
             defaults={"cursor_value": str(checkpoint_cursor or "")},
         )
         idempotency_key = idempotency_key or f"{locked_job.id}:{cursor.cursor_value or 'initial'}"
@@ -407,8 +418,9 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
     adapter.bind_run(run)
     rejected_auth_token = None
     if sync_job.resource_type == "inventory_snapshot" and sync_job.warehouse_authorization_id:
-        authorization = getattr(adapter, "warehouse_authorization", None) or sync_job.warehouse_authorization
-        rejected_auth_token = authorization.token_id
+        rejected_auth_token = getattr(getattr(adapter, "warehouse_authorization", None), "token_id", None)
+        if rejected_auth_token is None:
+            rejected_auth_token = sync_job.warehouse_authorization.token_id
 
     schedule = (sync_job.sync_scope or {}).get("schedule", {})
     budget_seconds = 240 if history_segment else int(schedule.get("execution_budget_seconds") or 0)
@@ -430,7 +442,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
         frozen_scope = runtime_budget.get("resolved_scope")
         if hasattr(adapter, "scope"):
             adapter.scope = dict(frozen_scope)
-    if sync_job.ads_mapping_id and dispatch and dispatch.schedule_snapshot.get("ads_scope"):
+    if sync_job.resource_type == "advertising_report" and sync_job.ads_mapping_id and dispatch and dispatch.schedule_snapshot.get("ads_scope"):
         adapter.scope = dict(dispatch.schedule_snapshot["ads_scope"])
     adapter_scope = getattr(adapter, "scope", {})
     # Live clients expose only these provider-neutral query controls. Never

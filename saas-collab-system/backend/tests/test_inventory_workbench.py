@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from apps.commerce.models import InventorySnapshot
+from apps.integrations.models import WarehouseAuthorization
 from apps.masterdata.models import WarehouseMaster
 from apps.permissions.models import DataScope
 from apps.products.models import ProductSKU, ProductSPU
@@ -30,7 +31,28 @@ def test_observed_days_use_one_scoped_query_and_keep_utc_midnight():
     assert len(observed) == 1
 
 
+def _publish_run(tenant, warehouse, run, at):
+    # The current workbench reads published complete warehouse batches.
+    job = run.sync_job
+    if not job.warehouse_authorization_id:
+        owner = job.integration_config.created_by
+        job.warehouse_authorization = WarehouseAuthorization.objects.create(
+            tenant=tenant, warehouse=warehouse, integration_config=job.integration_config,
+            provider='jifeng_wms', external_warehouse_code=f'{warehouse.code}-{job.pk}',
+            external_warehouse_region=warehouse.country_code, status='active',
+            created_by=owner, updated_by=owner,
+        )
+        job.save(update_fields=['warehouse_authorization'])
+    run.status = 'success'
+    run.finished_at = max(run.finished_at or at, at)
+    if 'decision_source' not in (run.masked_log or {}):
+        run.masked_log = {**(run.masked_log or {}), 'decision_source': {'started_from_initial_cursor': True,
+            'ended_without_cursor': True, 'all_records_valid': True}}
+    run.save(update_fields=['status', 'finished_at', 'masked_log'])
+
+
 def _snapshot(tenant, warehouse, run, sku, at, available, *, reserved=0, on_hand=None, internal_sku=None):
+    _publish_run(tenant, warehouse, run, at)
     return InventorySnapshot.objects.create(
         tenant=tenant,
         warehouse=warehouse,
@@ -42,6 +64,7 @@ def _snapshot(tenant, warehouse, run, sku, at, available, *, reserved=0, on_hand
         on_hand_qty=available if on_hand is None else on_hand,
         available_qty=available,
         reserved_qty=reserved,
+        provided_quantity_fields=['available_qty', 'on_hand_qty', 'reserved_qty', 'in_transit_qty'],
         payload_hash="f" * 64,
     )
 
@@ -193,8 +216,10 @@ def test_workbench_focus_filters_before_limit_without_changing_overview():
             on_hand_qty=0, available_qty=0, payload_hash="f" * 64,
         ) for index in range(55)
     ])
-    _snapshot(tenant, other_warehouse, run, "TARGET-ONE", NOW, 0)
-    _snapshot(tenant, other_warehouse, run, "TARGET-TWO", NOW, 2)
+    _publish_run(tenant, warehouse, run, NOW)
+    other_run = create_run(tenant, "inventory_snapshot", "workbench-filter-other", platform="jifeng_wms")
+    _snapshot(tenant, other_warehouse, other_run, "TARGET-ONE", NOW, 0)
+    _snapshot(tenant, other_warehouse, other_run, "TARGET-TWO", NOW, 2)
 
     unfiltered = client.get(URL).json()["data"]
     assert unfiltered["focus_total"] == 57

@@ -3,7 +3,7 @@ import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
-    dependencies = [("influencers", "0050_requirement_feedback")]
+    dependencies = [("influencers", "0048_requirement_feedback")]
     operations = [migrations.CreateModel(
         name="InfluencerRequirementImage",
         fields=[

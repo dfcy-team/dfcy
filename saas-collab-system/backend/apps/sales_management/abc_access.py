@@ -16,7 +16,11 @@ def published_run(actor, country):
     latest = runs.annotate(
         policy_priority=Case(When(status__in=("queued", "building"), then=Value(0)), When(current_policy, then=Value(1)), default=Value(2))
     ).order_by("policy_priority", "-created_at", "-pk").first()
-    latest_composite = latest if latest and latest.config.get("classification_basis") == "composite" and latest.config.get("policy_version") == ABC_POLICY_VERSION else None
+    # Without an active task, policy priority already selected the newest
+    # current-policy run. Only active tasks can hide newer diagnostic state.
+    latest_composite = latest if latest and latest.policy_priority == 1 else None
+    if latest and latest.policy_priority == 0:
+        latest_composite = runs.filter(current_policy).order_by("-created_at", "-pk").first()
     settings = InventoryObservationSettings.objects.filter(tenant_id=actor.tenant_id).first()
     enabled = settings.abc_enabled if settings else True
     run = None

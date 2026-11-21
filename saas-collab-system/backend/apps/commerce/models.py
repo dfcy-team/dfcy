@@ -646,3 +646,24 @@ class RefundReturnItem(ValidatedWriteModel):
                 errors["external_order_item_id"] = "External order item ID must match the linked order item."
         if errors:
             raise ValidationError(errors)
+
+
+class WarehouseCatalogueItem(models.Model):
+    """Provider catalogue record anchored to the tenant-owned warehouse."""
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
+    warehouse = models.ForeignKey("masterdata.WarehouseMaster", on_delete=models.PROTECT)
+    source_sku_key = models.CharField(max_length=128)
+    source_sku = models.CharField(max_length=64)
+    internal_sku = models.ForeignKey("products.ProductSKU", on_delete=models.PROTECT, null=True, blank=True)
+    mapping_rule = models.CharField(max_length=64)
+    source_data = models.JSONField()
+    observed_at = models.DateTimeField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant", "warehouse", "source_sku_key"),
+                name="commerce_warehouse_catalogue_identity",
+            ),
+        ]

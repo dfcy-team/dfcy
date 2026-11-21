@@ -64,7 +64,7 @@ class _Response:
 
 
 @pytest.mark.django_db
-def test_bulk_image_cache_updates_old_and_new_sku_and_is_idempotent(monkeypatch):
+def test_bulk_image_cache_updates_old_and_new_sku_and_is_idempotent(monkeypatch, tmp_path):
     tenant = Tenant.objects.create(name="Image tenant", code="image-tenant")
     user = _user(tenant, "image-user")
     spu = ProductSPU.objects.create(tenant=tenant, spu_code="IMG-SPU", product_name="SPU")
@@ -87,7 +87,7 @@ def test_bulk_image_cache_updates_old_and_new_sku_and_is_idempotent(monkeypatch)
         "apps.products.views._NO_REDIRECT_OPENER.open",
         lambda request, timeout: (opened.append(request.full_url) or _Response(content)),
     )
-    media_root = Path(__file__).resolve().parents[1] / ".test-product-image-cache"
+    media_root = tmp_path / "product-image-cache"
     media_root.mkdir(parents=True, exist_ok=True)
     with override_settings(MEDIA_ROOT=media_root):
         client = APIClient()
@@ -143,7 +143,7 @@ def test_bulk_image_cache_updates_old_and_new_sku_and_is_idempotent(monkeypatch)
 
 
 @pytest.mark.django_db
-def test_bulk_image_cache_returns_partial_errors_and_rejects_private_hosts(monkeypatch):
+def test_bulk_image_cache_returns_partial_errors_and_rejects_private_hosts(monkeypatch, tmp_path):
     tenant = Tenant.objects.create(name="Image security tenant", code="image-security")
     user = _user(tenant, "image-security-user")
     spu = ProductSPU.objects.create(tenant=tenant, spu_code="SEC-SPU", product_name="SPU")
@@ -152,7 +152,7 @@ def test_bulk_image_cache_returns_partial_errors_and_rejects_private_hosts(monke
         "apps.products.views.socket.getaddrinfo",
         lambda *args, **kwargs: [(2, 1, 6, "", ("127.0.0.1", 80))],
     )
-    media_root = Path(__file__).resolve().parents[1] / ".test-product-image-cache-security"
+    media_root = tmp_path / "product-image-cache-security"
     media_root.mkdir(parents=True, exist_ok=True)
     with override_settings(MEDIA_ROOT=media_root):
         client = APIClient()
@@ -174,7 +174,7 @@ def test_bulk_image_cache_returns_partial_errors_and_rejects_private_hosts(monke
 
 
 @pytest.mark.django_db
-def test_bulk_image_cache_is_reflected_by_detail_rows_for_all_target_types(monkeypatch):
+def test_bulk_image_cache_is_reflected_by_detail_rows_for_all_target_types(monkeypatch, tmp_path):
     """Cached images must be visible through the same detail API the UI reads.
 
     A generated legacy bridge can be targeted by its new SKU code.  In that
@@ -227,7 +227,7 @@ def test_bulk_image_cache_is_reflected_by_detail_rows_for_all_target_types(monke
         "apps.products.views._NO_REDIRECT_OPENER.open",
         lambda request, timeout: _Response(content),
     )
-    media_root = Path(__file__).resolve().parents[1] / ".test-product-image-cache-detail"
+    media_root = tmp_path / "product-image-cache-detail"
     media_root.mkdir(parents=True, exist_ok=True)
     with override_settings(MEDIA_ROOT=media_root):
         client = APIClient()

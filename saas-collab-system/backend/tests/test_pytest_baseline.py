@@ -10,8 +10,14 @@ from apps.tenants.models import Tenant
 from tests.factories import create_internal_user, create_rpa_agent, create_tenant
 
 
-def test_django_settings_module_is_dev():
-    assert settings.SETTINGS_MODULE == "config.settings.dev"
+def test_django_settings_module_is_an_explicit_local_profile():
+    assert settings.SETTINGS_MODULE in {"config.settings.dev", "config.settings.settlement_test"}
+    if settings.SETTINGS_MODULE == "config.settings.settlement_test":
+        assert settings.DATABASES['default']['ENGINE'] == 'django.db.backends.sqlite3'
+        assert settings.CELERY_BROKER_URL == 'memory://'
+        assert settings.LIVE_PLATFORM_SECURITY_APPROVED is False
+        assert settings.LIVE_READONLY_SYNC_ENABLED is False
+        assert settings.LIVE_CUSTODY_BACKEND == 'refuse'
 
 
 def test_django_configuration_check_passes():

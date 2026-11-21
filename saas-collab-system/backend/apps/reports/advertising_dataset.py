@@ -242,12 +242,13 @@ ADVERTISING_DATASET = {
         "direct_gmv": _field("直接归因 GMV", _observed_sum("direct_gmv"), "money", "仅直接归因；不可与广泛归因相加。"),
         "broad_gmv": _field("广泛归因 GMV", _observed_sum("broad_gmv"), "money", "仅广泛归因；不可与直接归因相加。"),
         "record_count": _field("日报记录数", Count("pk"), "count"),
+        "expense_observed_count": _field("有效消耗记录数", Count(_metric("expense")), "count", "含真实零消耗。与日报记录数比较可发现已到记录中的缺失或无效消耗。"),
     },
     "defaults": {
         "dimensions": ["date", "store_id", "currency"],
-        "metrics": ["expense", "impressions", "clicks", "direct_gmv", "broad_gmv", "record_count"],
+        "metrics": ["expense", "impressions", "clicks", "direct_gmv", "broad_gmv", "record_count", "expense_observed_count"],
     },
-    "note": "按目前已拉取的有效指标暂估；部分数据可能尚未拉取或字段缺失，后续同步可能调整。完全缺失的指标留空，不作为零。仅聚合店铺级日报；不会混合小时、活动或周期数据。币种必须分组。Shopee 归因窗口为 7 天，最近 7 天数据可能回补。直接与广泛归因 GMV 分开呈现，不能相加。",
+    "note": "合计按已拉取的有效指标暂估。到报覆盖率未知。计算覆盖率需要完整的应报店铺日清单。有效消耗记录数少于日报记录数时，消耗合计仅覆盖部分已到记录。完全缺失的指标留空，不作为零。仅聚合店铺级日报；不会混合小时、活动或周期数据。币种必须分组。Shopee 归因窗口为 7 天，最近 7 天数据可能回补。直接与广泛归因 GMV 分开呈现，不能相加。",
 }
 
 ADVERTISING_FILTERS = ["date_from", "date_to", "currency", "store_id", "store_ids", "country", "storecountry", "region", "platform", "platforms"]

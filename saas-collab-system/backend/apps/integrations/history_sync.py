@@ -1,4 +1,4 @@
-"""Durable one-shot Shopee history outbox, isolated from incremental watermarks."""
+"""Durable one-shot history outbox, isolated from incremental watermarks."""
 import hashlib
 import json
 from copy import copy
@@ -15,6 +15,8 @@ from apps.permissions.services import check_user_permission, get_permission_data
 from apps.common.module_gate import is_module_enabled
 from .models import HistorySyncBatch, HistorySyncSegment, HistorySyncTaskControl, IntegrationAuditLog, SyncCursor, SyncJob, SyncRun
 from .history_schedule import blocking_runs, history_task_gate, history_authorizer, pause_for_permission, validate_execution_policy
+from .history_tiktok_collection import TIKTOK_DAY_RESOURCES, apply_tiktok_day_scope, tiktok_day_scopes
+from .history_tiktok_collection import video_history_day_expired
 from .security import sanitize_text
 from .sync_services import _run_id, validate_manual_sync_job
 
@@ -40,6 +42,8 @@ def history_execution_allowed(segment):
 
 def history_validation_job(job, segment):
     candidate = copy(job)
+    if job.resource_type in TIKTOK_DAY_RESOURCES:
+        return apply_tiktok_day_scope(candidate, segment.scope)
     if job.resource_type == "advertising_report":
         query = segment.scope.get("history_query")
         if not isinstance(query, dict):
@@ -139,6 +143,7 @@ def _range_snapshot(batch, segments, now):
     reason = (
         "批次缺少可调整的分段，请先核对运行记录。" if not segments else
         "广告批次按已冻结的日期续跑；追加日期请在当前补采结束后另建补采。" if any(job.resource_type == "advertising_report" for job in jobs.values()) else
+        "联盟订单和视频批次按已冻结的店铺自然日续跑；追加日期请另建补采。" if any(job.resource_type in TIKTOK_DAY_RESOURCES for job in jobs.values()) else
         "退款小批次使用已冻结的20条分页和1天分段；当前不支持调整范围，请在受支持的恢复流程中处理。" if custom_refund_policy or custom_tiktok_refund_policy else
         "运行中的批次请先暂停，再调整补采范围。" if batch.status == "running" else
         "只有暂停或已结束的批次可以调整补采范围。" if batch.status not in {"paused", "completed", "failed"} else
@@ -240,7 +245,7 @@ def create_history_batch(user, payload):
         raise ValidationError("当前仅支持退款小批次预设：refund_page_size=20、refund_segment_days=1。")
     ids = payload.get("job_ids")
     if not isinstance(ids, list) or not 1 <= len(ids) <= 100 or any(type(pk) is not int or pk < 1 for pk in ids):
-        raise ValidationError("请选择 1～100 个店铺订单任务。")
+        raise ValidationError("请选择 1～100 个同步任务。")
     ids = sorted(set(ids))
     key = str(payload.get("idempotency_key") or "").strip()
     name = str(payload.get("name") or "Shopee 历史补采").strip()
@@ -292,15 +297,23 @@ def create_history_batch(user, payload):
             raise ValidationError("所选店铺已有未结束的历史补采批次，请先继续或处理该批次。")
         batch = HistorySyncBatch.objects.create(tenant_id=user.tenant_id, created_by=user, name=name,
             idempotency_key=key, request_hash=fingerprint, start_date=start_day, end_date=end_day)
+        day_jobs = sum(job.resource_type in TIKTOK_DAY_RESOURCES for job in jobs)
+        if day_jobs and ((end_day - start_day).days + 1) * day_jobs > 3100:
+            raise ValidationError("联盟订单和视频补采单次最多生成 3100 个自然日分段。")
+        day_policy = policy if "execution_policy" in payload else {
+            "mode": "night", "timezone": "Asia/Shanghai", "start_time": "20:00", "end_time": "06:00",
+        }
         segments = []
         for job in jobs:
             platform = job.integration_config.platform
             shopee_resource = platform == "shopee" and job.resource_type in {"sales_order", "refund_return", "settlement_bill", "advertising_report"}
-            tiktok_resource = platform == "tiktok" and job.resource_type in {"sales_order", "refund_return", "settlement_bill"}
+            tiktok_resource = platform == "tiktok" and job.resource_type in (
+                {"sales_order", "refund_return", "settlement_bill"} | TIKTOK_DAY_RESOURCES
+            )
             tiktok_ads = platform == "tiktok" and job.resource_type == "advertising_report" and bool(job.ads_mapping_id)
             authorized_shop_job = bool(job.store_authorization_id) and not job.ads_mapping_id
             if not (shopee_resource and authorized_shop_job or tiktok_resource and authorized_shop_job or tiktok_ads and not job.store_authorization_id):
-                raise ValidationError("仅支持已授权 Shopee 店铺的销售、退款、结算和广告任务、已授权 TikTok 店铺的销售、退款、结算任务，以及映射授权的 TikTok BASIC 广告任务。")
+                raise ValidationError("仅支持已授权 Shopee 店铺的销售、退款、结算和广告任务、已授权 TikTok 店铺的销售、退款、结算、联盟订单和视频任务，以及映射授权的 TikTok BASIC 广告任务。")
             if not job.is_enabled or job.status == "disabled":
                 raise ValidationError(f"{shop_name(job)}：请先启用同步任务。")
             if job.resource_type == "advertising_report":
@@ -315,6 +328,13 @@ def create_history_batch(user, payload):
                 for sequence, scope in enumerate(scopes, 1):
                     segment = HistorySyncSegment(batch=batch, sync_job=job, sequence=sequence, scope=scope)
                     validate_manual_sync_job(history_validation_job(job, segment), live_only=True)
+                    segments.append(segment)
+                continue
+            if job.resource_type in TIKTOK_DAY_RESOURCES:
+                for sequence, scope in enumerate(tiktok_day_scopes(job, start_day, end_day, now), 1):
+                    segment = HistorySyncSegment(batch=batch, sync_job=job, sequence=sequence, scope=scope)
+                    if sequence == 1:
+                        validate_manual_sync_job(history_validation_job(job, segment), live_only=True)
                     segments.append(segment)
                 continue
             cursor, sequence = start, 1
@@ -336,10 +356,12 @@ def create_history_batch(user, payload):
                 cursor, sequence = stop + 1, sequence + 1
         HistorySyncSegment.objects.bulk_create(segments)
         HistorySyncTaskControl.objects.bulk_create([
-            HistorySyncTaskControl(batch=batch, sync_job=job, execution_policy=policy,
+            HistorySyncTaskControl(batch=batch, sync_job=job,
+                                   execution_policy=day_policy if job.resource_type in TIKTOK_DAY_RESOURCES else policy,
                                    authorized_by=user, authority_assigned=True) for job in jobs
         ])
         _audit(batch, user, jobs, "create", {"execution_policy": policy, "advertising_datasets": normalized.get("advertising_datasets", []),
+            **({"tiktok_day_execution_policy": day_policy} if day_jobs else {}),
             **({"refund_page_size": 20, "refund_segment_days": 1} if refund_policy_requested else {})})
         return batch
 
@@ -386,6 +408,8 @@ def batch_action(batch, user, action, payload=None):
                 job = job_map[segment.sync_job_id]
                 if not job.is_enabled or job.status == "disabled":
                     continue
+                if video_history_day_expired(job, segment.scope, timezone.now()):
+                    continue
                 try:
                     validate_manual_sync_job(history_validation_job(job, segment), live_only=True)
                 except ValidationError:
@@ -428,6 +452,8 @@ def dispatch_history_segments(enqueue, now=None, limit=20, delivery_snapshot=Non
             break
         with transaction.atomic():
             job = SyncJob.objects.select_for_update().get(pk=job_id)
+            from .scheduler import paused_until
+            pause = paused_until(job)
             segments = HistorySyncSegment.objects.filter(sync_job=job, batch__status="running").order_by("batch_id", "sequence")
             # Reconcile terminal runs after worker loss or a committed run followed by process death.
             for segment in segments.filter(status__in=["queued", "running"]).select_for_update():
@@ -459,6 +485,11 @@ def dispatch_history_segments(enqueue, now=None, limit=20, delivery_snapshot=Non
                     if candidate.batch_id not in gates:
                         gates[candidate.batch_id] = history_task_gate(candidate.batch, job.pk, now)["allowed"]
                     if gates[candidate.batch_id]:
+                        if (job.is_enabled and job.status not in {"running", "disabled"}
+                                and not (job.lock_expires_at and job.lock_expires_at > now)
+                                and not (pause and pause > now)
+                                and _expire_unstarted_video_segment(job, candidate, now)):
+                            continue
                         segment = candidate
                         break
             if not segment or not job.is_enabled or job.status in {"running", "disabled"} or (job.lock_expires_at and job.lock_expires_at > now):
@@ -468,8 +499,6 @@ def dispatch_history_segments(enqueue, now=None, limit=20, delivery_snapshot=Non
             if not history_execution_allowed(segment):
                 pause_for_permission(segment)
                 continue
-            from .scheduler import paused_until
-            pause = paused_until(job)
             if pause and pause > now:
                 continue
             if blocking_runs(job.runs.filter(status__in=["queued", "running"]).exclude(history_segment=segment)
@@ -575,3 +604,26 @@ def batch_data(batch, visible_job_ids, manageable_job_ids=None):
     for field in ["total_segments", "success_segments", "failed_segments", "superseded_segments", "fetched_count"]:
         result[field] = sum(item[field] for item in shops.values())
     return result
+
+
+def _expire_unstarted_video_segment(job, segment, now):
+    """Record a permanent date-window failure without calling the platform."""
+    if segment.status != "pending" or not video_history_day_expired(job, segment.scope, now):
+        return False
+    if segment.runs.filter(status__in=["queued", "running"]).exists():
+        return False
+    if not history_execution_allowed(segment):
+        return False
+    _, created = SyncRun.objects.get_or_create(
+        tenant_id=job.tenant_id, sync_job=job, idempotency_key=f"history:{segment.pk}:{segment.attempt}",
+        defaults={"history_segment": segment, "run_id": _run_id(), "status": "failed", "finished_at": now,
+                  "error_code": "VIDEO_HISTORY_DAY_EXPIRED",
+                  "masked_error_message": "目标日期已超出店铺当地最近30个完整自然日。",
+                  "masked_log": {"trigger_type": "history", "history_segment_id": segment.pk}},
+    )
+    if not created:
+        return False
+    segment.status = "failed"
+    segment.save(update_fields=["status"])
+    update_batch_status(segment.batch_id)
+    return True

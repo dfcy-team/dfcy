@@ -2,7 +2,7 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-    dependencies = [("influencers", "0048_influencer_username_alias")]
+    dependencies = [("influencers", "0047_influencer_username_alias")]
     operations = [
         migrations.AddField(
             model_name="outreachtask",

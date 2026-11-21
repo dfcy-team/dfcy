@@ -71,11 +71,17 @@ def sync_source_health(sync_job):
 def _source_health(sync_job, selected_sources=None):
     if sync_job.ads_mapping_id:
         from .ads_sync import load_mapping, validate_mapping
+        gmv = sync_job.resource_type == "gmv_max_report"
+        code = "GMV_MAX" if gmv else "ADS_SPEND"
         try:
-            validate_mapping(load_mapping(sync_job))
+            mapping = load_mapping(sync_job)
+            validate_mapping(mapping)
+            if gmv:
+                from .gmv_max_sync import shop_authorization
+                shop_authorization(mapping)
         except Exception:
-            return {"state": "capability_missing", "capability_code": "ADS_SPEND", "source_priority": None}
-        return {"state": "ready", "capability_code": "ADS_SPEND", "source_priority": None}
+            return {"state": "capability_missing", "capability_code": code, "source_priority": None}
+        return {"state": "ready", "capability_code": code, "source_priority": None}
     if not sync_job.store_authorization_id or sync_job.resource_type == SyncJob.ResourceType.MOCK_RECORD:
         return {"state": "not_required", "capability_code": "", "source_priority": None}
     code = RESOURCE_CAPABILITY.get(sync_job.resource_type)

@@ -8,7 +8,8 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('influencers', '0049_outreachtask_dispatch_requirements'),
+        ('influencers', '0047_influencer_username_alias'),
+        ('influencers', '0044_outreachtask_dispatch_requirements'),
         ('tenants', '0002_department_leader_and_more'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]

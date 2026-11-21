@@ -94,3 +94,23 @@ def test_another_actor_cannot_use_preview(records):
     user, _, _, influencer, _, _, _ = records
     _, another = user_with_permissions(user.tenant, "other-renamer", "influencers.view", "influencers.manage")
     assert apply(another, influencer, preview(records)["token"]).status_code == 403
+
+
+def test_soft_deleted_influencer_cannot_be_renamed_with_preissued_proof(records):
+    user, client, _, influencer, profile, account, _ = records
+    token = preview(records)["token"]
+    influencer.status = Influencer.Status.INACTIVE
+    influencer.is_deleted = True
+    influencer.deleted_at = timezone.now()
+    influencer.save(update_fields=["status", "is_deleted", "deleted_at"])
+
+    response = apply(client, influencer, token)
+    assert response.status_code == 404
+    influencer.refresh_from_db()
+    profile.refresh_from_db()
+    account.refresh_from_db()
+    assert influencer.handle == "old.name" and influencer.is_deleted
+    assert account.handle == "old.name"
+    assert profile.display_name == "Old name"
+    assert not InfluencerUsernameAlias.objects.exists()
+    assert not OperationLog.objects.filter(action="verified_tiktok_username_rename").exists()

@@ -6,11 +6,13 @@ from django.db.models.functions import RowNumber
 from apps.integrations.models import SyncRun
 
 
-def published_inventory_filter(tenant_id, *, country_code=None, as_of=None):
+def _latest_complete_inventory_runs(tenant_id, *, country_code=None, as_of=None):
     warehouse = "sync_job__warehouse_authorization__warehouse"
     runs = SyncRun.objects.filter(
         tenant_id=tenant_id, status="success", failed_count=0, finished_at__isnull=False,
         sync_job__resource_type="inventory_snapshot",
+        sync_job__tenant_id=tenant_id,
+        sync_job__integration_config__tenant_id=tenant_id,
         sync_job__integration_config__platform="jifeng_wms",
         sync_job__warehouse_authorization__tenant_id=tenant_id,
         **{f"{warehouse}__tenant_id": tenant_id},
@@ -28,6 +30,19 @@ def published_inventory_filter(tenant_id, *, country_code=None, as_of=None):
             order_by=[F("finished_at").desc(), F("pk").desc()],
         ),
     ).filter(warehouse_rank=1).order_by()
+    return latest
+
+
+def latest_complete_inventory_runs(tenant_id, country_code=None, *, as_of=None):
+    """Cloud warning callers share the same strict, time-bounded run selector."""
+    return list(_latest_complete_inventory_runs(
+        tenant_id, country_code=country_code, as_of=as_of,
+    ).values_list("pk", flat=True))
+
+
+def published_inventory_filter(tenant_id, *, country_code=None, as_of=None):
+    warehouse = "sync_job__warehouse_authorization__warehouse"
+    latest = _latest_complete_inventory_runs(tenant_id, country_code=country_code, as_of=as_of)
     scope = Q(pk__in=[])
     for run_id, warehouse_id in latest.values_list("pk", f"{warehouse}_id"):
         scope |= Q(source_run_id=run_id, warehouse_id=warehouse_id)

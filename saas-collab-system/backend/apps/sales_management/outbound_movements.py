@@ -52,7 +52,8 @@ def shipment_projection(packages, *, site_code):
             for item in package.get("items") or []:
                 warehouse_sku = str(item.get("warehouse_sku") or "").strip()
                 source_sku = str(item.get("sku") or "").strip()
-                quantity = str(item.get("quantity") or "").strip()
+                raw_quantity = item.get("quantity")
+                quantity = "" if raw_quantity is None else str(raw_quantity).strip()
                 if not (warehouse_sku or source_sku):
                     continue
                 if not quantity.isascii() or not quantity.isdecimal() or len(quantity) > 18:

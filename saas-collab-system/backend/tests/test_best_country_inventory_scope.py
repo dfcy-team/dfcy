@@ -198,7 +198,7 @@ def test_provider_scopes_keep_authorized_in_transit_at_unobserved_warehouses(wor
     country = world['country']
     sku = world['sku']
     observed = warehouse(facts, 'Observed warehouse', country='US')
-    snapshot(facts, observed, sku, 'jifeng-observed', provider=decisions.JIFENG)
+    snapshot(facts, observed, sku, 'jifeng-observed', provider=decisions.JIFENG, bind=True, published=True)
     authorized = warehouse(facts, 'Authorized manual warehouse', country='US')
     other = warehouse(facts, 'Other manual warehouse', country='US')
     assigned_batches = {}

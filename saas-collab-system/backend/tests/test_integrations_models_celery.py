@@ -114,6 +114,11 @@ def test_api_sync_task_enums_are_limited_to_sync_center_scope():
 
 
 def test_celery_is_configured_with_redis_broker():
-    assert settings.CELERY_BROKER_URL.startswith("redis://")
-    assert app.conf.broker_url.startswith("redis://")
+    if settings.SETTINGS_MODULE == "config.settings.settlement_test":
+        assert settings.CELERY_BROKER_URL == "memory://"
+        assert app.conf.broker_url == "memory://"
+        assert settings.CELERY_TASK_ALWAYS_EAGER is False
+    else:
+        assert settings.CELERY_BROKER_URL.startswith("redis://")
+        assert app.conf.broker_url.startswith("redis://")
     assert debug_task.name == "config.celery.debug_task"

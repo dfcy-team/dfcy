@@ -21,7 +21,7 @@ from apps.permissions.services import check_user_permission, get_permission_data
 from apps.sales_management import operating
 from apps.sales_management.operating_models import OperatingOrderLine
 from .cost_models import (FeeRevisionItem, FeeRecord, SettlementRecord, PaymentRecord,
-    PaymentApplication, ShipmentDiscountAdjustment)
+    PaymentApplication, ShipmentDiscountAdjustment, ShipmentPayableTax)
 from .dates import business_date
 from .document_time import document_time
 from .logistics import batches_for
@@ -186,8 +186,10 @@ def _money_targets(kind, scoped):
             missing=Subquery(missing, output_field=IntegerField()))
         if kind == 'supplier':
             discounts = ShipmentDiscountAdjustment.objects.filter(shipment_id=OuterRef('pk')).order_by().values('shipment_id').annotate(total=Sum('amount')).values('total')
+            confirmed_taxes = ShipmentPayableTax.objects.filter(
+                shipment_id=OuterRef('pk')).values('added_tax_amount')[:1]
             query = query.annotate(discount_amount=Coalesce(Subquery(discounts, output_field=MONEY), ZERO)).annotate(
-                due=Case(When(missing=0, then=F('known_amount') + Case(When(purchase_contract__status='issued', then=F('purchase_contract__settlement_tax_amount')), default=ZERO, output_field=MONEY) - F('discount_amount')), default=Value(None), output_field=MONEY))
+                due=Case(When(missing=0, then=F('known_amount') + Case(When(purchase_contract__status='issued', then=F('purchase_contract__settlement_tax_amount')), default=Coalesce(Subquery(confirmed_taxes, output_field=MONEY), ZERO), output_field=MONEY) - F('discount_amount')), default=Value(None), output_field=MONEY))
             records = SettlementRecord.objects.filter(shipment_id=OuterRef('pk'))
             payment_owner, purpose = 'shipment_id', 'goods'
         else:

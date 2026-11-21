@@ -513,10 +513,13 @@ class MonthlyPayables(InternalAPI):
                 offset += len(page['rows'])
                 if offset >= page['count']: break
             classified=wb.create_sheet('往来单位性质对账')
-            classified.append(['往来单位','币种','性质','期初应付','期初分类付款超额','本月新增应付','本月付款','本月历史已付登记','月末应付（待核对时不提供）','月末参考应付（未核实）','月末分类付款超额（待核对时不提供）','参考分类付款超额（未核实）','本月当前计划','核对状态','未记录币种的来源'])
+            corporate_headers = ['正报金额（未税）','正报金额（含税）'] if data['queue'] == 'supplier' else []
+            classified.append(['往来单位','币种','性质','期初应付','期初分类付款超额','本月新增应付',*corporate_headers,'本月付款','本月历史已付登记','月末应付（待核对时不提供）','月末参考应付（未核实）','月末分类付款超额（待核对时不提供）','参考分类付款超额（未核实）','本月当前计划','核对状态','未记录币种的来源'])
             for row in summary.get('nature_balances',[]):
                 classified.append([row['party_name'],row['currency'],{'corporate':'对公/正报','personal':'对私','unknown':'性质待确认'}[row['nature']],
-                    row['opening_payable'],row['opening_credit'],row['new_payable'],row['paid_amount'],row['historical_paid_amount'],
+                    row['opening_payable'],row['opening_credit'],row['new_payable'],
+                    *([row.get('corporate_net_amount'),row.get('corporate_gross_amount')] if corporate_headers else []),
+                    row['paid_amount'],row['historical_paid_amount'],
                     row['remaining_amount'],row['reference_remaining_amount'],row['credit_balance'],row['reference_credit_balance'],row['current_plan_amount'],'待核对' if row['needs_review'] else '已分类',row['source_number']])
             plans=wb.create_sheet('本月当前付款计划'); plans.append(['计划到期日','往来单位','币种','付款性质','剩余计划金额','款项名称','原计划金额','已核销金额','审批占用金额','可申请金额'])
             for row in data.get('current_plan_rows',[]):

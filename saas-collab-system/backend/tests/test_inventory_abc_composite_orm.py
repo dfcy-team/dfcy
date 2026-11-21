@@ -149,8 +149,7 @@ def test_composite_run_persists_exact_sibling_and_bundle_evidence(abc_scope):
     repeated = same_cutoff.entries.get(entity_type="spu", entity_id=spu.pk)
     assert (repeated.grade, repeated.candidate_grade, repeated.candidate_streak) == ("B", "A", 1)
     different_thresholds = {**run.config, "a_percent": "81.00"}
-    state = _previous_entries(tenant.pk, country.pk, run.cutoff_date, different_thresholds)[("spu", spu.pk)]
-    assert (state["grade"], state["candidate_grade"], state["candidate_streak"]) == ("B", "", 0)
+    assert _previous_entries(tenant.pk, country.pk, run.cutoff_date, different_thresholds) == {}
 
 
 def test_legacy_ready_snapshot_is_pending_then_partial_is_reference_only(abc_scope):
@@ -225,3 +224,27 @@ def test_new_pending_run_remains_visible_with_existing_ready(abc_scope, marked, 
     assert selected == ready
     assert meta["latest_status"] == "queued"
     assert meta["run_id"] == ready.pk
+
+
+def test_unmarked_active_run_does_not_hide_current_policy_failure_issues(abc_scope):
+    actor, country, *_ = abc_scope
+    current = {"classification_basis": "composite", "policy_version": ABC_POLICY_VERSION}
+    InventoryABCRun.objects.create(
+        tenant=actor.tenant, country=country, cutoff_date=NOW.date(), status="failed",
+        config=current, issues=["missing_sales:one", "missing_sales:two", "unknown_rate:three"],
+    )
+    InventoryABCRun.objects.create(
+        tenant=actor.tenant, country=country, cutoff_date=NOW.date(), status="queued",
+        config={"source": "automatic"},
+    )
+    selected, meta = published_run(actor, country)
+    assert selected is None
+    assert meta["latest_status"] == "queued"
+    assert meta["issues"] == ["missing_sales", "unknown_rate"]
+
+    InventoryABCRun.objects.create(
+        tenant=actor.tenant, country=country, cutoff_date=NOW.date(), status="ready",
+        config=current, completed_at=timezone.now(),
+    )
+    _, newer_meta = published_run(actor, country)
+    assert newer_meta["issues"] == []

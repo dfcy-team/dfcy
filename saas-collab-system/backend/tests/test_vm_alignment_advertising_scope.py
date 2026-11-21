@@ -29,7 +29,7 @@ def test_aligned_policy_preserves_advertising_authorization_and_scope(explicit_n
 
 def test_mapping_backed_ads_uses_ads_scope_resolver():
     mapping = object()
-    job = SimpleNamespace(ads_mapping_id=1, ads_mapping=mapping, sync_scope={"query": {"lookback_days": 7}})
+    job = SimpleNamespace(resource_type='advertising_report', ads_mapping_id=1, ads_mapping=mapping, sync_scope={"query": {"lookback_days": 7}})
     with patch("apps.integrations.ads_sync.resolve_scope", return_value={"advertiser_id": "123"}) as scope:
         assert resolve_job_scope(job) == {"advertiser_id": "123"}
     scope.assert_called_once_with(mapping, job.sync_scope)

@@ -40,6 +40,7 @@ def progress(batch):
         remaining = max(0, planned[line.pk] - consumed[line.pk] - terminated[line.pk])
         available = max(0, remaining - reserved[line.pk])
         candidates.append({'shipment_line_id': line.pk, 'shipment_id': line.shipment_id,
+            'sku_id': line.sku_id,
             'shipment_number': line.shipment.number, 'sku': line.sku_code_snapshot,
             'legacy_sku_code': line.sku.legacy_sku_code or '', 'product_name': line.product_name_snapshot,
             'allocated_quantity': planned[line.pk], 'received_quantity': received[line.pk],

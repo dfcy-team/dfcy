@@ -45,6 +45,7 @@ from .serializers import (
     SalesExportRequestSerializer,
     SalesOrderDetailSerializer,
     SalesOrderSerializer,
+    SalesOrderWorkspaceSerializer,
     SalesReturnSerializer,
     SyncSourceSerializer,
 )
@@ -1086,7 +1087,7 @@ class SalesTrendView(SalesOverviewView):
 
 
 
-def filtered_order_records(request, queryset=None):
+def filtered_order_records(request, queryset=None, *, ignore_status=False):
     if queryset is None:
         queryset = _scoped_orders(request, "sales_management.orders.view")
     scoped_orders = queryset
@@ -1117,7 +1118,7 @@ def filtered_order_records(request, queryset=None):
         )
         queryset = queryset.filter(pk__in=Subquery(items.values("sales_order_id")))
     status = request.query_params.get("status") or request.query_params.get("order_status")
-    if status:
+    if status and not ignore_status:
         queryset = queryset.filter(normalized_status=status)
     if _parse_boolean(request.query_params.get("exclude_cancelled"), "exclude_cancelled"):
         queryset = queryset.exclude(normalized_status="cancelled")
@@ -1151,7 +1152,8 @@ def filtered_order_records(request, queryset=None):
     if request.query_params.get("reminder_id"):
         from apps.integrations.feishu_reminders import apply_reminder_scope
         queryset = apply_reminder_scope(request, queryset, "orders")
-    return queryset
+    from .order_workspace_filters import filter_workspace
+    return filter_workspace(request, queryset)
 
 
 def filtered_refund_records(request, queryset=None):
@@ -1221,7 +1223,19 @@ class SalesOrderCollectionView(APIView):
         queryset = queryset.prefetch_related(
             Prefetch("refund_returns", queryset=_order_linked_refunds(request.user.tenant_id))
         ).order_by(*order_fields)
-        data = paginated_data(request, queryset, SalesOrderSerializer, page=page, page_size=page_size)
+        workspace = request.query_params.get('presentation') == 'workspace'
+        if workspace:
+            queryset = queryset.prefetch_related(Prefetch('items', queryset=_sales_item_images(
+                SalesOrderItem.objects.select_related('internal_spu', 'internal_sku'), 'sales_order')))
+        data = paginated_data(request, queryset, SalesOrderWorkspaceSerializer if workspace else SalesOrderSerializer,
+                              page=page, page_size=page_size)
+        if workspace:
+            from .order_workspace_filters import workspace_summary
+            data['workspace_summary'] = workspace_summary(request, filtered_order_records(request, scoped_orders, ignore_status=True))
+            from .order_warehouse_summary import attach_warehouse_summaries
+            attach_warehouse_summaries(request.user, data['results'])
+            from .order_presentation import attach_event_milestones
+            attach_event_milestones(request.user.tenant_id, data['results'])
         if not request.query_params.get("reminder_id") and request.query_params.get("include_summary", "true").lower() != "false":
             data.update(_sales_page_context(scoped_orders, scoped_refunds))
         else:
@@ -1251,7 +1265,12 @@ class SalesOrderDetailView(APIView):
             )
         )
         order = get_object_or_404(queryset, pk=pk)
-        return success_response(convert_sales_payload(request, SalesOrderDetailSerializer(order).data))
+        data = SalesOrderDetailSerializer(order).data
+        from .order_warehouse_summary import attach_warehouse_summaries
+        attach_warehouse_summaries(request.user, [data])
+        from .order_presentation import attach_event_milestones
+        attach_event_milestones(request.user.tenant_id, [data])
+        return success_response(convert_sales_payload(request, data))
 
 
 class SalesReturnCollectionView(APIView):
