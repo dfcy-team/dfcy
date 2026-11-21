@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -241,9 +242,37 @@ class InternalAPIClientTests(APITestCase):
         credential = base64.b64encode(f'{created["client_id"]}:{created["client_secret"]}'.encode()).decode()
         header = {"HTTP_AUTHORIZATION": f"Basic {credential}", "REMOTE_ADDR": "10.10.1.2"}
         url = "/api/internal-readonly/v1/products/"
-        self.assertEqual(self.client.get(url + "?limit=2", **header).status_code, 400)
-        self.assertEqual(self.client.get(url + "?limit=1", **header).status_code, 200)
-        self.assertEqual(self.client.get(url + "?limit=1", **header).status_code, 429)
+        # A per-minute limit legitimately resets at a wall-clock boundary.
+        # Exercise exhaustion within one explicit window, regardless of CI time.
+        moment = datetime(2026, 11, 21, 12, 0, 10, tzinfo=timezone.utc)
+        with patch("apps.integrations.internal_readonly_api.timezone.now", return_value=moment):
+            self.assertEqual(self.client.get(url + "?limit=2", **header).status_code, 400)
+            self.assertEqual(self.client.get(url + "?limit=1", **header).status_code, 200)
+            self.assertEqual(self.client.get(url + "?limit=1", **header).status_code, 429)
+        usage = InternalAPIClientUsage.objects.get(client=obj)
+        self.assertEqual(usage.request_count, 1)
+        self.assertEqual(usage.window_start, moment.replace(second=0))
+
+    def test_read_limit_resets_only_in_the_next_minute_window(self):
+        created = self.create_client().json()["data"]
+        obj = InternalAPIClient.objects.get(pk=created["id"])
+        obj.approval_status = "approved"
+        obj.status = "active"
+        obj.rate_limit_per_minute = 1
+        obj.save()
+        credential = base64.b64encode(f'{created["client_id"]}:{created["client_secret"]}'.encode()).decode()
+        header = {"HTTP_AUTHORIZATION": f"Basic {credential}", "REMOTE_ADDR": "10.10.1.2"}
+        url = "/api/internal-readonly/v1/products/?limit=1"
+        moment = datetime(2026, 11, 21, 12, 0, 59, tzinfo=timezone.utc)
+        with patch("apps.integrations.internal_readonly_api.timezone.now", return_value=moment):
+            self.assertEqual(self.client.get(url, **header).status_code, 200)
+            self.assertEqual(self.client.get(url, **header).status_code, 429)
+        with patch("apps.integrations.internal_readonly_api.timezone.now", return_value=moment + timedelta(seconds=1)):
+            self.assertEqual(self.client.get(url, **header).status_code, 200)
+            self.assertEqual(self.client.get(url, **header).status_code, 429)
+        usage = list(InternalAPIClientUsage.objects.filter(client=obj).order_by("window_start"))
+        self.assertEqual([row.request_count for row in usage], [1, 1])
+        self.assertEqual(usage[1].window_start - usage[0].window_start, timedelta(minutes=1))
 
     def test_capabilities_mark_unpublished_blocks_pending(self):
         response = self.client.get("/api/internal-readonly/v1/capabilities/")
