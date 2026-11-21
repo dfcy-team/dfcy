@@ -1,0 +1,39 @@
+name: V518 Build Controller Offline Checks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/v518-cloud-control-checks.yml'
+      - '.github/workflows/v518-cloud-artifacts-build-only.yml'
+      - 'saas-collab-system/deploy/production-control/ci/v518_cloud_build_only.py'
+      - 'saas-collab-system/deploy/production-control/ci/v518-cloud-build-only-identity.json'
+      - 'saas-collab-system/deploy/production-control/ci/tests/test_v518_cloud_build_only.py'
+
+permissions:
+  contents: read
+
+jobs:
+  controller-offline-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install offline test dependencies
+        run: python -m pip install 'pytest>=8,<9' 'PyYAML==6.0.3'
+      - name: Test exact controller source without publishing or cloud access
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -m pytest saas-collab-system/deploy/production-control/ci/tests/test_v518_cloud_build_only.py -q --junitxml=test-artifacts/v518-controller-offline.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v518-controller-offline-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-artifacts/v518-controller-offline.xml
+          if-no-files-found: error
