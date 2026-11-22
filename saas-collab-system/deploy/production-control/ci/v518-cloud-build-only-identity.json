@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
   "repository": "dfcy-team/dfcy",
-  "controller_base": "f4c1307a286bc7899dc6e4a916a3e8d50aed6957",
-  "source_sha": "13233654721edf6a8f405099266d3001c99ec1e8",
-  "source_tree": "1116ee5064287d79b7acd50bc68bf5e8099c7756",
-  "source_parent": "e81811e855db166c53137aaf5ec3d1b68b9743c9",
+  "controller_base": "287847be708b3a296c7949ef8def5be6f5f07954",
+  "source_sha": "89a5457035c43f8fc6d032d32275721b49f9c54a",
+  "source_tree": "3bd698034bd3fc64ed7acb82a4febebf40bd237f",
+  "source_parent": "2151b639a307c5d476e7aeb4758217aed11ca8ac",
   "reconciled_base": "cd7c991d222703cec4f7d7eb6cc1237664217908",
   "vm_base": "9728c548cce4c21d9cbc99aea7407298b4056fc7",
-  "source_material_sha256": "9298077a5cb7bfa9fb903213e8e459c8c36fe0b3f0805bf53eb5b6503541a5a7",
-  "migration_sha256": "f3db9d6d425020506c084fe46a7bf4e105e2f86f05606471e43b2189d9499239",
-  "migration_files": 556,
+  "source_material_sha256": "f8e79fa7810d85c6304aa644f273e356d94e8a9fba03f79b37d434d738f36b4d",
+  "migration_sha256": "d51ba76b2d4cfe08c31d2e93c7b927e6a506e538ec7087206185efbd66a5a27e",
+  "migration_files": 558,
   "release_notes_sha256": "77791a9fd987409866afa3798b476c32d8e128c75e0dcba3e26f54741ab20c4d",
   "release_version": "2.44.518",
   "release_date": "2026-11-22",
@@ -19,6 +19,14 @@
   "notes_exception_approved": true,
   "bounded_minimatch_risk_accepted": true,
   "source_chain": [
+    [
+      "89a5457035c43f8fc6d032d32275721b49f9c54a",
+      "2151b639a307c5d476e7aeb4758217aed11ca8ac"
+    ],
+    [
+      "2151b639a307c5d476e7aeb4758217aed11ca8ac",
+      "13233654721edf6a8f405099266d3001c99ec1e8"
+    ],
     [
       "13233654721edf6a8f405099266d3001c99ec1e8",
       "e81811e855db166c53137aaf5ec3d1b68b9743c9"
@@ -48,9 +56,19 @@
     "saas-collab-system/backend/apps/flash_sales/engine.py",
     "saas-collab-system/backend/apps/flash_sales/provider.py",
     "saas-collab-system/backend/apps/integrations/apps.py",
+    "saas-collab-system/backend/apps/integrations/automatic_refresh.py",
     "saas-collab-system/backend/apps/integrations/credential_access.py",
+    "saas-collab-system/backend/apps/integrations/custody.py",
+    "saas-collab-system/backend/apps/integrations/live_providers.py",
+    "saas-collab-system/backend/apps/integrations/marketplace_oauth_service.py",
+    "saas-collab-system/backend/apps/integrations/migrations/0068_automatic_refresh_commit_recovery.py",
+    "saas-collab-system/backend/apps/integrations/migrations/0070_merge_refresh_commit_recovery.py",
+    "saas-collab-system/backend/apps/integrations/models.py",
     "saas-collab-system/backend/apps/integrations/readonly_clients.py",
+    "saas-collab-system/backend/apps/integrations/refresh_commit_recovery.py",
+    "saas-collab-system/backend/apps/integrations/store_authorization_service.py",
     "saas-collab-system/backend/apps/integrations/tests/test_internal_api_clients.py",
+    "saas-collab-system/backend/apps/integrations/tests/test_tiktok_migration_compatibility.py",
     "saas-collab-system/backend/apps/permissions/frontend_permission_surface.json",
     "saas-collab-system/backend/apps/permissions/menu_registry.json",
     "saas-collab-system/backend/apps/permissions/permission_manifest.json",
@@ -60,6 +78,8 @@
     "saas-collab-system/backend/tests/test_flash_rate_scope.py",
     "saas-collab-system/backend/tests/test_menu_permission_registry.py",
     "saas-collab-system/backend/tests/test_permission_lifecycle.py",
+    "saas-collab-system/backend/tests/test_v518_refresh_recovery_compat.py",
+    "saas-collab-system/backend/tests/test_warehouse_migration_alignment.py",
     "saas-collab-system/deploy/pilot/application/Dockerfile.frontend",
     "saas-collab-system/deploy/sandbox/application/Dockerfile.frontend",
     "saas-collab-system/frontend/package-lock.json",
@@ -77,11 +97,11 @@
   "cloud_cutover_authorized": false,
   "formal_registration_authorized": false,
   "status": "SOURCE_STRICT_CI_VERIFIED_CONTROL_NOT_PUBLISHED",
-  "pr_files_sha256": "a17aa4dbdb9a2d0c42e49914475f4d7b7b7e5668770e610d8ad92c7aa5b9d5fc",
-  "pr_file_count": 1037,
+  "pr_files_sha256": "2b1ebc383df3be0a8c764502d2db38b563e375afbaf7716e2973c13870a58695",
+  "pr_file_count": 1045,
   "strict_ci_runs": {
-    "phase2-ci.yml": 44968602461,
-    "phase3-ci.yml": 44968607687
+    "phase2-ci.yml": 44997459463,
+    "phase3-ci.yml": 44997470665
   },
   "security_risk_resolved": false
 }

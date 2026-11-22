@@ -11,7 +11,7 @@ mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
 ROOT=MODULE.parents[4]
 
 def identity():
-    return {**mod.FIXED,'pr_files_sha256':'d'*64,'strict_ci_runs':{'phase2-ci.yml':123,'phase3-ci.yml':456}}
+    return {**mod.FIXED,'strict_ci_runs':dict(mod.FIXED['strict_ci_runs'])}
 
 def load(tmp_path,value):
     path=tmp_path/'identity.json';path.write_text(json.dumps(value),encoding='utf-8')
@@ -31,6 +31,7 @@ def test_complete_identity(tmp_path):
  ('migration_files',555),('migration_files',True),('redis_image','redis:latest'),
  ('pr_files_sha256','d'*40),('strict_ci_runs',{'phase2-ci.yml':123}),
  ('strict_ci_runs',{'phase2-ci.yml':123,'phase3-ci.yml':123}),
+ ('strict_ci_runs',{'phase2-ci.yml':44997459464,'phase3-ci.yml':44997470665}),
  ('strict_ci_runs',{'phase2-ci.yml':'123','phase3-ci.yml':456}),
 ])
 def test_bad_identity_closed(tmp_path,key,value):
@@ -107,6 +108,7 @@ def test_workflow_all_original_gates_retained():
 
 def test_workflow_no_deployment_or_legacy_manifest():
     text=(ROOT/'.github/workflows/v518-cloud-artifacts-build-only.yml').read_text(encoding='utf-8')
+    assert f"echo 'migration_sha={mod.MIGRATION_SHA}'" in text
     assert 'production_build_only.py manifest' not in text
     assert 'v518_cloud_build_only.py manifest' in text
     assert 'ssh ' not in text and 'scp ' not in text and 'sftp ' not in text
