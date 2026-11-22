@@ -76,12 +76,12 @@
   "source_pr_do_not_merge": true,
   "cloud_cutover_authorized": false,
   "formal_registration_authorized": false,
-  "status": "LOCAL_FROZEN_NOT_PUSHED_STRICT_CI_ABSENT_BUILD_DISABLED",
-  "pr_files_sha256": "",
-  "pr_file_count": 0,
+  "status": "SOURCE_STRICT_CI_VERIFIED_CONTROL_NOT_PUBLISHED",
+  "pr_files_sha256": "a17aa4dbdb9a2d0c42e49914475f4d7b7b7e5668770e610d8ad92c7aa5b9d5fc",
+  "pr_file_count": 1037,
   "strict_ci_runs": {
-    "phase2-ci.yml": 0,
-    "phase3-ci.yml": 0
+    "phase2-ci.yml": 44968602461,
+    "phase3-ci.yml": 44968607687
   },
   "security_risk_resolved": false
 }
