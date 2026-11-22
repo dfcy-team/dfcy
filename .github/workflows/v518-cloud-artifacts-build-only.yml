@@ -63,7 +63,7 @@ jobs:
           python control/saas-collab-system/deploy/production-control/ci/v518_docker_input_check.py --source-root business/saas-collab-system
           python control/saas-collab-system/deploy/production-control/ci/v518_cloud_build_only.py validate --source-root business --control-root control
           echo "release_sha=$REQUESTED_SHA" >> "$GITHUB_OUTPUT"
-          echo 'migration_sha=f3db9d6d425020506c084fe46a7bf4e105e2f86f05606471e43b2189d9499239' >> "$GITHUB_OUTPUT"
+          echo 'migration_sha=d51ba76b2d4cfe08c31d2e93c7b927e6a506e538ec7087206185efbd66a5a27e' >> "$GITHUB_OUTPUT"
 
   quality:
     needs: validate

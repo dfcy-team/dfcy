@@ -16,13 +16,13 @@ BASE='cd7c991d222703cec4f7d7eb6cc1237664217908'
 VM_BASE='9728c548cce4c21d9cbc99aea7407298b4056fc7'
 SECURITY='08569188173edbe93524d6fe33a8c6ca39dfb13c'
 SURFACE='e4b32bf9e0c1168c6396e5f0399d8c0e41abccc0'
-PARENT='e81811e855db166c53137aaf5ec3d1b68b9743c9'
-SOURCE='13233654721edf6a8f405099266d3001c99ec1e8'
-TREE='1116ee5064287d79b7acd50bc68bf5e8099c7756'
-SOURCE_CHAIN=[(SOURCE,PARENT),(PARENT,'fb9ba5fa9f060265a6300cbd11628269747ee9a6'),('fb9ba5fa9f060265a6300cbd11628269747ee9a6',SURFACE),(SURFACE,SECURITY),(SECURITY,BASE),(BASE,VM_BASE)]
-MIGRATION_SHA='f3db9d6d425020506c084fe46a7bf4e105e2f86f05606471e43b2189d9499239'
+PARENT='2151b639a307c5d476e7aeb4758217aed11ca8ac'
+SOURCE='89a5457035c43f8fc6d032d32275721b49f9c54a'
+TREE='3bd698034bd3fc64ed7acb82a4febebf40bd237f'
+SOURCE_CHAIN=[(SOURCE,PARENT),(PARENT,'13233654721edf6a8f405099266d3001c99ec1e8'),('13233654721edf6a8f405099266d3001c99ec1e8','e81811e855db166c53137aaf5ec3d1b68b9743c9'),('e81811e855db166c53137aaf5ec3d1b68b9743c9','fb9ba5fa9f060265a6300cbd11628269747ee9a6'),('fb9ba5fa9f060265a6300cbd11628269747ee9a6',SURFACE),(SURFACE,SECURITY),(SECURITY,BASE),(BASE,VM_BASE)]
+MIGRATION_SHA='d51ba76b2d4cfe08c31d2e93c7b927e6a506e538ec7087206185efbd66a5a27e'
 NOTES_SHA='77791a9fd987409866afa3798b476c32d8e128c75e0dcba3e26f54741ab20c4d'
-MATERIAL_SHA='9298077a5cb7bfa9fb903213e8e459c8c36fe0b3f0805bf53eb5b6503541a5a7'
+MATERIAL_SHA='f8e79fa7810d85c6304aa644f273e356d94e8a9fba03f79b37d434d738f36b4d'
 REDIS='redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99'
 PHASES={
  'phase2-ci.yml':['Repository safety and file guard','Django and pytest','Frontend build observation gate','Docker Compose configuration','RPA samples and required documents'],
@@ -32,9 +32,19 @@ SAFETY_FILES=sorted('''
 saas-collab-system/backend/apps/flash_sales/engine.py
 saas-collab-system/backend/apps/flash_sales/provider.py
 saas-collab-system/backend/apps/integrations/apps.py
+saas-collab-system/backend/apps/integrations/automatic_refresh.py
+saas-collab-system/backend/apps/integrations/custody.py
 saas-collab-system/backend/apps/integrations/credential_access.py
+saas-collab-system/backend/apps/integrations/live_providers.py
+saas-collab-system/backend/apps/integrations/marketplace_oauth_service.py
+saas-collab-system/backend/apps/integrations/migrations/0068_automatic_refresh_commit_recovery.py
+saas-collab-system/backend/apps/integrations/migrations/0070_merge_refresh_commit_recovery.py
+saas-collab-system/backend/apps/integrations/models.py
 saas-collab-system/backend/apps/integrations/readonly_clients.py
+saas-collab-system/backend/apps/integrations/refresh_commit_recovery.py
+saas-collab-system/backend/apps/integrations/store_authorization_service.py
 saas-collab-system/backend/apps/integrations/tests/test_internal_api_clients.py
+saas-collab-system/backend/apps/integrations/tests/test_tiktok_migration_compatibility.py
 saas-collab-system/backend/apps/permissions/frontend_permission_surface.json
 saas-collab-system/backend/apps/permissions/menu_registry.json
 saas-collab-system/backend/apps/permissions/permission_manifest.json
@@ -44,6 +54,8 @@ saas-collab-system/backend/tests/test_flash_pacing_lease.py
 saas-collab-system/backend/tests/test_flash_rate_scope.py
 saas-collab-system/backend/tests/test_menu_permission_registry.py
 saas-collab-system/backend/tests/test_permission_lifecycle.py
+saas-collab-system/backend/tests/test_v518_refresh_recovery_compat.py
+saas-collab-system/backend/tests/test_warehouse_migration_alignment.py
 saas-collab-system/deploy/pilot/application/Dockerfile.frontend
 saas-collab-system/deploy/sandbox/application/Dockerfile.frontend
 saas-collab-system/frontend/package-lock.json
@@ -56,7 +68,7 @@ saas-collab-system/frontend/tests/order-registrations.spec.js
 saas-collab-system/frontend/tests/permission-tree-structure.spec.js
 saas-collab-system/frontend/tests/ui-p11-sales-management-routing.spec.js
 '''.split())
-FIXED={'schema_version':1,'repository':REPOSITORY,'controller_base':'f4c1307a286bc7899dc6e4a916a3e8d50aed6957','source_sha':SOURCE,'source_tree':TREE,'source_parent':PARENT,'reconciled_base':BASE,'vm_base':VM_BASE,'source_material_sha256':MATERIAL_SHA,'migration_sha256':MIGRATION_SHA,'migration_files':556,'release_notes_sha256':NOTES_SHA,'release_version':'2.44.518','release_date':'2026-11-22','redis_image':REDIS,'source_pr':622,'source_ref':'release/v518-cloud-reconciled-20261121','notes_exception_approved':True,'bounded_minimatch_risk_accepted':True}
+FIXED={'schema_version':1,'repository':REPOSITORY,'controller_base':'287847be708b3a296c7949ef8def5be6f5f07954','source_sha':SOURCE,'source_tree':TREE,'source_parent':PARENT,'reconciled_base':BASE,'vm_base':VM_BASE,'source_material_sha256':MATERIAL_SHA,'migration_sha256':MIGRATION_SHA,'migration_files':558,'release_notes_sha256':NOTES_SHA,'release_version':'2.44.518','release_date':'2026-11-22','redis_image':REDIS,'source_pr':622,'source_ref':'release/v518-cloud-reconciled-20261121','notes_exception_approved':True,'bounded_minimatch_risk_accepted':True,'pr_file_count':1045,'pr_files_sha256':'2b1ebc383df3be0a8c764502d2db38b563e375afbaf7716e2973c13870a58695'}
 FIXED.update(source_chain=[list(pair) for pair in SOURCE_CHAIN],reviewed_source_files=SAFETY_FILES,exchange_menu_inactive=True,source_pr_do_not_merge=True,cloud_cutover_authorized=False,formal_registration_authorized=False)
 
 def require(condition,message):
@@ -68,6 +80,8 @@ def digest(body):
 
 def canonical(value):
     return json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode('utf-8')
+
+FIXED['strict_ci_runs']={'phase2-ci.yml':44997459463,'phase3-ci.yml':44997470665}
 
 def load_identity(path=IDENTITY):
     require(Path(path).is_file(),'final reviewed identity absent; build disabled')
@@ -125,7 +139,7 @@ def verify_source(root,identity):
     verify_exchange_policy(backend)
     for path in paths:
         h.update(path.relative_to(backend).as_posix().encode());h.update(path.read_bytes().replace(b'\r\n',b'\n'))
-    require(len(paths)==556 and h.hexdigest()==MIGRATION_SHA,'migration tree drift')
+    require(len(paths)==558 and h.hexdigest()==MIGRATION_SHA,'migration tree drift')
     require(identity['source_sha']==SOURCE,'source identity mismatch')
 
 def verify_run(run,jobs,workflow,run_id):
