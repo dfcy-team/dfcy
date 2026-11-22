@@ -1,24 +1,28 @@
 {
   "schema_version": 1,
   "repository": "dfcy-team/dfcy",
-  "controller_base": "eaa1d6fa6d50b266cc1302151e144700efcc6b9c",
-  "source_sha": "e81811e855db166c53137aaf5ec3d1b68b9743c9",
-  "source_tree": "a7fd993fbffc6acfc3e0d4aecf06b208fc900d7e",
-  "source_parent": "fb9ba5fa9f060265a6300cbd11628269747ee9a6",
+  "controller_base": "f4c1307a286bc7899dc6e4a916a3e8d50aed6957",
+  "source_sha": "13233654721edf6a8f405099266d3001c99ec1e8",
+  "source_tree": "1116ee5064287d79b7acd50bc68bf5e8099c7756",
+  "source_parent": "e81811e855db166c53137aaf5ec3d1b68b9743c9",
   "reconciled_base": "cd7c991d222703cec4f7d7eb6cc1237664217908",
   "vm_base": "9728c548cce4c21d9cbc99aea7407298b4056fc7",
-  "source_material_sha256": "ce437b3d03005564a7da307d90808d384848ab5e362789769ef3961fdbcac7a3",
+  "source_material_sha256": "9298077a5cb7bfa9fb903213e8e459c8c36fe0b3f0805bf53eb5b6503541a5a7",
   "migration_sha256": "f3db9d6d425020506c084fe46a7bf4e105e2f86f05606471e43b2189d9499239",
   "migration_files": 556,
-  "release_notes_sha256": "1ce9dc4e02754f0fb4cbcc68dac2c092a2865dc1337e1d1732543059db1dfd73",
+  "release_notes_sha256": "77791a9fd987409866afa3798b476c32d8e128c75e0dcba3e26f54741ab20c4d",
   "release_version": "2.44.518",
-  "release_date": "2026-11-21",
+  "release_date": "2026-11-22",
   "redis_image": "redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99",
   "source_pr": 622,
   "source_ref": "release/v518-cloud-reconciled-20261121",
   "notes_exception_approved": true,
   "bounded_minimatch_risk_accepted": true,
   "source_chain": [
+    [
+      "13233654721edf6a8f405099266d3001c99ec1e8",
+      "e81811e855db166c53137aaf5ec3d1b68b9743c9"
+    ],
     [
       "e81811e855db166c53137aaf5ec3d1b68b9743c9",
       "fb9ba5fa9f060265a6300cbd11628269747ee9a6"
@@ -56,8 +60,11 @@
     "saas-collab-system/backend/tests/test_flash_rate_scope.py",
     "saas-collab-system/backend/tests/test_menu_permission_registry.py",
     "saas-collab-system/backend/tests/test_permission_lifecycle.py",
+    "saas-collab-system/deploy/pilot/application/Dockerfile.frontend",
+    "saas-collab-system/deploy/sandbox/application/Dockerfile.frontend",
     "saas-collab-system/frontend/package-lock.json",
     "saas-collab-system/frontend/package.json",
+    "saas-collab-system/frontend/src/data/releaseNotes.json",
     "saas-collab-system/frontend/src/router/menu.js",
     "saas-collab-system/frontend/src/router/menuRegistry.js",
     "saas-collab-system/frontend/tests/cloud-exchange-menu-retirement.spec.js",
@@ -69,12 +76,12 @@
   "source_pr_do_not_merge": true,
   "cloud_cutover_authorized": false,
   "formal_registration_authorized": false,
-  "status": "SOURCE_FROZEN_STRICT_CI_RUNNING_NOT_BUILD_AUTHORIZATION",
-  "pr_files_sha256": "c39fd38b0588e89e41e0562effa38e2475f35afeda11447c61847551ad4168f8",
+  "status": "SOURCE_STRICT_CI_VERIFIED_CONTROL_NOT_PUBLISHED",
+  "pr_files_sha256": "a17aa4dbdb9a2d0c42e49914475f4d7b7b7e5668770e610d8ad92c7aa5b9d5fc",
   "pr_file_count": 1037,
   "strict_ci_runs": {
-    "phase2-ci.yml": 44892909262,
-    "phase3-ci.yml": 44892924083
+    "phase2-ci.yml": 44968602461,
+    "phase3-ci.yml": 44968607687
   },
   "security_risk_resolved": false
 }
