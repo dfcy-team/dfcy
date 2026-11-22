@@ -22,9 +22,12 @@ try:validate_runtime_config(bad)
 except ValidationError:pass
 else:raise AssertionError('UNKNOWN_PROVIDER_ACCEPTED')
 assert SAFE_DEFAULTS['platforms']['best_ecapi']['contract_approved'] is False
+from apps.integrations.refresh_commit_recovery import refresh_with_commit_recovery
+from apps.integrations.models import AutomaticRefreshAttempt
+assert AutomaticRefreshAttempt._meta.get_field('commit_recovery').get_internal_type()=='JSONField'
 from apps.integrations.readonly_clients import ShopeeReadonlyClient
 assert 'retrieve_marketplace_credentials' in ShopeeReadonlyClient._request.__code__.co_names
-print(json.dumps({'valid':True,'version':r['effective_version'],'custody_backend':type(backend).__name__,'helper_sha256':hashlib.sha256(Path('/app/apps/integrations/credential_access.py').read_bytes()).hexdigest(),'worker_startup_guard':True,'beat_startup_guard':True,'shared_readonly_credentials':True}))
+print(json.dumps({'valid':True,'version':r['effective_version'],'custody_backend':type(backend).__name__,'helper_sha256':hashlib.sha256(Path('/app/apps/integrations/credential_access.py').read_bytes()).hexdigest(),'worker_startup_guard':True,'beat_startup_guard':True,'shared_readonly_credentials':True,'refresh_recovery_sha256':hashlib.sha256(Path('/app/apps/integrations/refresh_commit_recovery.py').read_bytes()).hexdigest()}))
 """
 def verify_one(name):
     completed=subprocess.run(['docker','exec',name,'python','-c',CODE],capture_output=True,text=True)
@@ -35,7 +38,7 @@ def verify(names=None):
     with ThreadPoolExecutor(max_workers=3) as pool:rows=dict(pool.map(verify_one,names))
     valid=all(row.get('valid') for row in rows.values())
     if valid:
-        valid=len({row['version'] for row in rows.values()})==1 and len({row['helper_sha256'] for row in rows.values()})==1
+        valid=len({row['version'] for row in rows.values()})==1 and len({row['helper_sha256'] for row in rows.values()})==1 and len({row.get('refresh_recovery_sha256') for row in rows.values()})==1
     return {'status':'PASS' if valid else 'FAIL','services':rows}
 if __name__=='__main__':
     result=verify()
