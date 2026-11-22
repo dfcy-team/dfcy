@@ -7,9 +7,11 @@ from django.db.migrations.loader import MigrationLoader
 def test_warehouse_and_main_histories_have_one_integration_leaf():
     loader = MigrationLoader(None)
     assert not loader.detect_conflicts()
-    target = ('integrations','0069_alter_syncjob_resource_type')
+    target = ('integrations','0070_merge_refresh_commit_recovery')
     assert loader.graph.leaf_nodes('integrations') == [target]
     ancestors = loader.graph.forwards_plan(target)
+    assert ('integrations','0068_automatic_refresh_commit_recovery') in ancestors
+    assert ('integrations','0069_alter_syncjob_resource_type') in ancestors
     assert ('integrations','0060_gmv_max_audit_lookup_index') in ancestors
     assert ('integrations','0060_best_ecapi_platform') in ancestors
     assert ('integrations','0067_warehouse_order_lookup_jobs') in ancestors
