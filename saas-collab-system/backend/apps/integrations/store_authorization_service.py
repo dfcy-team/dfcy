@@ -199,6 +199,7 @@ def rotate_store_authorization_references(
     allow_live_references=False,
     new_reference_revoker=None,
     defer_previous_revocation=False,
+    preserve_new_reference_on_failure=False,
 ):
     _validate_actor_tenant(actor, record.tenant_id)
     metadata = build_reference_metadata(
@@ -217,6 +218,7 @@ def rotate_store_authorization_references(
             previous_revoker=revoker,
             new_revoker=new_reference_revoker,
             defer_previous_revocation=defer_previous_revocation,
+            preserve_new_reference_on_failure=preserve_new_reference_on_failure,
         )
     failed = None
     with transaction.atomic():
@@ -287,6 +289,7 @@ def _rotate_live_store_authorization_references(
     previous_revoker,
     new_revoker,
     defer_previous_revocation=False,
+    preserve_new_reference_on_failure=False,
 ):
     """Commit a live reference once, then reconcile external revocation.
 
@@ -335,10 +338,11 @@ def _rotate_live_store_authorization_references(
                 },
             )
     except Exception:
-        _revoke_old_references(
-            new_revoker,
-            {"credential_id": metadata["credential_id"], "token_id": metadata["token_id"]},
-        )
+        if not preserve_new_reference_on_failure:
+            _revoke_old_references(
+                new_revoker,
+                {"credential_id": metadata["credential_id"], "token_id": metadata["token_id"]},
+            )
         raise
 
     if defer_previous_revocation:

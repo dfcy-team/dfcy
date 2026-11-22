@@ -359,6 +359,9 @@ class ShopeeLiveOAuthProvider(LiveOAuthProviderBase):
         version = authorization.credential_reference_version + 1
         expires_at = _expiry(data.get("expire_in"))
         stored = self._store_tokens(
+            **({"operation_id": authorization._refresh_operation_id,
+                "idempotency_key": authorization._refresh_operation_id}
+               if getattr(authorization, "_refresh_operation_id", None) else {}),
             credential_type="shopee",
             reference_version=version,
             access_token=data["access_token"],
@@ -526,6 +529,9 @@ class LazadaLiveOAuthProvider(LiveOAuthProviderBase):
         version = authorization.credential_reference_version + 1
         expires_at = _expiry(data.get("expires_in"))
         stored = self._store_tokens(
+            **({"operation_id": authorization._refresh_operation_id,
+                "idempotency_key": authorization._refresh_operation_id}
+               if getattr(authorization, "_refresh_operation_id", None) else {}),
             credential_type="lazada",
             reference_version=version,
             access_token=data["access_token"],
@@ -788,6 +794,9 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
         version = authorization.credential_reference_version + 1
         expires_at = _expiry(data.get("access_token_expire_in"))
         stored = self._store_tokens(
+            **({"operation_id": authorization._refresh_operation_id,
+                "idempotency_key": authorization._refresh_operation_id}
+               if getattr(authorization, "_refresh_operation_id", None) else {}),
             credential_type="tiktok",
             reference_version=version,
             access_token=data["access_token"],
