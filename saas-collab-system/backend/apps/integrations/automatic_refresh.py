@@ -127,9 +127,24 @@ def _claim_attempt(record):
         if created:
             return attempt
         attempt = AutomaticRefreshAttempt.objects.select_for_update().get(pk=attempt.pk)
+        from .refresh_commit_recovery import lease_expired, LEASE_SECONDS
+        data = attempt.commit_recovery or {}
+        recovering = (data.get("schema") == 1 and data.get("phase") in {"exchange_in_flight", "commit_pending"}
+                      and lease_expired(data) and attempt.status in {"running", "commit_pending", "failed"}
+                      and (attempt.status != "failed" or attempt.failure_category == "commit_pending"))
+        if recovering and attempt.attempt_count < MAX_REFRESH_ATTEMPTS and (not attempt.next_retry_at or attempt.next_retry_at <= now):
+            data.update(lease_until=(now + timedelta(seconds=LEASE_SECONDS)).isoformat(),
+                        resuming_exchange=data.get("phase") == "exchange_in_flight")
+            attempt.status, attempt.finished_at, attempt.next_retry_at = "running", None, None
+            attempt.attempt_count += 1
+            attempt.commit_recovery = data
+            attempt.save(update_fields=["status", "finished_at", "next_retry_at", "attempt_count", "commit_recovery"])
+            return attempt
         if (attempt.status != "failed" or attempt.failure_category not in SAFE_REFRESH_RETRY_CATEGORIES
                 or attempt.attempt_count >= MAX_REFRESH_ATTEMPTS or not attempt.next_retry_at
                 or attempt.next_retry_at > now):
+            return None
+        if data:
             return None
         attempt.status, attempt.finished_at, attempt.next_retry_at = "running", None, None
         attempt.attempt_count += 1
@@ -142,7 +157,9 @@ def _refresh_failure_detail(exc):
     # already have rotated its refresh token before the response was lost.
     stage, category = getattr(exc, "stage", None), getattr(exc, "category", None)
     code, http_status = getattr(exc, "controlled_code", None), getattr(exc, "http_status", None)
-    if stage == "read_developer_secret" and isinstance(category, str) and category in {"timeout_uncertain", "network_uncertain", "service_uncertain"}:
+    if getattr(exc, "commit_recovery", False):
+        recovery = "commit_pending"
+    elif stage == "read_developer_secret" and isinstance(category, str) and category in {"timeout_uncertain", "network_uncertain", "service_uncertain"}:
         recovery = "pre_request_transient"
     elif code == OAUTH_RATE_LIMITED and http_status == 429 and stage == "exchange_token":
         recovery = "rate_limited"
@@ -151,7 +168,7 @@ def _refresh_failure_detail(exc):
     else:
         recovery = "rotation_uncertain"
     detail = {"error_code": "AUTO_REFRESH_FAILED", "failure_category": recovery,
-              "safe_to_retry": recovery in SAFE_REFRESH_RETRY_CATEGORIES,
+              "safe_to_retry": recovery in SAFE_REFRESH_RETRY_CATEGORIES or recovery == "commit_pending",
               "reauthorization_required": recovery == "authorization_rejected"}
     from .oauth_diagnostics import STAGES, CATEGORIES
     from .oauth_errors import OAUTH_ERROR_SPECS
@@ -163,6 +180,15 @@ def _refresh_failure_detail(exc):
         detail["controlled_code"] = code
     if type(http_status) is int and 100 <= http_status <= 599:
         detail["http_status"] = http_status
+    if getattr(exc, "custody_saved", False):
+        detail["token_saved"] = True
+    if getattr(exc, "error_class", None):
+        detail["exception_class"] = exc.error_class
+    if type(getattr(exc, "database_error_number", None)) is int:
+        detail["database_error_number"] = exc.database_error_number
+    if recovery == "commit_pending":
+        detail["reason"] = "正在核对托管回执并有限重试提交授权引用；不会重复刷新平台令牌。"
+        return detail
     detail["reason"] = ("自动续期在请求平台前失败或被明确限流，正在有限退避重试。" if detail["safe_to_retry"] else
                         "平台拒绝授权，请重新授权并执行只读检查。" if detail["reauthorization_required"] else
                         "续期轮换结果不确定，已停止重复刷新；请核对托管凭据或重新授权。")
@@ -185,7 +211,9 @@ def credential_refresh_state(record):
                     or record.last_error_code in {AUTO_REFRESH_VALIDATION_PENDING, AUTO_REFRESH_VALIDATION_FAILED}):
         state = "manual_recovery"
     elif enabled and expiry <= now + REFRESH_WINDOW:
-        if attempt and attempt.status == "running":
+        if attempt and (attempt.commit_recovery or {}).get("phase") == "commit_pending":
+            state = "retry_wait" if attempt.next_retry_at else "manual_recovery"
+        elif attempt and attempt.status == "running":
             state = "refreshing"
         elif attempt and attempt.status == "failed":
             state = "retry_wait" if attempt.next_retry_at else "manual_recovery"
