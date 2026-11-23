@@ -139,14 +139,15 @@ def validated_payload(kind, data, store, order):
 
 
 @transaction.atomic
-def create_registration(user, kind, store_id, order_id, data, key, batch_key="", permission_action="create", *, historical=False):
+def create_registration(user, kind, store_id, order_id, data, key, batch_key="", permission_action="create", *, historical=False, preview=False, source_data=None):
     if type(historical) is not bool or (historical and kind != "exchange"):
         raise ValidationError("历史补录仅适用于换货登记，模式必须为布尔值。")
     store = store_for(user, kind, permission_action, store_id)
-    StoreMaster.objects.select_for_update().get(pk=store.pk)
+    if not preview or kind == "exchange":
+        StoreMaster.objects.select_for_update().get(pk=store.pk)
     if not isinstance(key, str) or not 1 <= len(key) <= 100:
         raise ValidationError("登记标识必须为1至100字符。")
-    request_hash = digest([kind, store.id, order_id, data])
+    request_hash = digest([kind, store.id, order_id, data if source_data is None else source_data])
     if historical:
         request_hash = digest(["historical_exchange", request_hash])
     existing = OrderRegistration.objects.filter(tenant=user.tenant, idempotency_key=key).first()
@@ -192,6 +193,8 @@ def create_registration(user, kind, store_id, order_id, data, key, batch_key="",
         after = validate_adjustment(order, detail, payload)
         active_order = order
         snapshot = {"original": detail.original_lines, "before": detail.lines, "after": after, "detail_version": detail.version}
+    if preview and kind != "exchange":
+        return OrderRegistration(tenant=user.tenant, store=store, order=order, kind=kind, payload=payload, snapshot=snapshot), True
     row = OrderRegistration.objects.create(tenant=user.tenant, store=store, order=order, kind=kind, payload=payload,
                                           snapshot=snapshot, requested_by=user, idempotency_key=key, request_hash=request_hash,
                                           active_exchange_order=active_order, batch_key=batch_key)
@@ -289,7 +292,7 @@ def edit_registration(user, kind, pk, payload, version, reason=""):
         row.transaction_key = gcash_key(row)
         prevent_duplicate_transaction(row)
     if kind == "promotion" and row.status == "registered":
-        row.snapshot = copy.deepcopy(data)
+        row.snapshot.update(copy.deepcopy(data))
     row.version += 1
     row.save()
     audit(row, user, "correct" if row.status == "registered" else "edit", before, reason)
@@ -370,15 +373,15 @@ def _registration_decision(user, kind, pk, action, note="", *, expected_version=
         row.active_exchange_order = None
     elif action == "register":
         if kind == "gcash":
-            if row.status != "draft" or not row.evidence.exists():
-                raise StateConflict("只能登记已上传完整截图的草稿。")
+            if row.status != "draft":
+                raise StateConflict("只能登记草稿。")
             row.transaction_key = gcash_key(row)
             prevent_duplicate_transaction(row)
         else:
             if row.status not in EDITABLE | {"approved"}:
                 raise StateConflict("只能确认草稿、驳回、撤回或旧审批已通过的推广登记；旧待审批记录需先撤回。")
             row.payload = validated_payload(kind, {k: v for k, v in row.payload.items() if k in FIELDS[kind]}, row.store, row.order)
-            row.snapshot = copy.deepcopy(row.payload)
+            row.snapshot.update(copy.deepcopy(row.payload))
         row.status = "registered"
     elif action == "void":
         if row.status != "registered" or not str(note).strip():
@@ -457,14 +460,9 @@ def apply_exchange_detail(user, pk):
     return row
 
 
-@transaction.atomic
-def upload_evidence(user, kind, pk, uploaded, permission_action="edit"):
-    row = locked_registration(user, kind, pk, permission_action)
-    if row.status not in EDITABLE:
-        raise StateConflict("仅草稿／驳回／撤回状态可上传凭证。")
-    if not uploaded or uploaded.size > 5 * 1024 * 1024 or row.evidence.count() >= 10:
-        raise ValidationError("最多10张截图，每张不超过5MB。")
-    content = uploaded.read()
+def validate_evidence(content):
+    if len(content) > 5 * 1024 * 1024:
+        raise ValidationError("每张截图不超过5MB。")
     try:
         with Image.open(io.BytesIO(content)) as image:
             if image.format not in {"PNG", "JPEG"} or image.width * image.height > 20000000:
@@ -473,6 +471,18 @@ def upload_evidence(user, kind, pk, uploaded, permission_action="edit"):
             image.verify()
     except (ValueError, UnidentifiedImageError, OSError, Image.DecompressionBombError):
         raise ValidationError("只允许完整的PNG／JPEG截图。") from None
+    return media
+
+
+@transaction.atomic
+def upload_evidence(user, kind, pk, uploaded, permission_action="edit"):
+    row = locked_registration(user, kind, pk, permission_action)
+    if row.status not in EDITABLE:
+        raise StateConflict("仅草稿／驳回／撤回状态可上传凭证。")
+    if not uploaded or uploaded.size > 5 * 1024 * 1024 or row.evidence.count() >= 10:
+        raise ValidationError("最多10张截图，每张不超过5MB。")
+    content = uploaded.read()
+    media = validate_evidence(content)
     evidence, _ = RegistrationEvidence.objects.get_or_create(registration=row, sha256=hashlib.sha256(content).hexdigest(),
                                                              defaults={"name": uploaded.name[:180], "media_type": media, "content": content, "uploaded_by": user})
     audit(row, user, "evidence_upload")
