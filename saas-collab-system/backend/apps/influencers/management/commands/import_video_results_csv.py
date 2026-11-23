@@ -206,10 +206,14 @@ class Command(BaseCommand):
             )
             candidate.full_clean()
             candidate.save()
+            from ...sample_video_completion import enqueue_registered_video_completion
+            enqueue_registered_video_completion(candidate)
             summary["created"] += 1
             return
         for field, value in values.items():
             setattr(current, field, value)
         current.full_clean()
         current.save(update_fields=[*values, "updated_at"])
+        from ...sample_video_completion import enqueue_registered_video_completion
+        enqueue_registered_video_completion(current)
         summary["updated"] += 1

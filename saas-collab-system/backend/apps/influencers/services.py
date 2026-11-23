@@ -170,6 +170,8 @@ def _generate_sample_fulfillment_no(tenant, link_type):
 
 
 def _assert_task_accepts_target(task, *, allow_completed=False):
+    if task.status == OutreachTask.Status.PAUSED:
+        raise ValidationError({"outreach_task": "任务已暂停，请恢复任务后再新增送样或修改建联目标。"}, code="conflict")
     blocked_statuses = {OutreachTask.Status.CANCELLED}
     if not allow_completed:
         blocked_statuses.add(OutreachTask.Status.COMPLETED)
@@ -1082,6 +1084,7 @@ def _sample_item_payload(item):
 def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
     """Replace item cost snapshots and aggregate cost in one transaction."""
     item_payloads = _normalize_item_payloads(item_payloads)
+    item_payloads = _resolve_sample_item_products(user, fulfillment, item_payloads)
     # Resolve and validate every requested warehouse before removing the old
     # snapshots. Country alone cannot select a warehouse when several exist.
     try:
@@ -1113,12 +1116,12 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
     # Reuse only exact request inputs; preserve database SKU matching semantics.
     sku_cache = {}
     resolved_skus = []
-    for payload in item_payloads:
-        key = (id(payload.get("sku")), str(payload.get("requested_sku") or ""))
-        if key not in sku_cache:
-            sku_cache[key] = _purchase_cost_for_payload(user.tenant, payload)
-        resolved_skus.append(sku_cache[key])
     snapshot_time = timezone.now()
+    for payload in item_payloads:
+        key = (id(payload.get("sku")), str(payload.get("requested_sku") or ""), getattr(payload.get("warehouse"), "pk", None))
+        if key not in sku_cache:
+            sku_cache[key] = _purchase_cost_for_sample_payload(user.tenant, payload, as_of=snapshot_time)
+        resolved_skus.append(sku_cache[key])
     versions = confirmed_sample_costs_for(
         tenant=user.tenant, as_of=snapshot_time,
         pairs=[(resolved[1], payload.get("warehouse"))
@@ -1131,12 +1134,7 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
 
     sku_quantity = 0
     saved_items = []
-    for raw_payload, resolved_sku in zip(item_payloads, resolved_skus):
-        payload = _inherit_item_product(
-            raw_payload,
-            product_id=fulfillment.external_product_id,
-            product_name=fulfillment.product_name_snapshot,
-        )
+    for payload, resolved_sku in zip(item_payloads, resolved_skus):
         # Computed fields must never be accepted from a client or reused verbatim.
         for field_name in (
             "id",
@@ -1193,16 +1191,6 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
 
 
 def _current_sample_item_costs(*, tenant, fulfillment, payload, allow_auto_warehouse=False, strict_sku=True, as_of=None, resolved_sku=None, versions=None):
-    try:
-        normalized, sku, status = resolved_sku if resolved_sku is not None else _purchase_cost_for_payload(tenant, payload)
-    except ValidationError:
-        if strict_sku:
-            raise
-        normalized, sku, status = _normalize_sku(payload.get("requested_sku")), None, "ambiguous"
-    if payload.get("sku") is None and status == "matched_normalized":
-        sku, status = None, "ambiguous"
-    if sku is not None:
-        normalized = _normalize_sku(sku.sku_code)
     country = (fulfillment.store.country_code or "").strip().upper()
     site = str(payload.get("site_code") or "").strip().upper()
     warehouse = payload.get("warehouse")
@@ -1220,6 +1208,18 @@ def _current_sample_item_costs(*, tenant, fulfillment, payload, allow_auto_wareh
         )
     ):
         warehouse = None
+    try:
+        normalized, sku, status = resolved_sku if resolved_sku is not None else _purchase_cost_for_sample_payload(
+            tenant, {**payload, "warehouse": warehouse}, as_of=as_of,
+        )
+    except ValidationError:
+        if strict_sku:
+            raise
+        normalized, sku, status = _normalize_sku(payload.get("requested_sku")), None, "ambiguous"
+    if payload.get("sku") is None and status == "matched_normalized":
+        sku, status = None, "ambiguous"
+    if sku is not None:
+        normalized = _normalize_sku(sku.sku_code)
     return sample_item_cost_fields(
         tenant=tenant, sku=sku, warehouse=warehouse, quantity=payload.get("quantity", 1),
         normalized=normalized, status=status, as_of=as_of, versions=versions,
@@ -1265,6 +1265,53 @@ def _inherit_item_product(payload, *, product_id, product_name):
     if not str(item.get("product_name") or "").strip() and product_name:
         item["product_name"] = product_name
     return item
+
+
+def _resolve_sample_item_products(user, fulfillment, payloads):
+    primary = str(fulfillment.external_product_id or "").strip()
+    primary_name = fulfillment.product_name_snapshot
+    separator = r"[,，、;；\r\n]+"
+    primary_is_list = bool(re.search(separator, primary))
+    catalog = {}
+    items = []
+    for row in payloads:
+        product_id = str(row.get("external_product_id") or "").strip()
+        if not product_id or product_id == primary:
+            if primary_is_list:
+                if row.get("requested_sku") or row.get("sku"):
+                    raise ValidationError({"items": "请为每条 SKU 选择一个实际商品 ID。"})
+                items.append({**row, "external_product_id": ""})
+            else:
+                items.append(_inherit_item_product(row, product_id=primary, product_name=primary_name))
+            continue
+        if re.search(separator, product_id):
+            raise ValidationError({"items": "每条送样明细只能填写一个商品 ID。"})
+        if product_id not in catalog:
+            matches = resolve_outreach_products(
+                tenant=user.tenant, store_id=fulfillment.store_id, product_id=product_id,
+            )["candidates"]
+            if not matches:
+                raise ValidationError({"items": "明细商品不在送样店铺的商品目录中，请核对商品 ID。"})
+            catalog[product_id] = matches[0]
+        product = catalog[product_id]
+        sku = row.get("requested_sku")
+        selected = row.get("sku")
+        sku_codes = {str(sku or "").casefold()}
+        if selected is not None:
+            sku_codes.update({selected.sku_code.casefold(), selected.legacy_sku_code.casefold()})
+        if (sku or selected) and product["skus"] and sku_codes.isdisjoint(
+            {code.casefold() for code in product["skus"]}
+        ):
+            raise ValidationError({"items": "该 SKU 不属于所选商品，请按样品订单核对。"})
+        items.append({**row, "external_product_id": product_id, "product_name": product["product_name"]})
+    products_by_sku = {}
+    for item in items:
+        sku_key = (item.get("requested_sku") or "").casefold()
+        if sku_key:
+            previous = products_by_sku.setdefault(sku_key, item["external_product_id"])
+            if previous != item["external_product_id"]:
+                raise ValidationError({"items": "同一送样暂不支持将同一个 SKU 编码保存到不同商品。"})
+    return items
 
 
 def _normalize_sku(value):
@@ -1317,6 +1364,37 @@ def _purchase_cost_for_payload(tenant, payload):
         )
         return _normalize_sku(selected_sku.sku_code), selected_sku, matched_status
     return _purchase_cost_for_item(tenant, requested_sku)
+
+
+def _purchase_cost_for_sample_payload(tenant, payload, *, as_of=None):
+    """Resolve exact same-SPU ambiguity by current confirmed warehouse cost only."""
+    result = _purchase_cost_for_payload(tenant, payload)
+    if payload.get("sku") is not None or result[2] != "ambiguous":
+        return result
+    warehouse = payload.get("warehouse")
+    if warehouse is None or warehouse.tenant_id != tenant.pk or warehouse.status != StatusChoices.ACTIVE:
+        return result
+    requested = str(payload.get("requested_sku") or "").strip()
+    candidates = list(ProductSKU.objects.filter(tenant=tenant, is_active=True).filter(
+        Q(sku_code__iexact=requested) | Q(legacy_sku_code__iexact=requested),
+    ).order_by("pk"))
+    if len(candidates) < 2 or len({sku.spu_id for sku in candidates}) != 1:
+        return result
+    as_of = as_of or timezone.now()
+    versions = confirmed_sample_costs_for(tenant=tenant, pairs=[(sku, warehouse) for sku in candidates], as_of=as_of)
+    eligible = []
+    for sku in candidates:
+        version, _source = versions.get((sku.pk, warehouse.pk), (None, ""))
+        if (version is not None and version.currency == "CNY" and version.created_at <= as_of
+                and version.confirmed_cost.is_finite() and version.confirmed_cost >= 0):
+            eligible.append((sku, version))
+    if not eligible:
+        return result
+    # Version numbers are local to each SKU, so compare immutable confirmation
+    # records by creation time rather than comparing unrelated version counters.
+    sku, _version = max(eligible, key=lambda pair: (pair[1].created_at, pair[1].effective_from, pair[1].pk))
+    status = "matched_new_sku" if sku.sku_code.casefold() == requested.casefold() else "matched_legacy_sku"
+    return _normalize_sku(sku.sku_code), sku, status
 
 
 def _product_snapshot_fields(*, tenant, store, external_product_id, fallback_name, sku_prefix=""):
@@ -1474,7 +1552,7 @@ def create_outreach_task(*, user, validated_data):
 
 @transaction.atomic
 def update_outreach_task(*, user, task, validated_data, expected_version):
-    """Safely edit mutable task facts without touching workflow state timestamps."""
+    """Edit task facts atomically; delegate requested status to the workflow."""
     _lock_tenant(user)
     task = _locked_task(user, _pk(task))
     if task.is_deleted:
@@ -1486,6 +1564,11 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         )
 
     data = dict(validated_data)
+    requested_status = data.pop("status", None)
+    if not data and requested_status is not None:
+        if requested_status == task.status:
+            return task
+        return transition_outreach_task(user=user, task=task, status=requested_status, expected_version=expected_version)
     if any(
         field in data
         for field in ("source_owner_name_snapshot", "source_dispatcher_name_snapshot")
@@ -1629,6 +1712,8 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         before=before,
         after=after,
     )
+    if requested_status is not None and requested_status != task.status:
+        task = transition_outreach_task(user=user, task=task, status=requested_status, expected_version=task.version)
     if "target_count" in changes:
         task = recompute_outreach_task_completion(user=user, task=task)
     return task
@@ -2143,7 +2228,8 @@ def transition_outreach_task(*, user, task, status, expected_version):
         raise ValidationError({"status": "Unsupported task status."})
     allowed = {
         OutreachTask.Status.PENDING: {OutreachTask.Status.IN_PROGRESS, OutreachTask.Status.CANCELLED},
-        OutreachTask.Status.IN_PROGRESS: {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED},
+        OutreachTask.Status.IN_PROGRESS: {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED, OutreachTask.Status.PAUSED},
+        OutreachTask.Status.PAUSED: {OutreachTask.Status.IN_PROGRESS, OutreachTask.Status.CANCELLED},
         OutreachTask.Status.COMPLETED: set(),
         OutreachTask.Status.CANCELLED: set(),
     }
@@ -4985,6 +5071,23 @@ def transition_sample_fulfillment(
             {"confirmation": "Explicit confirmation is required for terminal status changes."},
             code="confirmation_required",
         )
+    if status == SampleFulfillment.Status.BLACKLISTED:
+        from rest_framework.exceptions import PermissionDenied
+        from apps.permissions.services import check_user_permission
+        from apps.permissions.ui_p2_scopes import require_all_scope
+
+        for permission in ("influencers.manage", "influencers.fulfillment.manage"):
+            if not check_user_permission(user, permission):
+                raise PermissionDenied("拉黑需要达人档案及送样管理权限，且两项均为全量数据范围。")
+            require_all_scope(user, permission)
+        if fulfillment.status in SAMPLE_TERMINAL_STATUSES:
+            raise ValidationError({"status": "已完成、已取消或已拉黑的送样不能再次拉黑。"})
+        set_influencer_blacklist(
+            user=user, influencer=fulfillment.influencer_id, blacklisted=True,
+            reason=reason or f"sample_blacklist:{fulfillment.fulfillment_no}",
+        )
+        fulfillment.refresh_from_db()
+        return fulfillment
     allowed = {
         SampleFulfillment.Status.PENDING: {
             SampleFulfillment.Status.PROCESSING,
@@ -5119,11 +5222,24 @@ def update_sample_fulfillment(
         items_mode = "append"
         item_payloads = append_item_payloads
     has_item_change = item_payloads is not None
-    identifier_only = bool(data) and set(data) <= {"fulfillment_no", "type_no"} and not has_item_change
+    identity_only = bool(data) and set(data) <= {"fulfillment_no", "type_no", "external_product_id"} and not has_item_change
     if not data and not has_item_change:
         raise ValidationError({"detail": "At least one editable fulfillment field is required."})
 
     changes = {}
+    if "external_product_id" in data:
+        product_id = str(data["external_product_id"] or "").strip()
+        if fulfillment.outreach_task_id or fulfillment.outreach_target_id or (fulfillment.external_product_id or "").strip():
+            raise ValidationError({"external_product_id": "仅未关联任务且商品 ID 为空的送样可以补录。"})
+        if not product_id or re.search(r"[,，、;；\r\n]+", product_id):
+            raise ValidationError({"external_product_id": "请填写一个有效的商品 ID。"})
+        matches = resolve_outreach_products(
+            tenant=user.tenant, store_id=fulfillment.store_id, product_id=product_id,
+        )["candidates"]
+        if not matches:
+            raise ValidationError({"external_product_id": "该商品不在原店铺目录中，请核对商品 ID。"})
+        changes["external_product_id"] = product_id
+        changes["product_name_snapshot"] = matches[0]["product_name"] or fulfillment.product_name_snapshot
     reserve_current(fulfillment)
     for field_name in ("fulfillment_no", "type_no"):
         if field_name in data:
@@ -5152,6 +5268,7 @@ def update_sample_fulfillment(
     before = {
         "fulfillment_no": fulfillment.fulfillment_no,
         "type_no": fulfillment.type_no,
+        "external_product_id": fulfillment.external_product_id,
         "sample_order_no": fulfillment.sample_order_no,
         "notes": fulfillment.notes,
         "link_type": fulfillment.link_type,
@@ -5162,7 +5279,7 @@ def update_sample_fulfillment(
     }
     now = timezone.now()
     auto_ship = (
-        not identifier_only
+        not identity_only
         and fulfillment.status == SampleFulfillment.Status.PENDING
         and bool(str(changes.get("sample_order_no", fulfillment.sample_order_no) or "").strip())
     )
@@ -5221,7 +5338,7 @@ def update_sample_fulfillment(
         )
     else:
         fulfillment.refresh_from_db()
-        if not identifier_only:
+        if not identity_only:
             _refresh_existing_sample_costs(user=user, fulfillment=fulfillment)
 
     _audit(
@@ -5233,6 +5350,7 @@ def update_sample_fulfillment(
         after={
             "fulfillment_no": fulfillment.fulfillment_no,
             "type_no": fulfillment.type_no,
+            "external_product_id": fulfillment.external_product_id,
             "sample_order_no": fulfillment.sample_order_no,
             "notes": fulfillment.notes,
             "link_type": fulfillment.link_type,
@@ -5242,7 +5360,7 @@ def update_sample_fulfillment(
             "calculated_cost": str(fulfillment.calculated_cost) if fulfillment.calculated_cost is not None else None,
         },
     )
-    if not identifier_only:
+    if not identity_only:
         _recompute_related_task(user=user, fulfillment=fulfillment)
     return fulfillment
 

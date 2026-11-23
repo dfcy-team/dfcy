@@ -43,7 +43,7 @@ def test_reconcile_links_only_unique_exact_registered_video_and_is_idempotent(la
     assert reconcile(actor, store.pk, apply=True).get("profiles_updated", 0) == 0
 
 
-def test_sync_quarantines_bad_rate_and_commits_degraded_readback(marketplace_callback, monkeypatch):
+def test_sync_quarantines_bad_rate_and_commits_degraded_readback(marketplace_callback, monkeypatch, django_capture_on_commit_callbacks):
     from urllib.parse import urlencode
     from rest_framework.test import APIClient
     client, store, config, params, _ = marketplace_callback
@@ -79,7 +79,13 @@ def test_sync_quarantines_bad_rate_and_commits_degraded_readback(marketplace_cal
             return {"data":{"latest_available_date":str(day), "total_count":1, "videos":[payload]}}
 
     actor = store.tenant.users.first()
-    result = tiktok_video_sync.run_day(actor, store.pk, day, apply=True, client_factory=Client)
+    from apps.influencers.tasks import reconcile_sample_videos_task
+    dispatched = []
+    monkeypatch.setattr(reconcile_sample_videos_task, "delay", lambda **kwargs: dispatched.append(kwargs))
+    with django_capture_on_commit_callbacks(execute=True):
+        result = tiktok_video_sync.run_day(actor, store.pk, day, apply=True, client_factory=Client)
+        assert dispatched == []
+    assert dispatched == [{"tenant_id": store.tenant_id, "store_id": store.pk, "video_ids": [video.pk]}]
     metric = TikTokVideoDailyMetric.objects.get(store=store, metric_date=day)
     batch = TikTokVideoSyncBatch.objects.get(pk=result["batch_id"])
     evidence = TikTokVideoSyncEvidence.objects.filter(batch=batch, page=0).get().payload

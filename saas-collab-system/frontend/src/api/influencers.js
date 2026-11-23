@@ -6,6 +6,7 @@ const API_ROOT = '/api/internal/influencers';
 export const OUTREACH_STATUS_LABELS = Object.freeze({
   pending: '待开始',
   in_progress: '进行中',
+  paused: '已暂停',
   completed: '已完成',
   cancelled: '已取消'
 });
