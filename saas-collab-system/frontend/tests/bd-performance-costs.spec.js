@@ -13,10 +13,12 @@ describe('BD actual cost presentation', () => {
     expect(costDisplay({ actual_standard_commission: '0.0000', actual_standard_commission_complete: true }, standard, format)).toBe('CNY 0.0000');
   });
 
-  it('marks partial known amounts including zero instead of inventing a complete amount', () => {
-    expect(costDisplay({ actual_standard_commission: null, known_actual_standard_commission: '0.0000', actual_standard_commission_complete: false }, standard, format)).toBe('已知 CNY 0.0000（未完整）');
-    expect(costDisplay({ actual_standard_commission: '8.0000', known_actual_standard_commission: '3.0000', actual_standard_commission_complete: false }, standard, format)).toBe('已知 CNY 3.0000（未完整）');
-    expect(costDisplay({}, standard, format)).toBe('待补齐');
+  it('shows nonzero known subtotals without inventing an unverified zero', () => {
+    expect(costDisplay({ actual_standard_commission: null, known_actual_standard_commission: '0.0000', actual_standard_commission_complete: false }, standard, format)).toBe('—');
+    expect(costDisplay({ actual_standard_commission: '8.0000', known_actual_standard_commission: '3.0000', actual_standard_commission_complete: false }, standard, format)).toBe('CNY 3.0000');
+    expect(costDisplay({}, standard, format)).toBe('—');
+    expect(costDisplay({ known_total_cost: '12.0000' }, BD_COST_COLUMNS[3], format)).toBe('CNY 12.0000');
+    expect(costDisplay({ known_sample_cost: '9.0000' }, BD_COST_COLUMNS[0], format)).toBe('已知 CNY 9.0000（未完整）');
   });
 
   it('exports full amounts, separately labelled known subtotals and completeness', () => {

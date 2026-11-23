@@ -4,7 +4,7 @@
       <div><span>BD 成员</span><strong>{{ displayCount(totalMetric('owner_count', rows.length)) }}</strong><small>统计范围内</small></div>
       <div><span>送样记录</span><strong>{{ displayCount(totalMetric('samples', totalMetric('sample_count', 0))) }}</strong><small>已实际送样</small></div>
       <div><span>合作预估计佣金额</span><strong>{{ formatMoney(totalMetric('gmv', null)) }}</strong><small>{{ reportCurrency }}</small></div>
-      <div><span>合作单 ROI</span><strong>{{ formatRoi(totalMetric('roi', null)) }}</strong><small>预估计佣金额 / 总成本</small></div>
+      <div><span>合作单 ROI</span><strong>{{ roiDisplay(totals) }}</strong><small>预估计佣金额 / 总成本</small></div>
     </div>
 
     <el-card class="workspace-card" shadow="never">
@@ -74,14 +74,14 @@
           <el-table-column prop="owner" label="BD 成员" min-width="140" />
           <el-table-column prop="sample_count" label="送样记录" min-width="110" />
           <el-table-column prop="valid_order_count" label="有效订单" min-width="110" />
-          <el-table-column prop="gmv" label="合作预估计佣金额" min-width="185"><template #default="{ row }">{{ formatMoney(row.gmv) }}</template></el-table-column>
-          <el-table-column prop="gmv_php" label="PHP 预估计佣金额" min-width="175"><template #default="{ row }">{{ formatNativeMoney(row.gmv_php, 'PHP') }}</template></el-table-column>
-          <el-table-column prop="gmv_myr" label="MYR 预估计佣金额" min-width="175"><template #default="{ row }">{{ formatNativeMoney(row.gmv_myr, 'MYR') }}</template></el-table-column>
-          <el-table-column prop="gmv_thb" label="THB 预估计佣金额" min-width="175"><template #default="{ row }">{{ formatNativeMoney(row.gmv_thb, 'THB') }}</template></el-table-column>
+          <el-table-column prop="gmv" label="合作预估计佣金额" min-width="185"><template #default="{ row }">{{ commissionBaseDisplay(row) }}</template></el-table-column>
+          <el-table-column prop="gmv_php" label="PHP 预估计佣金额" min-width="175"><template #default="{ row }">{{ commissionBaseDisplay(row, 'PHP') }}</template></el-table-column>
+          <el-table-column prop="gmv_myr" label="MYR 预估计佣金额" min-width="175"><template #default="{ row }">{{ commissionBaseDisplay(row, 'MYR') }}</template></el-table-column>
+          <el-table-column prop="gmv_thb" label="THB 预估计佣金额" min-width="175"><template #default="{ row }">{{ commissionBaseDisplay(row, 'THB') }}</template></el-table-column>
           <el-table-column v-for="column in BD_COST_COLUMNS" :key="column.key" :prop="column.key" :label="column.label" min-width="190">
             <template #default="{ row }">{{ costDisplay(row, column, formatMoney) }}</template>
           </el-table-column>
-          <el-table-column prop="roi" label="合作单 ROI" min-width="120"><template #default="{ row }">{{ formatRoi(row.roi) }}</template></el-table-column>
+          <el-table-column prop="roi" label="合作单 ROI" min-width="120"><template #default="{ row }">{{ roiDisplay(row) }}</template></el-table-column>
           <template v-if="filters.metrics === 'full'">
             <el-table-column prop="shipped_count" label="已送达" min-width="100" />
             <el-table-column prop="item_quantity" label="商品件数" min-width="100" />
@@ -118,19 +118,20 @@ const amountWarning = computed(() => {
   const missingStandard = Number(totals.value.missing_actual_standard_commission_count || 0);
   const missingAds = Number(totals.value.missing_actual_ads_commission_count || 0);
   const warnings = [];
-  if (missingBase) warnings.push(`${missingBase} 条订单明细缺少预估计佣金额，受影响金额和 ROI 显示为空，不使用支付金额替代`);
+  if (missingBase) warnings.push(`${missingBase} 条订单明细缺少预估计佣金额，受影响的完整金额和 ROI 不展示，不使用支付金额替代`);
   if (missingCost) warnings.push(`${missingCost} 条送样记录缺少成本`);
   if (missingStandard) warnings.push(`${missingStandard} 条有效订单明细缺少实际标准佣金`);
   if (missingAds) warnings.push(`${missingAds} 条有效订单明细缺少实际广告佣金`);
-  if (missingCost || missingStandard || missingAds) warnings.push('已知小计不是完整总成本，受影响总成本和 ROI 显示为空');
-  if (performance.value.rate_missing) warnings.push('存在缺失汇率，受影响金额和 ROI 显示为空');
+  if (missingStandard || missingAds) warnings.push('实际佣金列仅展示已核实金额，不是完整区间总额');
+  if (missingCost || missingStandard || missingAds) warnings.push('总成本仅展示已核实小计；参考 ROI = 已核实计佣金额 / 已核实成本，不是正式 ROI');
+  if (performance.value.rate_missing) warnings.push('存在缺失汇率，受影响的完整金额和 ROI 不展示');
   return warnings.join('；');
 });
 const lastUpdated = computed(() => performance.value?.data_updated_at || performance.value?.data_as_of);
 const sourceMessage = computed(() => ({
   not_imported: '暂无已导入的联盟订单，金额指标保持为空。',
   awaiting_fulfillment_data: '等待送样履约数据完成归属，当前不展示推算金额。',
-  incomplete: '订单结算或退款状态尚未完整核验，仅展示已核验有效明细的已知小计，完整金额、总成本和 ROI 保持为空。',
+  incomplete: '订单结算或退款状态尚未完整核验，金额只展示已核实小计；参考 ROI 不代表正式结果。',
   empty: '当前日期范围暂无可归属的绩效记录。'
 }[performance.value?.source_status] || ''));
 
@@ -154,10 +155,27 @@ function formatNativeMoney(value, currency) {
   const number = Number(value);
   return Number.isFinite(number) ? `${currency} ${number.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}` : String(value);
 }
+function commissionBaseDisplay(row, currency) {
+  const full = currency ? row[`gmv_${currency.toLowerCase()}`] : row.gmv;
+  const known = currency ? row.known_native_gmv?.[currency] : row.known_estimated_commission_base;
+  const format = (value) => currency ? formatNativeMoney(value, currency) : formatMoney(value);
+  if (full != null && full !== '') return format(full);
+  // The API initializes partial sums to zero, even when no eligible amount was observed.
+  const subtotal = Number(known);
+  return Number.isFinite(subtotal) && subtotal !== 0 ? format(known) : '—';
+}
 function formatRoi(value) {
   if (value === null || value === undefined || value === '') return '—';
   const number = Number(value);
   return Number.isFinite(number) ? `${number.toFixed(4)}x` : String(value);
+}
+function roiDisplay(row) {
+  if (row?.roi != null && row.roi !== '') return formatRoi(row.roi);
+  const amount = Number(row?.known_estimated_commission_base);
+  const cost = Number(row?.known_total_cost);
+  if (!(Number(row?.valid_order_count) > 0) || !Number.isFinite(amount) || !Number.isFinite(cost) || amount <= 0 || cost <= 0) return '—';
+  const ratio = amount / cost;
+  return Number.isFinite(ratio) ? `参考 ${formatRoi(ratio)}` : '—';
 }
 function formatTime(value) {
   if (!value) return '—';
