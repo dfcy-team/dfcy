@@ -45,6 +45,8 @@
         </el-select>
         <el-checkbox v-model="filters.normalOnly" @change="applyFilters">正常任务</el-checkbox>
         <el-checkbox v-model="filters.deletedOnly" @change="applyFilters">只显示删除的</el-checkbox>
+        <label>创建开始日期 <input v-model="filters.created_from" type="date" aria-label="创建开始日期（北京时间）" @change="applyFilters" /></label>
+        <label>创建结束日期 <input v-model="filters.created_to" type="date" aria-label="创建结束日期（北京时间）" @change="applyFilters" /></label>
         <el-button type="primary" @click="applyFilters">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
         <el-button type="primary" :disabled="!canManage" @click="openCreate">新建任务</el-button>
@@ -474,7 +476,7 @@ const bdOptions = ref([]);
 const influencerOptions = ref([]);
 const taskOptionsLoaded = ref(false);
 const influencerOptionsLoaded = ref(false);
-const filters = reactive({ search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
+const filters = reactive({ search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at', created_from: '', created_to: '' });
 const displayTargets = computed(() => [...targets.value, ...deletedTargets.value]);
 const canManage = computed(() => auth.hasPermission('influencers.outreach.manage'));
 const canCreateFulfillment = computed(() => auth.hasPermission('influencers.fulfillment.manage'));
@@ -629,6 +631,8 @@ async function load() {
   if (filters.status) params.status = filters.status;
   if (filters.store) params.store = filters.store;
   if (filters.deletedOnly) params.deleted_only = 'true';
+  if (filters.created_from) params.created_from = filters.created_from;
+  if (filters.created_to) params.created_to = filters.created_to;
   const r = await fetchOutreachTasks(params);
   loading.value = false;
   if (r.success) {
@@ -645,7 +649,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
+  Object.assign(filters, { search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at', created_from: '', created_to: '' });
   applyFilters();
 }
 
