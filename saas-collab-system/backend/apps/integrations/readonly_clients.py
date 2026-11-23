@@ -2025,10 +2025,12 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
                 break
         else:
             raise ValidationError("极风库存响应缺少记录列表，不能标记为校验通过。")
+        if any(not isinstance(item, dict) for item in records):
+            raise ValidationError("极风库存响应包含无效记录，不能丢弃后标记为同步成功。")
         total_page = int(page.get("totalPage") or page_no)
         snapshot_at = self.now().isoformat()
         return {
-            "records": [{**item, "_snapshot_at_utc": snapshot_at} for item in records if isinstance(item, dict)],
+            "records": [{**item, "_snapshot_at_utc": snapshot_at} for item in records],
             "next_cursor": str(page_no + 1) if page_no < total_page else "",
             "raw_responses": [{"endpoint": self.INVENTORY_PATH, "payload": payload}],
         }
