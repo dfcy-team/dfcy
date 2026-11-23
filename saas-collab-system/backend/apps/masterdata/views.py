@@ -23,6 +23,9 @@ from .models import PlatformMaster, PlatformSiteMaster, StatusChoices, StoreMast
 from .platform_catalog import PLATFORM_CATALOG
 from .platform_site_mapping import apply_exact_mappings, mapping_preview
 from apps.accounts.models import CustomUser
+from apps.accounts.models import InternalUserProfile
+from apps.tenants.models import Department
+from apps.permissions.role_catalog import user_is_tenant_administrator
 from apps.products.models import ProductCategory
 from .serializers import MODEL_BY_RESOURCE, SERIALIZER_BY_RESOURCE
 
@@ -93,6 +96,56 @@ class PlatformCatalogView(APIView):
 
     def get(self, request):
         return success_response({"count": len(PLATFORM_CATALOG), "results": list(PLATFORM_CATALOG)})
+
+
+class StorePersonOptionsView(APIView):
+    """Small, tenant-safe directory used only by store assignment controls."""
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "masterdata.view"
+
+    def get(self, request):
+        user = request.user
+        users = CustomUser.objects.filter(
+            tenant_id=user.tenant_id, user_type=CustomUser.UserType.INTERNAL,
+            is_active=True,
+        )
+        # Only holders of the protected tenant-admin role keep the tenant-wide
+        # assignment experience. An ordinary all-scope viewer remains scoped to
+        # their own department tree.
+        if not (user.is_superuser or user_is_tenant_administrator(user)):
+            try:
+                profile = user.internal_profile
+            except InternalUserProfile.DoesNotExist:
+                return success_response({"count": 0, "results": []})
+            seeds = set(profile.departments.filter(tenant_id=user.tenant_id).values_list("id", flat=True))
+            if profile.department_id:
+                seeds.add(profile.department_id)
+            departments = list(Department.objects.filter(tenant_id=user.tenant_id).values("id", "parent_id"))
+            parents = {row["id"]: row["parent_id"] for row in departments}
+            roots = set()
+            for department_id in seeds:
+                current = department_id
+                visited = set()
+                while current in parents and current not in visited:
+                    visited.add(current)
+                    parent_id = parents[current]
+                    if parent_id is None:
+                        roots.add(current)
+                        break
+                    current = parent_id
+            allowed = set(roots)
+            changed = True
+            while changed:
+                descendants = {row["id"] for row in departments if row["parent_id"] in allowed}
+                expanded = allowed | descendants
+                changed = expanded != allowed
+                allowed = expanded
+            users = users.filter(internal_profile__tenant_id=user.tenant_id).filter(
+                Q(internal_profile__department_id__in=allowed)
+                | Q(internal_profile__departments__id__in=allowed)
+            )
+        rows = list(users.order_by("full_name", "username").values("id", "full_name", "username").distinct())
+        return success_response({"count": len(rows), "results": rows})
 
 
 class PlatformSiteMigrationView(APIView):

@@ -72,7 +72,7 @@ def validate_component_rows(tenant, rows, bundle_sku=None):
     if len(skus) != len(ids):
         raise ValueError("component SKU not found or inactive")
     for sku_id in ids:
-        if skus[sku_id].spu.product_type == ProductSPU.ProductType.BUNDLE or (bundle_sku and sku_id == bundle_sku.id):
+        if skus[sku_id].product_type == ProductSKU.ProductType.BUNDLE or (bundle_sku and sku_id == bundle_sku.id):
             raise ValueError("nested or self-referencing bundles are not supported")
     normalized = []
     for row, sku_id in zip(rows, ids):
@@ -370,8 +370,8 @@ def confirm_legacy_migration(*, tenant, actor, token):
                 "code": "nested_bundle_component",
             } for row in item.get("preview_rows", []))
             continue
-        bundle.spu.product_type = ProductSPU.ProductType.BUNDLE
-        bundle.spu.save(update_fields=["product_type", "updated_at"])
+        bundle.product_type = ProductSKU.ProductType.BUNDLE
+        bundle.save(update_fields=["product_type", "updated_at"])
         if item.get("image_url"):
             bundle.image_url = item["image_url"][:500]
             bundle.save(update_fields=["image_url", "updated_at"])

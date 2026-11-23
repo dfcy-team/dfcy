@@ -237,6 +237,7 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "apps/listings/migrations/0005_platformproductdetail_platform_image_url.py",
             "apps/reports/migrations/0013_export_storage_metadata.py",
             "apps/products/migrations/0028_legacy_import_spu_group.py",
+            "apps/products/migrations/0030_productsku_product_type.py",
             "apps/supply_chain/migrations/0031_settlementrevision_payee_allocations_payeeaccount.py",
             "apps/supply_chain/migrations/0032_payment_records.py",
             "apps/supply_chain/migrations/0033_payment_applications.py",
@@ -289,7 +290,16 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
         historical_digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
     assert historical_digest.hexdigest() == HISTORICAL_MIGRATION_SHA
     assert current_digest != HISTORICAL_MIGRATION_SHA
-    assert current_digest == MIGRATION_SHA
+    # The SKU-type migration belongs to the new candidate, not this frozen controller.
+    frozen_digest = sha256()
+    for path in sorted(controller_backend.glob("apps/*/migrations/*.py")):
+        relative = path.relative_to(controller_backend).as_posix()
+        if relative == "apps/products/migrations/0030_productsku_product_type.py":
+            continue
+        frozen_digest.update(relative.encode())
+        frozen_digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
+    assert frozen_digest.hexdigest() == MIGRATION_SHA
+    assert current_digest != MIGRATION_SHA
     release_sha, tree_sha = next(iter(HISTORICAL_TARGETS.items()))
     with pytest.raises(ValueError, match="Unapproved historical source"):
         validate_historical_source(release_sha, tree_sha, current_digest)

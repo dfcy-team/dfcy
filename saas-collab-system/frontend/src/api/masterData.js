@@ -14,6 +14,11 @@ export const fetchPlatformCatalog = () => requestWithMockFallback(
   'masterdata.platforms.catalog'
 );
 export const fetchStores = (params = {}) => resourceRequest('stores', params);
+export const fetchStorePersonOptions = () => requestWithMockFallback(
+  { method: 'get', url: '/api/internal/master-data/store-person-options/' },
+  () => ({ success: true, data: { count: 0, results: [] } }),
+  'masterdata.store-person-options'
+);
 
 // Deep links must resolve a single tenant-scoped record instead of guessing
 // from the first page of a collection.  The detail request deliberately does

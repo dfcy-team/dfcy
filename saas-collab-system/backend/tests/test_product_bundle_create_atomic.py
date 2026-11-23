@@ -23,7 +23,9 @@ def _bundle_client(tenant, username="bundle-atomic-user"):
         user_type=CustomUser.UserType.INTERNAL,
     )
     role = Role.objects.create(tenant=tenant, code=f"{username}-role", name="Bundle atomic role")
-    role.permissions.add(*Permission.objects.filter(code__in=["products.bundle.view", "products.bundle.manage"]))
+    for code in ["products.bundle.view", "products.bundle.manage"]:
+        permission, _ = Permission.objects.get_or_create(code=code, defaults={"name": code, "module": "products", "action": code.rsplit(".", 1)[-1]})
+        role.permissions.add(permission)
     UserRole.objects.create(tenant=tenant, user=user, role=role)
     DataScope.objects.create(tenant=tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
     client = APIClient()
@@ -298,7 +300,7 @@ def test_bundle_create_can_add_sku_to_existing_bundle_spu():
 
 
 @pytest.mark.django_db
-def test_bundle_create_existing_spu_rejects_standard_and_cross_tenant_spus():
+def test_bundle_create_existing_spu_accepts_standard_but_rejects_cross_tenant_spus():
     tenant = Tenant.objects.create(name="Existing validation tenant", code="bundle-existing-validation")
     other_tenant = Tenant.objects.create(name="Foreign existing tenant", code="bundle-existing-foreign")
     client = _bundle_client(tenant, "bundle-existing-validation-user")
@@ -332,6 +334,8 @@ def test_bundle_create_existing_spu_rejects_standard_and_cross_tenant_spus():
         format="json",
     )
 
-    assert standard.status_code == 400
+    assert standard.status_code == 201
     assert foreign.status_code == 400
-    assert not ProductSKU.objects.filter(tenant=tenant, spu=standard_spu).exists()
+    assert ProductSKU.objects.get(tenant=tenant, spu=standard_spu).product_type == "bundle"
+    standard_spu.refresh_from_db()
+    assert standard_spu.product_type == "standard"

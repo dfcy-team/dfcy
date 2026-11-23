@@ -138,7 +138,7 @@ def _validated_config(actor, payload):
             raise ValidationError({"platform_type": "所选平台不在当前国家授权店铺范围内。"})
         selected = matches[0]
     candidates = country_decisions.skus_for(actor, country).filter(is_active=True,
-        spu__product_type="standard").exclude(inventory_type="virtual").order_by("sku_code", "pk")
+        product_type="standard").exclude(inventory_type="virtual").order_by("sku_code", "pk")
     ids = list(candidates.values_list("pk", flat=True)[:MAX_CANDIDATES + 1])
     if len(ids) > MAX_CANDIDATES:
         raise ValidationError("当前国家普通商品超过全量计算上限100000，请缩小范围或分批处理。")

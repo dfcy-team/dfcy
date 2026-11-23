@@ -15,6 +15,7 @@ def bundle(world):
     spu = world['sku'].spu
     spu.product_type = 'bundle'
     spu.save()
+    spu.skus.update(product_type='bundle')
 
 
 def import_excel(world):
@@ -82,3 +83,17 @@ def test_draft_cannot_submit_after_product_changes_to_bundle(world):
         services.confirm_purchase_order(buyer, order.pk, expected_version=order.version,idempotency_key='confirm')
     response = write(client(ops), OPS+str(demand['id'])+'/submit/', {'expected_version':demand['version']}, 'submit')
     assert response.status_code == 422
+
+
+def test_parent_type_change_preserves_standard_sku_import(world):
+    buyer = internal_user(world)
+    spu = world['sku'].spu
+    spu.product_type = 'bundle'
+    spu.save(update_fields=['product_type'])
+    world['sku'].refresh_from_db()
+    assert world['sku'].product_type == 'standard'
+    job = create_import(buyer, 'mixed.xlsx', import_excel(world), idempotency_key='mixed-import')
+    assert job.preview['valid']
+    commit_import(buyer, job.pk, expected_version=1, idempotency_key='mixed-commit')
+    job.refresh_from_db()
+    assert job.committed_at is not None and job.order_ids

@@ -140,7 +140,7 @@ def publish_price(actor, supplier, sku, value, effective_date, *, order=None, no
 
 
 def require_orderable_sku(sku):
-    if sku.spu.product_type != 'standard':
+    if sku.product_type != 'standard':
         raise ValidationError('运营订货单和采购单仅支持普通商品，组合商品不能参与订货。')
     return sku
 

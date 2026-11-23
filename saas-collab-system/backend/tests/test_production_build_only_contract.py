@@ -162,6 +162,7 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/reports/migrations/0012_worker_active.py",
         "apps/reports/migrations/0013_export_storage_metadata.py",
         "apps/products/migrations/0028_legacy_import_spu_group.py",
+        "apps/products/migrations/0030_productsku_product_type.py",
         "apps/supply_chain/migrations/0031_settlementrevision_payee_allocations_payeeaccount.py",
         "apps/supply_chain/migrations/0038_payment_item_profiles.py",
         "apps/supply_chain/migrations/0039_fee_item_breakdown.py",
@@ -309,10 +310,20 @@ def test_archive_migrations_cannot_reuse_registered_release():
     assert registered_digest.hexdigest() == archived_migration_sha
     current_digest = migration_digest(root)
     assert current_digest != archived_migration_sha
-    assert current_digest == MIGRATION_SHA
+    # The SKU-type migration belongs to the new candidate, not this frozen controller.
+    frozen_digest = sha256()
+    for path in sorted(root.glob("apps/*/migrations/*.py")):
+        relative = path.relative_to(root).as_posix()
+        if relative == "apps/products/migrations/0030_productsku_product_type.py":
+            continue
+        frozen_digest.update(relative.encode())
+        frozen_digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
+    assert frozen_digest.hexdigest() == MIGRATION_SHA
+    assert current_digest != MIGRATION_SHA
     args = valid_args()
     args[-1] = current_digest
-    assert make_manifest(*args)["migration_sha256"] == current_digest
+    with pytest.raises(ValueError):
+        make_manifest(*args)
 
 
 @pytest.mark.parametrize("line_endings", [(b"\n", b"\n"), (b"\r\n", b"\r\n"), (b"\r\n", b"\n")])

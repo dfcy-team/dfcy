@@ -25,7 +25,7 @@ def product_details(sku):
         'specification', 'size', 'material', 'unit', 'origin_country', 'hs_code', 'inventory_type', 'product_description')}
     result.update(image_url=safe_image_url(sku.image_url, sku.tenant_id), spu=spu.spu_code,
         brand=spu.brand, category=spu.category_node.name if spu.category_node_id else spu.category,
-        product_type=spu.product_type, color=sku.color_code, spec_values=deepcopy(sku.spec_values),
+        product_type=sku.product_type, color=sku.color_code, spec_values=deepcopy(sku.spec_values),
         selling_points=deepcopy(sku.selling_points))
     for field, key in [('package_weight', 'package_weight_g'), ('package_volume', 'package_volume_cbm'),
                        ('package_length_cm', 'package_length_cm'), ('package_width_cm', 'package_width_cm'),

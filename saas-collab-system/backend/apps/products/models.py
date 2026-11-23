@@ -238,12 +238,16 @@ class ProductSPU(models.Model):
 
 
 class ProductSKU(models.Model):
+    class ProductType(models.TextChoices):
+        STANDARD = "standard", "普通商品"
+        BUNDLE = "bundle", "组合商品"
     class ProductNameSource(models.TextChoices):
         AUTO = "auto", "Auto"
         MANUAL = "manual", "Manual"
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="product_skus")
     spu = models.ForeignKey(ProductSPU, on_delete=models.CASCADE, related_name="skus")
+    product_type = models.CharField(max_length=20, choices=ProductType.choices, default="")
     sku_code = models.CharField(max_length=80)
     legacy_sku_code = models.CharField(max_length=160, blank=True, db_index=True)
     product_name = models.CharField(max_length=200, blank=True, default="")
@@ -283,6 +287,7 @@ class ProductSKU(models.Model):
             models.Index(fields=["tenant", "is_active", "updated_at", "id"], name="idx_sku_tenant_active_updated"),
             models.Index(fields=["tenant", "updated_at", "id"], name="idx_sku_tenant_updated"),
         ]
+
         constraints = [
             models.UniqueConstraint(fields=["tenant", "sku_code"], name="uniq_sku_code_per_tenant"),
             models.CheckConstraint(
@@ -306,6 +311,13 @@ class ProductSKU(models.Model):
                 name="product_sku_package_height_nonnegative",
             ),
         ]
+    def save(self, *args, **kwargs):
+        # Preserve the historical default for direct legacy callers, while
+        # keeping an existing SKU's type stable when its SPU changes.
+        if not self.product_type:
+            self.product_type = self.spu.product_type
+        return super().save(*args, **kwargs)
+
 
     def __str__(self):
         return self.sku_code
@@ -539,9 +551,9 @@ class ProductBundleComponent(models.Model):
             raise ValidationError("Bundle SKU and component relation must belong to the same tenant.")
         if self.component_sku_id and self.component_sku.tenant_id != self.tenant_id:
             raise ValidationError("Component SKU and bundle relation must belong to the same tenant.")
-        if self.bundle_sku_id and self.bundle_sku.spu.product_type != ProductSPU.ProductType.BUNDLE:
+        if self.bundle_sku_id and self.bundle_sku.product_type != ProductSKU.ProductType.BUNDLE:
             raise ValidationError("Bundle SKU must belong to a bundle product.")
-        if self.component_sku_id and self.component_sku.spu.product_type == ProductSPU.ProductType.BUNDLE:
+        if self.component_sku_id and self.component_sku.product_type == ProductSKU.ProductType.BUNDLE:
             raise ValidationError("Nested bundles are not supported in the initial release.")
         if self.bundle_sku_id and self.bundle_sku_id == self.component_sku_id:
             raise ValidationError("A bundle cannot contain itself.")

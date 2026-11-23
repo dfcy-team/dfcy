@@ -9,10 +9,10 @@ const api = read('src/api/products.js');
 const payload = read('src/utils/bundleCreatePayload.js');
 
 describe('组合商品页面按钮与导入导出契约', () => {
-  it('新增组合 SKU 可新建 SPU 或选择已有组合 SPU，并显示旧 SPU 映射', () => {
+  it('新增组合 SKU 可新建 SPU 或选择已有 SPU，并显示旧 SPU 映射', () => {
     expect(page).toContain('data-testid="bundle-spu-mode"');
     expect(page).toContain('新建组合 SPU');
-    expect(page).toContain('选择已有组合 SPU');
+    expect(page).toContain('选择已有 SPU');
     expect(page).toContain('搜索新/旧 SPU 编码或商品名称');
     expect(page).toContain('legacy_spu_code');
     expect(page).toContain('buildBundleCreatePayload({');

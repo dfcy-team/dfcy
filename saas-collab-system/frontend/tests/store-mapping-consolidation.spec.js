@@ -33,6 +33,7 @@ const masterDataApi = vi.hoisted(() => ({
   fetchPlatformSiteMigrationPreview: vi.fn(),
   fetchPlatformSites: vi.fn(),
   fetchStores: vi.fn(),
+  fetchStorePersonOptions: vi.fn(),
   importStores: vi.fn(),
   updateMasterData: vi.fn(),
   updateMasterDataStatus: vi.fn(),

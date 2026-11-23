@@ -206,7 +206,7 @@ def _bundle_components_for_orders(actor, bundle_items, requested_ids):
                 snapshot.bundle_version.tenant_id != order_tenant or snapshot.bundle_version.bundle_sku_id != bundle_id or
                 snapshot.bundle_version.effective_at > item['sales_order__created_at_utc'] or
                 snapshot.bundle_version.bundle_sku.tenant_id != order_tenant or
-                snapshot.bundle_version.bundle_sku.spu.product_type != 'bundle'):
+                snapshot.bundle_version.bundle_sku.product_type != 'bundle'):
             unverified = True
             continue
         payload = snapshot.components_payload
@@ -233,7 +233,7 @@ def _bundle_components_for_orders(actor, bundle_items, requested_ids):
     component_ids = {row[1] for row in component_rows}
     from apps.products.models import ProductSKU
     valid_components = set(ProductSKU.objects.filter(tenant_id=actor.tenant_id, pk__in=component_ids,
-        spu__product_type='standard').values_list('pk', flat=True))
+        product_type='standard').values_list('pk', flat=True))
     for _, component_id, _ in component_rows:
         if component_id not in valid_components:
             unverified = True
@@ -247,7 +247,7 @@ def _bundle_components_for_orders(actor, bundle_items, requested_ids):
 
 
 def sales_windows(actor, country, sku_ids, windows, *, end_date=None, platform_type=None, permission_cache=None):
-    requested_skus = {row.pk: row.spu.product_type for row in ProductSKU.objects.filter(
+    requested_skus = {row.pk: row.product_type for row in ProductSKU.objects.filter(
         tenant_id=actor.tenant_id, pk__in=sku_ids).select_related('spu')}
     requested_ids = set(requested_skus)
     stores = filter_sales_queryset(actor, SALES,
@@ -297,7 +297,7 @@ def sales_windows(actor, country, sku_ids, windows, *, end_date=None, platform_t
             ordinary_ids = [pk for pk, product_type in requested_skus.items() if product_type != 'bundle']
             bundle_ids = [pk for pk, product_type in requested_skus.items() if product_type == 'bundle']
             rows = source.filter(internal_sku_id__in=ordinary_ids).exclude(
-                Q(bundle_snapshot__isnull=False) | Q(internal_sku__spu__product_type='bundle')).values('internal_sku_id', 'currency')
+                Q(bundle_snapshot__isnull=False) | Q(internal_sku__product_type='bundle')).values('internal_sku_id', 'currency')
             for row in rows.annotate(units=Sum('quantity'), amount=Sum('line_total_amount')):
                 value['direct_sales_by_sku'][row['internal_sku_id']] += row['units']
                 value['amounts'][row['internal_sku_id']][row['currency']] += row['amount']
@@ -306,7 +306,7 @@ def sales_windows(actor, country, sku_ids, windows, *, end_date=None, platform_t
                 for row in own_bundle_rows.annotate(units=Sum('quantity'), amount=Sum('line_total_amount')):
                     value['direct_sales_by_sku'][row['internal_sku_id']] += row['units']
                     value['amounts'][row['internal_sku_id']][row['currency']] += row['amount']
-            bundle_items = source.filter(Q(internal_sku__spu__product_type='bundle') |
+            bundle_items = source.filter(Q(internal_sku__product_type='bundle') |
                 Q(bundle_snapshot__isnull=False)).values(
                     'id', 'sales_order__tenant_id', 'sales_order__created_at_utc', 'internal_sku_id', 'quantity'
                 ).iterator(chunk_size=500)
@@ -462,7 +462,7 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
             observed = sales[days]
             units = observed['units_by_sku'][sku.pk]
             direct_units = observed['direct_sales_by_sku'][sku.pk]
-            bundle_units = observed['bundle_sales_by_sku'][sku.pk] if sku.spu.product_type != 'bundle' else 0
+            bundle_units = observed['bundle_sales_by_sku'][sku.pk] if sku.product_type != 'bundle' else 0
             unknown_codes = set(observed['issues'])
             if not observed['coverage_complete']:
                 unknown_codes.add('collection_coverage_unproven')
@@ -493,7 +493,7 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
             issues.append('unmapped_sales_lines')
         units = observed['units_by_sku'][sku.pk]
         direct_units = observed['direct_sales_by_sku'][sku.pk]
-        bundle_units = observed['bundle_sales_by_sku'][sku.pk] if sku.spu.product_type != 'bundle' else 0
+        bundle_units = observed['bundle_sales_by_sku'][sku.pk] if sku.product_type != 'bundle' else 0
         if not units and not observed['coverage_complete']:
             issues.append('no_sales_facts')
         unknown_codes = {'no_sales_facts', 'no_authorized_sales_store', 'invalid_store_timezone',
