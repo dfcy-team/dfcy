@@ -38,6 +38,9 @@
           <el-option label="建联优先级：低到高（独立送样最后）" value="priority" />
         </el-select>
         <el-checkbox v-model="filters.includeDeleted" @change="applyFilters">显示已删除</el-checkbox>
+        <el-date-picker v-model="createdRange" type="daterange" value-format="YYYY-MM-DD"
+          start-placeholder="创建开始日期" end-placeholder="创建结束日期" range-separator="至"
+          aria-label="创建时间范围（北京时间）" @change="applyFilters" />
         <el-button type="primary" @click="applyFilters">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
         <el-button type="primary" :disabled="!canManage" @click="openCreate">新增送样</el-button>
@@ -99,6 +102,7 @@
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
             <el-tag>{{ statusLabel(FULFILLMENT_STATUS_LABELS, row.status) }}</el-tag>
+            <small v-if="matchedVideoCount(row) > 0">已关联 {{ matchedVideoCount(row) }} 条发布视频</small>
             <small v-if="publishedEvidenceNotice(row)">视频证据待关联</small>
           </template>
         </el-table-column>
@@ -328,6 +332,7 @@ const editingSample = ref(null);
 const inheritedTask = ref(null);
 const draftKey = ref('');
 const filters = reactive({ search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at' });
+const createdRange = ref([]);
 const form = reactive({ fulfillment_no: '', type_no: '', outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', notes: '', link_type: 'YYJL', quick_tags: [] });
 const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '已完成']);
 const LEGACY_FULFILLMENT_STATUSES = new Set(['processing', 'creating', 'blank', '']);
@@ -538,6 +543,9 @@ const todayLabel = (() => {
 async function load() {
   loading.value = true;
   const params = { page: page.value, page_size: pageSize.value, search: filters.search, status: filters.status, store: filters.store, owner: filters.owner, ordering: filters.ordering };
+  if (createdRange.value?.length === 2) {
+    [params.created_from, params.created_to] = createdRange.value;
+  }
   if (filters.includeDeleted) params.include_deleted = 'true';
   const r = await fetchSampleFulfillments(params);
   loading.value = false;
@@ -555,6 +563,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
+  createdRange.value = [];
   Object.assign(filters, { search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at' });
   applyFilters();
 }

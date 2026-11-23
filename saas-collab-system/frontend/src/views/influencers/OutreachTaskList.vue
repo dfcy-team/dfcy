@@ -45,6 +45,9 @@
         </el-select>
         <el-checkbox v-model="filters.normalOnly" @change="applyFilters">正常任务</el-checkbox>
         <el-checkbox v-model="filters.deletedOnly" @change="applyFilters">只显示删除的</el-checkbox>
+        <el-date-picker v-model="createdRange" type="daterange" value-format="YYYY-MM-DD"
+          start-placeholder="创建开始日期" end-placeholder="创建结束日期" range-separator="至"
+          aria-label="创建时间范围（北京时间）" @change="applyFilters" />
         <el-button type="primary" @click="applyFilters">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
         <el-button type="primary" :disabled="!canManage" @click="openCreate">新建任务</el-button>
@@ -475,6 +478,7 @@ const influencerOptions = ref([]);
 const taskOptionsLoaded = ref(false);
 const influencerOptionsLoaded = ref(false);
 const filters = reactive({ search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
+const createdRange = ref([]);
 const displayTargets = computed(() => [...targets.value, ...deletedTargets.value]);
 const canManage = computed(() => auth.hasPermission('influencers.outreach.manage'));
 const canCreateFulfillment = computed(() => auth.hasPermission('influencers.fulfillment.manage'));
@@ -625,6 +629,9 @@ const detailProgressLabel = computed(() => {
 async function load() {
   loading.value = true;
   const params = { page: page.value, page_size: pageSize.value, ordering: filters.ordering };
+  if (createdRange.value?.length === 2) {
+    [params.created_from, params.created_to] = createdRange.value;
+  }
   if (filters.search.trim()) params.search = filters.search.trim();
   if (filters.status) params.status = filters.status;
   if (filters.store) params.store = filters.store;
@@ -645,6 +652,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
+  createdRange.value = [];
   Object.assign(filters, { search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
   applyFilters();
 }
