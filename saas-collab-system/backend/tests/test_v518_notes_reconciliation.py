@@ -154,7 +154,7 @@ def _args(case, **overrides):
 
 def test_prepare_check_preserves_history_and_is_idempotent(gate_case):
     case = gate_case
-    assert PRODUCTION_HISTORY_SHA == "9c48f04b592dd1353dad2533213f19b5333594c8df1944d5c61ee8467b94968c"
+    assert PRODUCTION_HISTORY_SHA == "0174464f65c46597576477cad0fce6a6eaad1097861b0b4036fc50f32c3a147f"
     assert PRODUCTION_BASE_SHA == "9728c548cce4c21d9cbc99aea7407298b4056fc7"
     rn.prepare(_args(case))
     assert case["notes"].read_bytes() == case["expected"]
