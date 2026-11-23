@@ -47,7 +47,9 @@ def initialization_status(user):
     require_access(user)
     runtime = runtime_status()
     job = FinanceSummaryCalculation.objects.filter(tenant=user.tenant,
-        request__bootstrap=True).order_by('-pk').values('id', 'status', 'error_code', 'result_dataset_id').first()
+        request__bootstrap=True).order_by('-pk').values('id', 'status', 'error_code', 'result_dataset_id', 'created_at', 'finished_at', 'request').first()
+    if job:
+        job['scope'] = job.pop('request').get('scope', {})
     return {'initialized': False, 'status': 'uninitialized' if runtime['ready'] else 'runtime_missing',
         'runtime': runtime, 'can_edit': has_full_scope(user, 'finance.import'), 'initialization_job': job,
         'scope_stores': list(StoreMaster.objects.filter(tenant=user.tenant).order_by('code').values('id', 'code'))}
@@ -102,6 +104,10 @@ def publish_candidate(user, pk):
             raise ValidationError('候选计算规则已变化，请重新试算；未发布旧结果。')
         if not candidate.metadata.get('reconciliation', {}).get('conservation_passed'):
             raise ValidationError('候选试算未通过金额守恒核对，不能发布。')
+        if not candidate.metadata.get('reconciliation', {}).get('attribution_complete'):
+            raise ValidationError('候选试算仍有成本或费用待归属，不能发布；请核对缺项后重新试算。')
+        if not candidate.metadata.get('source_checks', {}).get('coverage_complete'):
+            raise ValidationError('候选试算存在未获取或待核来源，不能按零费用发布；请补齐来源后重新试算。')
         raw = gzip.decompress(document_path(candidate).read_bytes())
         if hashlib.sha256(raw).hexdigest() != candidate.source_hash:
             raise ValidationError('候选试算文件校验失败。')

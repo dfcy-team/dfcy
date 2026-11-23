@@ -113,7 +113,8 @@ def test_candidate_publication_rechecks_tenant_sources_and_preserves_other_activ
         document_file=path.name, source_hash=manifest['sha256'], metadata={
             'bootstrap_candidate': True, 'automatic_update_enabled': False,
             'store_ids': [store.pk], 'database_scope': {'stores': [store.pk], 'from':'2026-10-01','to':'2026-10-31'},
-            'checkpoint': {}, 'reconciliation': {'conservation_passed':True,'attribution_complete':False}})
+            'checkpoint': {}, 'reconciliation': {'conservation_passed':True,'attribution_complete':True},
+            'source_checks': {'coverage_complete': True}})
     FinanceSummaryState.objects.create(dataset=candidate, updated_by=user)
     FinanceSummaryCalculation.objects.create(tenant=user.tenant, dataset=candidate, actor=user,
         cache_key='b'*64, kind='rebuild', revision=0, request={'bootstrap': True},

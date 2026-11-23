@@ -12,7 +12,9 @@ import subprocess
 
 SHANGHAI = timezone(timedelta(hours=8))
 VERSION_RE = re.compile(r"\d+\.\d+\.\d+\Z")
-V518_HISTORY_SHA = "9c48f04b592dd1353dad2533213f19b5333594c8df1944d5c61ee8467b94968c"
+# Current deployed 58-entry history includes the Nov23 financial review hotfix.
+# Its exact bytes were captured before reconciliation; preserve its hotfix metadata.
+V518_HISTORY_SHA = "0174464f65c46597576477cad0fce6a6eaad1097861b0b4036fc50f32c3a147f"
 V518_BASE_SHA = "9728c548cce4c21d9cbc99aea7407298b4056fc7"
 V518_VERSION = "2.44.518"
 V518_SCOPE = "V518_SAME_VERSION_NOTES_APPEND"
