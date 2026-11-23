@@ -1083,6 +1083,20 @@ def filtered_order_records(request, queryset=None):
     if queryset is None:
         queryset = _scoped_orders(request, "sales_management.orders.view")
     scoped_orders = queryset
+    tk_type = request.query_params.get("tk_order_type")
+    if tk_type:
+        from apps.influencers.models import AffiliateOrderSnapshot, SampleFulfillment
+        queryset = queryset.filter(platform__platform_type="tiktok").exclude(external_order_id="")
+        if tk_type == "sample":
+            samples = SampleFulfillment.objects.filter(tenant_id=request.user.tenant_id,
+                store_id=OuterRef("store_id"), sample_order_no=OuterRef("external_order_id"), is_deleted=False)
+            queryset = queryset.filter(Q(source_details__tk_sample_kind__in=["free", "refundable"]) | Exists(samples))
+        elif tk_type == "affiliate":
+            matches = AffiliateOrderSnapshot.objects.filter(tenant_id=request.user.tenant_id,
+                store_id=OuterRef("store_id"), order_id=OuterRef("external_order_id"))
+            queryset = queryset.filter(Exists(matches))
+        else:
+            raise ValidationError({"tk_order_type": "无效的订单类型"})
     internal_sku_id = request.query_params.get("internal_sku_id")
     if internal_sku_id is not None:
         if (len(request.query_params.getlist("internal_sku_id")) != 1
