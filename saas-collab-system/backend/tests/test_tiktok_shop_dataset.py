@@ -162,6 +162,27 @@ def test_daily_video_window_is_exclusive_and_scope_checked():
         client.video_day(date(2026, 10, 2))
 
 
+@pytest.mark.parametrize("page,accepted", [
+    ({"total_count": 0, "next_page_token": ""}, True),
+    ({"total_count": 0, "next_page_token": "next"}, False),
+    ({"total_count": 1, "next_page_token": ""}, False),
+    ({"total_count": False, "next_page_token": ""}, False),
+    ({"orders": None, "total_count": 0, "next_page_token": ""}, False),
+])
+def test_strict_affiliate_missing_orders(page, accepted):
+    client = client_with_pages(page)
+    client.authorization.store_id = 1
+    client.strict_affiliate_contract = True
+    client.authorization.scopes = ["seller.affiliate_collaboration.read"]
+    args = (date(2026, 10, 2), date(2026, 10, 2), dataset.ZoneInfo("Asia/Manila"))
+    if accepted:
+        assert client.affiliate_orders(*args) == ([], 1)
+        assert client.last_page_summary["pagination_exhausted"]
+    else:
+        with pytest.raises(dataset.DatasetError, match="affiliate_page_records_invalid"):
+            client.affiliate_orders(*args)
+
+
 def test_affiliate_total_counts_skus_not_orders():
     client = client_with_pages({"orders": [{"id": "order-one", "create_time": 1790899200, "skus": [
         {"sku_id": "sku-one", "product_id": "product-one"},
