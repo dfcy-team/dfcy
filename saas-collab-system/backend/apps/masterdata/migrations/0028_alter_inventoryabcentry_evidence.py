@@ -10,6 +10,9 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="inventoryabcentry",
             name="evidence",
-            field=models.JSONField(blank=True, db_default={}, default=dict),
+            field=models.JSONField(
+                blank=True, default=dict,
+                db_default=models.Func(function="JSON_OBJECT", output_field=models.JSONField()),
+            ),
         ),
     ]

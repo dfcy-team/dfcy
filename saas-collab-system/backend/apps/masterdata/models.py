@@ -543,7 +543,10 @@ class InventoryABCEntry(models.Model):
     cumulative_share = models.DecimalField(max_digits=18, decimal_places=10, null=True)
     first_sale_date = models.DateField(null=True, blank=True)
     changed_at = models.DateField(null=True, blank=True)
-    evidence = models.JSONField(blank=True, default=dict, db_default={})
+    evidence = models.JSONField(
+        blank=True, default=dict,
+        db_default=models.Func(function="JSON_OBJECT", output_field=models.JSONField()),
+    )
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["run", "entity_type", "entity_id"], name="abc_entry_run_entity_uniq")]
