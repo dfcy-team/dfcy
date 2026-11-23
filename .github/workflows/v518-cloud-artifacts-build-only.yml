@@ -424,7 +424,7 @@ jobs:
           grep -Eq '^Redis server v=[0-9]+\.[0-9]+\.[0-9]+' build-evidence/redis-version.txt
           notes_path=/usr/share/nginx/html/release-notes.json
           notes_digest="$(docker run --rm --network none --entrypoint sha256sum "$FRONTEND_IMAGE" "$notes_path")"
-          [[ "$notes_digest" == "e5189f402304a16f9a3522beb05467ba6c59483746529fe9a6000df2d35cfb41  $notes_path" ]]
+          [[ "$notes_digest" == "ff71b545d1f7e06fbee9f221932f4bb2f8c6cdc508bb4031b58abc631bda1670  $notes_path" ]]
           [[ "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$BACKEND_IMAGE")" == "$RELEASE_SHA" ]]
           [[ "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$FRONTEND_IMAGE")" == "$RELEASE_SHA" ]]
           docker run --rm --network none --entrypoint python "$BACKEND_IMAGE" -c 'import django,redis; assert django.get_version() == "5.2.17"; assert redis.__version__'

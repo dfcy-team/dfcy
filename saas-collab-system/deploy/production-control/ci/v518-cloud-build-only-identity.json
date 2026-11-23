@@ -2,15 +2,15 @@
   "schema_version": 1,
   "repository": "dfcy-team/dfcy",
   "controller_base": "6de91f9731de944c7d3716c51a8e7276a24e0260",
-  "source_sha": "7d132c0cc372db9c1747a5ded7dac523ceedea2b",
-  "source_tree": "d2fc6c7fc286365c2c174018d4559cb513f5b33d",
-  "source_parent": "89a5457035c43f8fc6d032d32275721b49f9c54a",
+  "source_sha": "d0914d45eb652071d5aa01730a7acd7d45fac692",
+  "source_tree": "c8856a46d7a9574ca470806484925b457404d37b",
+  "source_parent": "f49c4f8977a110aa276f7a5e7504082313e21994",
   "reconciled_base": "cd7c991d222703cec4f7d7eb6cc1237664217908",
   "vm_base": "9728c548cce4c21d9cbc99aea7407298b4056fc7",
-  "source_material_sha256": "e1899198d3edfa6fd63607b6c96409c3de48456938568861315b64a2e721be4c",
+  "source_material_sha256": "ad42ebd302d4fb0ab4e907384b3fdc7c5d3770fac4fcd97b650ac5f39008121c",
   "migration_sha256": "4e893f79423794a03bc79ea8b740bfe9dd03785f8fe2d1f35a17060ec5e7f53a",
   "migration_files": 558,
-  "release_notes_sha256": "e5189f402304a16f9a3522beb05467ba6c59483746529fe9a6000df2d35cfb41",
+  "release_notes_sha256": "ff71b545d1f7e06fbee9f221932f4bb2f8c6cdc508bb4031b58abc631bda1670",
   "release_version": "2.44.518",
   "release_date": "2026-11-23",
   "redis_image": "redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99",
@@ -19,6 +19,14 @@
   "notes_exception_approved": true,
   "bounded_minimatch_risk_accepted": true,
   "source_chain": [
+    [
+      "d0914d45eb652071d5aa01730a7acd7d45fac692",
+      "f49c4f8977a110aa276f7a5e7504082313e21994"
+    ],
+    [
+      "f49c4f8977a110aa276f7a5e7504082313e21994",
+      "7d132c0cc372db9c1747a5ded7dac523ceedea2b"
+    ],
     [
       "7d132c0cc372db9c1747a5ded7dac523ceedea2b",
       "89a5457035c43f8fc6d032d32275721b49f9c54a"
@@ -57,6 +65,7 @@
     ]
   ],
   "reviewed_source_files": [
+    "saas-collab-system/backend/apps/finance/summary_initialization.py",
     "saas-collab-system/backend/apps/flash_sales/engine.py",
     "saas-collab-system/backend/apps/flash_sales/provider.py",
     "saas-collab-system/backend/apps/integrations/apps.py",
@@ -80,21 +89,28 @@
     "saas-collab-system/backend/apps/permissions/permission_manifest.json",
     "saas-collab-system/backend/tests/test_cloud_credential_preservation.py",
     "saas-collab-system/backend/tests/test_credential_wait_state_contract.py",
+    "saas-collab-system/backend/tests/test_finance_initialization.py",
+    "saas-collab-system/backend/tests/test_finance_initialization_hotfix_preservation.py",
     "saas-collab-system/backend/tests/test_flash_pacing_lease.py",
     "saas-collab-system/backend/tests/test_flash_rate_scope.py",
     "saas-collab-system/backend/tests/test_inventory_abc_json_default_sql.py",
     "saas-collab-system/backend/tests/test_menu_permission_registry.py",
     "saas-collab-system/backend/tests/test_permission_lifecycle.py",
+    "saas-collab-system/backend/tests/test_v518_notes_reconciliation.py",
     "saas-collab-system/backend/tests/test_v518_refresh_recovery_compat.py",
     "saas-collab-system/backend/tests/test_warehouse_migration_alignment.py",
     "saas-collab-system/deploy/pilot/application/Dockerfile.frontend",
+    "saas-collab-system/deploy/production-control/release_notes.py",
+    "saas-collab-system/deploy/production-control/tests/test_v518_hotfix_history.py",
     "saas-collab-system/deploy/sandbox/application/Dockerfile.frontend",
     "saas-collab-system/frontend/package-lock.json",
     "saas-collab-system/frontend/package.json",
     "saas-collab-system/frontend/src/data/releaseNotes.json",
     "saas-collab-system/frontend/src/router/menu.js",
     "saas-collab-system/frontend/src/router/menuRegistry.js",
+    "saas-collab-system/frontend/src/views/finance/FinanceSummaryInitialization.vue",
     "saas-collab-system/frontend/tests/cloud-exchange-menu-retirement.spec.js",
+    "saas-collab-system/frontend/tests/finance-summary-initialization.spec.js",
     "saas-collab-system/frontend/tests/order-registrations.spec.js",
     "saas-collab-system/frontend/tests/permission-tree-structure.spec.js",
     "saas-collab-system/frontend/tests/ui-p11-sales-management-routing.spec.js"
@@ -103,12 +119,12 @@
   "source_pr_do_not_merge": true,
   "cloud_cutover_authorized": false,
   "formal_registration_authorized": false,
-  "status": "SOURCE_STRICT_CI_VERIFIED_CONTROL_NOT_PUBLISHED",
-  "pr_files_sha256": "e95ccc47c872c804f02e79b5a219f2be6b4ff678e4563e57b84dc111b5e48613",
-  "pr_file_count": 1046,
+  "status": "SOURCE_CI_RUNNING_CONTROL_NOT_PUBLISHED",
+  "pr_files_sha256": "98bf05e879ca57669726f994e6fb7ec8835ff25809bb4698df4201fc9bd99be6",
+  "pr_file_count": 1048,
   "strict_ci_runs": {
-    "phase2-ci.yml": 45090551002,
-    "phase3-ci.yml": 45090563304
+    "phase2-ci.yml": 45140151436,
+    "phase3-ci.yml": 45140169962
   },
   "security_risk_resolved": false
 }
