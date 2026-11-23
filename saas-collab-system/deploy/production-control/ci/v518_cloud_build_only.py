@@ -16,13 +16,13 @@ BASE='cd7c991d222703cec4f7d7eb6cc1237664217908'
 VM_BASE='9728c548cce4c21d9cbc99aea7407298b4056fc7'
 SECURITY='08569188173edbe93524d6fe33a8c6ca39dfb13c'
 SURFACE='e4b32bf9e0c1168c6396e5f0399d8c0e41abccc0'
-PARENT='2151b639a307c5d476e7aeb4758217aed11ca8ac'
-SOURCE='89a5457035c43f8fc6d032d32275721b49f9c54a'
-TREE='3bd698034bd3fc64ed7acb82a4febebf40bd237f'
-SOURCE_CHAIN=[(SOURCE,PARENT),(PARENT,'13233654721edf6a8f405099266d3001c99ec1e8'),('13233654721edf6a8f405099266d3001c99ec1e8','e81811e855db166c53137aaf5ec3d1b68b9743c9'),('e81811e855db166c53137aaf5ec3d1b68b9743c9','fb9ba5fa9f060265a6300cbd11628269747ee9a6'),('fb9ba5fa9f060265a6300cbd11628269747ee9a6',SURFACE),(SURFACE,SECURITY),(SECURITY,BASE),(BASE,VM_BASE)]
-MIGRATION_SHA='d51ba76b2d4cfe08c31d2e93c7b927e6a506e538ec7087206185efbd66a5a27e'
-NOTES_SHA='77791a9fd987409866afa3798b476c32d8e128c75e0dcba3e26f54741ab20c4d'
-MATERIAL_SHA='f8e79fa7810d85c6304aa644f273e356d94e8a9fba03f79b37d434d738f36b4d'
+PARENT='89a5457035c43f8fc6d032d32275721b49f9c54a'
+SOURCE='7d132c0cc372db9c1747a5ded7dac523ceedea2b'
+TREE='d2fc6c7fc286365c2c174018d4559cb513f5b33d'
+SOURCE_CHAIN=[(SOURCE,PARENT),(PARENT,'2151b639a307c5d476e7aeb4758217aed11ca8ac'),('2151b639a307c5d476e7aeb4758217aed11ca8ac','13233654721edf6a8f405099266d3001c99ec1e8'),('13233654721edf6a8f405099266d3001c99ec1e8','e81811e855db166c53137aaf5ec3d1b68b9743c9'),('e81811e855db166c53137aaf5ec3d1b68b9743c9','fb9ba5fa9f060265a6300cbd11628269747ee9a6'),('fb9ba5fa9f060265a6300cbd11628269747ee9a6',SURFACE),(SURFACE,SECURITY),(SECURITY,BASE),(BASE,VM_BASE)]
+MIGRATION_SHA='4e893f79423794a03bc79ea8b740bfe9dd03785f8fe2d1f35a17060ec5e7f53a'
+NOTES_SHA='e5189f402304a16f9a3522beb05467ba6c59483746529fe9a6000df2d35cfb41'
+MATERIAL_SHA='e1899198d3edfa6fd63607b6c96409c3de48456938568861315b64a2e721be4c'
 REDIS='redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99'
 PHASES={
  'phase2-ci.yml':['Repository safety and file guard','Django and pytest','Frontend build observation gate','Docker Compose configuration','RPA samples and required documents'],
@@ -45,6 +45,8 @@ saas-collab-system/backend/apps/integrations/refresh_commit_recovery.py
 saas-collab-system/backend/apps/integrations/store_authorization_service.py
 saas-collab-system/backend/apps/integrations/tests/test_internal_api_clients.py
 saas-collab-system/backend/apps/integrations/tests/test_tiktok_migration_compatibility.py
+saas-collab-system/backend/apps/masterdata/migrations/0028_alter_inventoryabcentry_evidence.py
+saas-collab-system/backend/apps/masterdata/models.py
 saas-collab-system/backend/apps/permissions/frontend_permission_surface.json
 saas-collab-system/backend/apps/permissions/menu_registry.json
 saas-collab-system/backend/apps/permissions/permission_manifest.json
@@ -52,6 +54,7 @@ saas-collab-system/backend/tests/test_cloud_credential_preservation.py
 saas-collab-system/backend/tests/test_credential_wait_state_contract.py
 saas-collab-system/backend/tests/test_flash_pacing_lease.py
 saas-collab-system/backend/tests/test_flash_rate_scope.py
+saas-collab-system/backend/tests/test_inventory_abc_json_default_sql.py
 saas-collab-system/backend/tests/test_menu_permission_registry.py
 saas-collab-system/backend/tests/test_permission_lifecycle.py
 saas-collab-system/backend/tests/test_v518_refresh_recovery_compat.py
@@ -68,7 +71,7 @@ saas-collab-system/frontend/tests/order-registrations.spec.js
 saas-collab-system/frontend/tests/permission-tree-structure.spec.js
 saas-collab-system/frontend/tests/ui-p11-sales-management-routing.spec.js
 '''.split())
-FIXED={'schema_version':1,'repository':REPOSITORY,'controller_base':'287847be708b3a296c7949ef8def5be6f5f07954','source_sha':SOURCE,'source_tree':TREE,'source_parent':PARENT,'reconciled_base':BASE,'vm_base':VM_BASE,'source_material_sha256':MATERIAL_SHA,'migration_sha256':MIGRATION_SHA,'migration_files':558,'release_notes_sha256':NOTES_SHA,'release_version':'2.44.518','release_date':'2026-11-22','redis_image':REDIS,'source_pr':622,'source_ref':'release/v518-cloud-reconciled-20261121','notes_exception_approved':True,'bounded_minimatch_risk_accepted':True,'pr_file_count':1045,'pr_files_sha256':'2b1ebc383df3be0a8c764502d2db38b563e375afbaf7716e2973c13870a58695'}
+FIXED={'schema_version':1,'repository':REPOSITORY,'controller_base':'6de91f9731de944c7d3716c51a8e7276a24e0260','source_sha':SOURCE,'source_tree':TREE,'source_parent':PARENT,'reconciled_base':BASE,'vm_base':VM_BASE,'source_material_sha256':MATERIAL_SHA,'migration_sha256':MIGRATION_SHA,'migration_files':558,'release_notes_sha256':NOTES_SHA,'release_version':'2.44.518','release_date':'2026-11-23','redis_image':REDIS,'source_pr':622,'source_ref':'release/v518-cloud-reconciled-20261121','notes_exception_approved':True,'bounded_minimatch_risk_accepted':True,'pr_file_count':1046,'pr_files_sha256':'e95ccc47c872c804f02e79b5a219f2be6b4ff678e4563e57b84dc111b5e48613'}
 FIXED.update(source_chain=[list(pair) for pair in SOURCE_CHAIN],reviewed_source_files=SAFETY_FILES,exchange_menu_inactive=True,source_pr_do_not_merge=True,cloud_cutover_authorized=False,formal_registration_authorized=False)
 
 def require(condition,message):
@@ -81,7 +84,7 @@ def digest(body):
 def canonical(value):
     return json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode('utf-8')
 
-FIXED['strict_ci_runs']={'phase2-ci.yml':44997459463,'phase3-ci.yml':44997470665}
+FIXED['strict_ci_runs']={'phase2-ci.yml':45090551002,'phase3-ci.yml':45090563304}
 
 def load_identity(path=IDENTITY):
     require(Path(path).is_file(),'final reviewed identity absent; build disabled')

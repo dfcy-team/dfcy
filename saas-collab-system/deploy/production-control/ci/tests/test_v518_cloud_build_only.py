@@ -31,7 +31,7 @@ def test_complete_identity(tmp_path):
  ('migration_files',555),('migration_files',True),('redis_image','redis:latest'),
  ('pr_files_sha256','d'*40),('strict_ci_runs',{'phase2-ci.yml':123}),
  ('strict_ci_runs',{'phase2-ci.yml':123,'phase3-ci.yml':123}),
- ('strict_ci_runs',{'phase2-ci.yml':44997459464,'phase3-ci.yml':44997470665}),
+ ('strict_ci_runs',{'phase2-ci.yml':45090551003,'phase3-ci.yml':45090563304}),
  ('strict_ci_runs',{'phase2-ci.yml':'123','phase3-ci.yml':456}),
 ])
 def test_bad_identity_closed(tmp_path,key,value):
