@@ -468,8 +468,8 @@ def test_cost_targets_country_name_comes_from_master_without_row_queries(world, 
     country.name = 'Master country label'
     country.save(update_fields=['name'])
     query = costs.targets(buyer, 'shipment')
-    # Load the page once and carrier membership labels once.
-    with django_assert_num_queries(2):
+    # Load page, carrier labels, and all source PO references in three fixed queries.
+    with django_assert_num_queries(3):
         rows = list(query)
         costs.prepare_target_parties('shipment', rows)
         result = [costs.target_data('shipment', obj) for obj in rows]

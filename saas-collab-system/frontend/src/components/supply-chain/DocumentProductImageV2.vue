@@ -11,7 +11,7 @@ import { ref } from 'vue';
 import { useLazyApiImage } from '../../composables/useLazyApiImage';
 const props = defineProps({ imagePath: { type: String, default: '' }, alt: { type: String, default: '商品图片' } });
 const imageElement = ref(null);
-const allowedImagePath = () => /^\/api\/(?:internal\/(?:supply-chain\/v2|commerce)|external\/supplier\/supply-chain\/v2)\/[^?#]*\/image\/$/.test(props.imagePath) ? props.imagePath : '';
+const allowedImagePath = () => /^\/api\/(?:internal\/(?:supply-chain\/v2|commerce)|external\/supplier\/supply-chain\/v2)\/[^?#]*\/image\/(?:\?shipment_line_id=[1-9]\d{0,14})?$/.test(props.imagePath) ? props.imagePath : '';
 const { imageUrl, loading } = useLazyApiImage(imageElement, allowedImagePath);
 </script>
 <style scoped>

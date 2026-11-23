@@ -75,7 +75,6 @@
       <template v-if="orderOpen">
         <div class="order-heading"><div><strong>{{ selectedOrder?.number || '保存后自动生成系统单号' }}</strong><p class="muted">系统单号只读，备注单号可重复。{{ selectedOrder ? `当前版本 v${selectedOrder.version}` : '' }}</p></div><el-tag v-if="selectedOrder" :type="statusType(selectedOrder.status)">{{ statusLabels[selectedOrder.status] }}</el-tag></div>
         <el-alert v-if="selectedOrder && !selectedOrder.prices_complete" title="该草稿仍有缺失单价，请补齐并保存后确认。" type="warning" :closable="false" />
-        <p v-if="selectedOrder?.supplier_terms" class="muted">供应商账期：{{selectedOrder.supplier_terms.days==null?'未维护':`${selectedOrder.supplier_terms.days} 天`}} · {{selectedOrder.supplier_terms.start_label || '未约定'}} · {{selectedOrder.supplier_terms.state==='frozen'?'采购确认时已冻结':selectedOrder.supplier_terms.state==='unrecorded'?'历史单据未记录约定':'当前档案参考，确认采购时冻结'}}</p>
         <el-form label-position="top" class="order-form" :disabled="busy">
           <div class="form-grid">
             <el-form-item label="供应商 *">

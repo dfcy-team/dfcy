@@ -94,7 +94,7 @@ def test_shipment_image_route_allows_document_extra_inactive_sku_and_isolates_su
     from apps.supply_chain.shipments import snapshot as shipment_snapshot
     line = shipment_snapshot(shipment, internal=True)['lines'][0]
     assert line['product_details']['image_url'] == world['sku_b'].image_url
-    assert line['image_preview_url'] == path
+    assert line['image_preview_url'] == path + f"?shipment_line_id={line['id']}"
     assert buyer_client(buyer).get(path).status_code == 200
     supplier = supplier_user(world, world['supplier'], 'image-supplier')
     option = supplier_client(supplier).get(f"{EXTERNAL}shipment-options/").data['data']['skus']

@@ -1,3 +1,4 @@
+from .shipment_sources import accessible_shipments
 """Read-only product cost projections; never publish a batch as a global price."""
 from decimal import Decimal
 from django.db.models import Exists, F, OuterRef, Q
@@ -128,7 +129,7 @@ def entries_for(actor, *, history=False):
     active = DispatchAllocation.objects.filter(shipment_line_id=OuterRef('shipment_line_id'), membership__active_guard=True, membership__batch__status='active')
     same_batch = active.filter(membership__batch_id=OuterRef('cost_version__batch_id'))
     rows = CostEntry.objects.filter(tenant=actor.tenant, cost_version__tenant=actor.tenant,
-        shipment_line__shipment__order__in=orders).filter(
+        shipment_line__shipment__in=accessible_shipments(orders)).filter(
         Q(cost_version__batch__in=batches) |
         Q(cost_version__shipment_id=F('shipment_line__shipment_id'))).annotate(
         has_newer=Exists(newer), has_active_batch=Exists(active), in_owner_batch=Exists(same_batch))
@@ -139,7 +140,7 @@ def entries_for(actor, *, history=False):
             Q(cost_version__batch__status='active', in_owner_batch=True) |
             Q(cost_version__shipment__status='submitted', has_active_batch=False))
     return rows.select_related('cost_version__batch', 'cost_version__shipment',
-        'shipment_line__sku', 'shipment_line__shipment__order__country',
+        'shipment_line__sku', 'shipment_line__purchase_line__order__country', 'shipment_line__shipment__order__country',
         'receipt_line__receipt__warehouse')
 
 
@@ -172,7 +173,7 @@ def serialize(entry, fingerprints, details=None, settlements=None):
         if fingerprints[key] != version.input_fingerprint:
             status = 'recalculation_required'
     warehouse = entry.receipt_line.receipt.warehouse if entry.receipt_line_id else None
-    order = line.shipment.order
+    order = line.purchase_line.order if line.purchase_line_id else line.shipment.order
     goods_revision = (settlements or {}).get(('shipment', line.shipment_id))
     freight_revision = (settlements or {}).get(('batch', version.batch_id)) if version.batch_id else None
     payment_data = (settlements or {}).get('payments', {})

@@ -9,7 +9,7 @@ from tests.test_supply_chain_v2_logistics import BASE, write
 
 
 def adjust(api,kind,pk,due,days=None,key='terms'):
-    response=write(api,f'costs/{kind}/{pk}/payment-terms/',{'expected_version':0,'days':days,
+    response=write(api,f'costs/{kind}/{pk}/payment-terms/',{'expected_version':1 if kind=='shipment' else 0,'days':days,
         'start':'reconciliation_date','reminder_days':7,'reconciliation_date':'2026-10-01',
         'due_date_override':due,'reason':'双方确认'},key,'put')
     assert response.status_code==200,response.data
@@ -55,14 +55,22 @@ def test_reminder_unknown_history_and_clearance_date_override(world):
 
 
 @pytest.mark.django_db(transaction=True)
-def test_frozen_warehouse_anchor_uses_business_timezone_and_missing_event_is_unknown(world):
+def test_shipment_reminder_ignores_purchase_order_terms_snapshot(world):
     from apps.supply_chain.models import DispatchBatch
     buyer,api,shipment,batch_id,_=received_pilot(world)
     order=shipment.order
     batch=DispatchBatch.objects.get(pk=batch_id)
     with domain_write():
-        order.supplier_terms_snapshot={'days':0,'start':'warehouse_arrival','reminder_days':7}
+        order.supplier_terms_snapshot={'days':300,'start':'warehouse_arrival','reminder_days':7}
         order.save(update_fields=['supplier_terms_snapshot'])
+    write(api, f'costs/shipment/{shipment.pk}/payment-terms/', {'expected_version':1,'days':0,
+        'start':'shipment_date','reminder_days':7,'reconciliation_date':None,
+        'due_date_override':None,'reason':'核对发货单账期'}, 'shipment-terms-set', 'put')
+    shipment.refresh_from_db()
+    shipment.shipment_date=date(2026,10,30)
+    with domain_write():
+        shipment.save(update_fields=['shipment_date'])
+    with domain_write():
         batch.arrived_warehouse_at=datetime(2026,10,29,16,30,tzinfo=timezone.utc)
         batch.save(update_fields=['arrived_warehouse_at'])
     with patch('apps.supply_chain.payment_reminders.business_date',return_value=date(2026,10,30)):
@@ -74,5 +82,5 @@ def test_frozen_warehouse_anchor_uses_business_timezone_and_missing_event_is_unk
         with domain_write():
             batch.arrived_warehouse_at=None
             batch.save(update_fields=['arrived_warehouse_at'])
-        assert api.get(endpoint+'due_soon').data['count']==0
-        assert api.get(endpoint+'unknown').data['count']==1
+        assert api.get(endpoint+'due_soon').data['count']==1
+        assert api.get(endpoint+'unknown').data['count']==0

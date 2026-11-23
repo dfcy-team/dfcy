@@ -1,3 +1,4 @@
+from .shipment_sources import accessible_shipments
 from decimal import Decimal
 
 from django.db.models import Exists, OuterRef
@@ -40,7 +41,7 @@ def shipment_data(shipment, *, internal=False):
 
 def visible_batches(user):
     orders = internal_orders(user, PurchaseOrder.objects.all())
-    denied_members = DispatchMembership.objects.filter(batch_id=OuterRef("pk")).exclude(shipment__order__in=orders)
+    denied_members = DispatchMembership.objects.filter(batch_id=OuterRef("pk")).exclude(shipment__in=accessible_shipments(orders))
     return DispatchBatch.objects.filter(tenant_id=user.tenant_id).annotate(has_denied_member=Exists(denied_members)).filter(has_denied_member=False)
 
 
@@ -91,7 +92,7 @@ class Shipments(InternalAPI):
 
     def get(self, request):
         orders = (supplier_orders if self.supplier else internal_orders)(request.user, PurchaseOrder.objects.all())
-        queryset = SupplierShipment.objects.filter(tenant_id=request.user.tenant_id, order__in=orders).select_related("order").prefetch_related("lines", "dispatch_memberships__batch")
+        queryset = accessible_shipments(orders).filter(tenant_id=request.user.tenant_id).select_related("order").prefetch_related("lines", "dispatch_memberships__batch")
         return _page(request, queryset, lambda shipment: shipment_data(shipment, internal=not self.supplier))
 
 

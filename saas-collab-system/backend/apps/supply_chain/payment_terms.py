@@ -1,4 +1,4 @@
-"""Supplier terms are frozen at confirmation, not inferred from archive creation."""
+"""Supplier payment terms are owned and frozen by each shipment."""
 from datetime import date, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -18,9 +18,9 @@ def supplier_terms(supplier):
 
 
 def order_terms(order):
-    if order.status == 'draft':
-        return {**supplier_terms(order.supplier), 'state': 'draft_reference'}
-    return {**order.supplier_terms_snapshot, 'state': 'frozen' if order.supplier_terms_snapshot else 'unrecorded'}
+    # Legacy PO snapshots remain stored for audit, but terms belong to shipments.
+    return {'days': None, 'start': 'unspecified', 'reminder_days': 7,
+            'start_label': START_LABELS['unspecified'], 'state': 'unrecorded'}
 
 
 def _local_date(value):
@@ -30,14 +30,16 @@ def _local_date(value):
 
 
 def shipment_payment_reference(shipment):
-    terms = order_terms(shipment.order)
     record = PaymentTermsRecord.objects.filter(tenant_id=shipment.tenant_id, kind='shipment',
         shipment_id=shipment.pk, current_revision__isnull=False).select_related('current_revision').first()
     revision = record.current_revision if record else None
     if revision:
         terms = {'days': revision.days, 'start': revision.start, 'reminder_days': revision.reminder_days,
                  'start_label': START_LABELS.get(revision.start, '未约定'), 'state': 'adjusted'}
-    result = {**terms, 'anchor_date': None, 'due_date': None, 'message': '历史采购单未记录账期约定。'}
+    else:
+        terms = {'days': None, 'start': 'unspecified', 'reminder_days': 7,
+                 'start_label': START_LABELS['unspecified'], 'state': 'unrecorded'}
+    result = {**terms, 'anchor_date': None, 'due_date': None, 'message': '发货单账期待确认。'}
     if revision and revision.due_date_override:
         result.update(due_date=revision.due_date_override.isoformat(), message='按本单约定到期日计算。')
         return result
@@ -67,10 +69,29 @@ def shipment_payment_reference(shipment):
             result['message'] = '起算日期已确认，账期天数待确认。'
         else:
             result.update(due_date=(anchor + timedelta(days=terms['days'])).isoformat(),
-                          message='按本单账期约定计算。' if revision else '按采购确认时的账期约定计算。')
+                          message='按本单账期约定计算。')
     else:
         result['message'] = '待确认对账日期，暂不推算到期日。' if start == 'reconciliation_date' else '起算业务节点尚未发生，暂不推算到期日。'
     return result
+
+
+def freeze_shipment_terms(shipment):
+    """Capture supplier archive terms on this shipment without changing its PO."""
+    if PaymentTermsRecord.objects.filter(tenant_id=shipment.tenant_id, kind='shipment', shipment_id=shipment.pk).exists():
+        return
+    supplier = shipment.order.supplier
+    days = supplier.payment_term_days
+    reminder_days = supplier.payment_reminder_days
+    with transaction.atomic():
+        record = PaymentTermsRecord.objects.create(tenant_id=shipment.tenant_id,
+            created_by=shipment.created_by, kind='shipment', shipment=shipment, version=1)
+        revision = PaymentTermsRevision.objects.create(tenant_id=shipment.tenant_id,
+            created_by=shipment.created_by, terms=record, sequence=1, days=days,
+            start='shipment_date', reminder_days=reminder_days, reason='发货单创建时冻结供应商账期',
+            idempotency_key=f'shipment-terms-initial-{shipment.pk}',
+            request_hash=f'{shipment.pk}:{days}:{reminder_days}:shipment_date')
+        record.current_revision = revision
+        record.save(update_fields=['current_revision', 'updated_at'])
 
 
 @transaction.atomic
@@ -131,12 +152,13 @@ def terms_data(actor, kind, pk):
     record = PaymentTermsRecord.objects.filter(tenant=actor.tenant, kind=kind, **{field: obj}).select_related('current_revision').first()
     if record:
         rev = record.current_revision
-        terms = {'days': rev.days, 'start': rev.start, 'reminder_days': rev.reminder_days,
-                 'reconciliation_date': rev.reconciliation_date, 'due_date_override': rev.due_date_override,
-                 'version': record.version}
+        terms = ({'days': rev.days, 'start': rev.start, 'reminder_days': rev.reminder_days,
+                  'reconciliation_date': rev.reconciliation_date, 'due_date_override': rev.due_date_override,
+                  'version': record.version} if rev else
+                 {'days': None, 'start': 'unspecified', 'reminder_days': 7,
+                  'reconciliation_date': None, 'due_date_override': None, 'version': record.version})
     elif kind == 'shipment':
-        snap = obj.order.supplier_terms_snapshot or {}
-        terms = {'days': snap.get('days'), 'start': snap.get('start'), 'reminder_days': snap.get('reminder_days', 7),
+        terms = {'days': None, 'start': 'unspecified', 'reminder_days': 7,
                  'reconciliation_date': None, 'due_date_override': None, 'version': 0}
     elif kind in ('batch', 'inbound'):
         snapshot = obj.freight_terms_snapshot if kind == 'batch' else (obj.batch.freight_terms_snapshot or {})

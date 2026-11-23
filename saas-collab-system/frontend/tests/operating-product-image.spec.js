@@ -47,3 +47,18 @@ describe('operating order product images', () => {
     wrapper.unmount();
   });
 });
+
+
+it('loads an exact shipment source image and rejects arbitrary query parameters', async () => {
+  mocks.fetchApiFile.mockResolvedValue({ success: true, data: new Blob(['image']) });
+  const path='/api/internal/supply-chain/v2/supplier-shipments/12/skus/4/image/?shipment_line_id=31';
+  const wrapper=mount(DocumentProductImageV2,{...options,props:{imagePath:path}});
+  await flushPromises();
+  expect(mocks.fetchApiFile).toHaveBeenCalledWith(path);
+  wrapper.unmount();
+  mocks.fetchApiFile.mockClear();
+  const bad=mount(DocumentProductImageV2,{...options,props:{imagePath:path+'&url=https://evil.test'}});
+  await flushPromises();
+  expect(mocks.fetchApiFile).not.toHaveBeenCalled();
+  bad.unmount();
+});

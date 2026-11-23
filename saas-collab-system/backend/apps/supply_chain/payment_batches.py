@@ -16,6 +16,7 @@ from . import costs, services
 from .api import key
 from .cost_models import PaymentRecord
 from .models import domain_write, SupplierShipment, DispatchBatch, InboundOrder, PurchaseOrder
+from .shipment_sources import accessible_shipments
 from .payment_item_models import PaymentItem
 from .payment_request_models import SupplyPaymentRequest as PR, SupplyPaymentBatch as Batch, SupplyPaymentBatchVoucher as Voucher
 from .payment_requests import _snap, _current, finance_allowed
@@ -49,7 +50,7 @@ def visible_batches(actor):
     from .permissions import accessible_orders
     from .logistics import batches_for
     orders = accessible_orders(actor, PurchaseOrder.objects.all(), VIEW)
-    shipments = SupplierShipment.objects.filter(tenant_id=actor.tenant_id, order__in=orders)
+    shipments = accessible_shipments(orders, SupplierShipment.objects.filter(tenant_id=actor.tenant_id))
     dispatches = batches_for(actor, VIEW)
     inbounds = InboundOrder.objects.filter(tenant_id=actor.tenant_id, batch__in=dispatches)
     allowed = (Q(kind='shipment', source_id__in=Subquery(shipments.values('pk'))) |
@@ -190,7 +191,7 @@ class BatchCandidates(InternalAPI):
             from .models import PurchaseOrder
             from .permissions import accessible_orders
             allowed_orders=accessible_orders(actor,PurchaseOrder.objects.filter(supplier_id=party_id),'supply.v2.view')
-            qs=SupplierShipment.objects.filter(tenant_id=actor.tenant_id,order__in=allowed_orders,status='submitted').order_by('-id')
+            qs=accessible_shipments(allowed_orders, SupplierShipment.objects.filter(tenant_id=actor.tenant_id,status='submitted')).order_by('-id')
             if search: qs=qs.filter(number__icontains=search)
             total=qs.count(); page=list(qs[offset:offset+limit])
             for obj in page:
@@ -201,7 +202,7 @@ class BatchCandidates(InternalAPI):
             from .logistics import batches_for
             allowed_orders=accessible_orders(actor,PurchaseOrder.objects.all(),'supply.v2.view')
             allowed_batches=batches_for(actor,'supply.v2.view').filter(freight_company_id=party_id)
-            qsets=[('domestic_freight',SupplierShipment.objects.filter(tenant_id=actor.tenant_id,domestic_carrier_id=party_id,order__in=allowed_orders)),('batch',allowed_batches),('inbound',InboundOrder.objects.filter(tenant_id=actor.tenant_id,batch__in=allowed_batches))]
+            qsets=[('domestic_freight',accessible_shipments(allowed_orders, SupplierShipment.objects.filter(tenant_id=actor.tenant_id,domestic_carrier_id=party_id))),('batch',allowed_batches),('inbound',InboundOrder.objects.filter(tenant_id=actor.tenant_id,batch__in=allowed_batches))]
             if search: qsets=[(kind,qs.filter(number__icontains=search)) for kind,qs in qsets]
             counts=[qs.count() for _,qs in qsets]
             total=sum(counts); skip=offset; remaining=limit

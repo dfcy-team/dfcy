@@ -6,10 +6,16 @@ def source_links(kind, obj):
     if kind == 'purchase':
         return [{'label': f'采购单 {obj.number}', 'href': f'/supply-chain/purchase-orders?order_id={obj.pk}'}]
     if kind in ('shipment', 'domestic_freight'):
+        from .shipment_sources import source_order_ids
+        source_orders = getattr(obj, '_source_orders', None)
+        if source_orders is None:
+            source_orders = list(obj.order.__class__.objects.filter(tenant_id=obj.tenant_id,
+                pk__in=source_order_ids(obj)).order_by('pk'))
         return [
             {'label': f'发货单 {obj.number}', 'href': f'/supply-chain/supplier-shipments?shipment_id={obj.pk}'},
-            {'label': f'采购单 {obj.order.number}', 'href': f'/supply-chain/purchase-orders?order_id={obj.order_id}'},
-            {'label': '关联采购定金', 'href': f'/supply-chain/costs?kind=purchase&id={obj.order_id}'},
+            *[{'label': f'采购单 {order.number}', 'href': f'/supply-chain/purchase-orders?order_id={order.pk}'} for order in source_orders],
+            *([{'label': '关联采购定金', 'href': f'/supply-chain/costs?kind=purchase&id={source_orders[0].pk}'}] if len(source_orders) == 1 else [
+                {'label': f'采购定金 {order.number}', 'href': f'/supply-chain/costs?kind=purchase&id={order.pk}'} for order in source_orders]),
             {'label': '货款、国内费用与分摊', 'href': f'/supply-chain/costs?kind=shipment&id={obj.pk}'},
         ]
     if kind == 'batch':

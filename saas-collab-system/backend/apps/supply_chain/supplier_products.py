@@ -76,7 +76,7 @@ def shipment_line_product_details(lines):
     if not lines:
         return {}
     tenant_id = lines[0].tenant_id
-    order_ids = {line.shipment.order_id for line in lines}
+    order_ids = {line.purchase_line.order_id if line.purchase_line_id else line.shipment.order_id for line in lines}
     events = BusinessEvent.objects.filter(tenant_id=tenant_id, aggregate_type='purchaseorder',
         aggregate_id__in=order_ids, action='confirmed').only('aggregate_id', 'payload')
     frozen = {}

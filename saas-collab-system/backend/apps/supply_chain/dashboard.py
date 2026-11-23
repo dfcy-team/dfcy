@@ -1,3 +1,4 @@
+from .shipment_sources import accessible_shipments
 """Read-only, actor-scoped supply cockpit. Aggregate facts before joining owners.
 
 No warehouse balance is inferred from local receipts. Settlement revisions are
@@ -86,7 +87,7 @@ def scope(actor, country_id=None):
     # A batch with no accessible source never invents a country data grant.
     batches = batches.filter(country_id__in=countries.values('pk'))
     orders = orders.filter(status='confirmed')
-    shipments = SupplierShipment.objects.filter(tenant_id=actor.tenant_id, order__in=orders, status='submitted')
+    shipments = accessible_shipments(orders).filter(tenant_id=actor.tenant_id, status='submitted')
     inbounds = InboundOrder.objects.filter(tenant_id=actor.tenant_id, batch__in=batches)
     return countries, orders, demands, shipments, batches, inbounds
 

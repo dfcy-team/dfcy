@@ -1,3 +1,4 @@
+from .shipment_sources import accessible_shipments
 """Procurement-only dispatch and source-preserving inbound commands.
 
 Third-party inventory snapshots remain owned by their connectors. Local receipt
@@ -22,7 +23,7 @@ from .permissions import MANAGE, VIEW, internal_orders
 def batches_for(actor, permission=VIEW):
     orders = internal_orders(actor, PurchaseOrder.objects.all(), permission)
     # History includes removed members; it must never expose another scope's orders.
-    denied = DispatchMembership.objects.filter(batch_id=OuterRef('pk')).exclude(shipment__order__in=orders)
+    denied = DispatchMembership.objects.filter(batch_id=OuterRef('pk')).exclude(shipment__in=accessible_shipments(orders))
     return DispatchBatch.objects.filter(tenant=actor.tenant).annotate(denied=Exists(denied)).filter(denied=False)
 
 
@@ -84,7 +85,7 @@ def candidates(actor):
     from .models import ShipmentLine
     used = dispatch_allocations.active().filter(shipment_line_id=OuterRef('pk')).values('shipment_line_id').annotate(total=Sum('quantity')).values('total')
     available = ShipmentLine.objects.filter(shipment_id=OuterRef('pk'), is_active=True).annotate(used=Coalesce(Subquery(used), Value(0))).filter(quantity__gt=F('used'))
-    return SupplierShipment.objects.filter(tenant=actor.tenant, order__in=orders, status='submitted').annotate(has_remaining=Exists(available)).filter(has_remaining=True).select_related('order__supplier')
+    return accessible_shipments(orders).filter(tenant=actor.tenant, status='submitted').annotate(has_remaining=Exists(available)).filter(has_remaining=True).select_related('order__supplier')
 
 
 def batch_data(obj):
@@ -132,7 +133,7 @@ def inbound_for(actor, pk, permission=MANAGE):
 
 def inbound_data(obj):
     lines = list(obj.lines.select_related('shipment_line__sku__spu__category_node',
-        'shipment_line__shipment__order__supplier'))
+        'shipment_line__shipment__order__supplier', 'shipment_line__purchase_line__order'))
     from .supplier_products import shipment_line_product_details
     details = shipment_line_product_details([line.shipment_line for line in lines])
     return {'id': obj.pk, 'number': obj.number, 'batch_id': obj.batch_id, 'batch_number': obj.batch.number,
@@ -144,12 +145,12 @@ def inbound_data(obj):
             'notes': obj.notes, 'stock_receipt_ref': obj.stock_receipt_ref, 'confirmed_at': obj.confirmed_at,
             'lines': [{'id': line.pk, 'shipment_line_id': line.shipment_line_id,
                        'shipment_number': line.shipment_line.shipment.number,
-                       'order_number': line.shipment_line.shipment.order.number,
+                       'order_number': line.shipment_line.purchase_line.order.number if line.shipment_line.purchase_line_id else line.shipment_line.shipment.order.number,
                        'supplier_name': line.shipment_line.shipment.order.supplier.name,
                        'sku': line.shipment_line.sku_code_snapshot, 'sku_id': line.shipment_line.sku_id,
                        'legacy_sku_code': line.shipment_line.sku.legacy_sku_code or '',
                        'product_details': {'image_url': details.get(line.shipment_line_id, {}).get('image_url', '')},
-                       'image_preview_url': (f'/api/internal/supply-chain/v2/inbound-orders/{obj.pk}/skus/{line.shipment_line.sku_id}/image/'
+                       'image_preview_url': (f'/api/internal/supply-chain/v2/inbound-orders/{obj.pk}/skus/{line.shipment_line.sku_id}/image/?shipment_line_id={line.shipment_line_id}'
                            if details.get(line.shipment_line_id, {}).get('image_url') else ''),
                        'product_name': line.shipment_line.product_name_snapshot,
                        'expected_quantity': line.expected_quantity, 'received_quantity': line.received_quantity,

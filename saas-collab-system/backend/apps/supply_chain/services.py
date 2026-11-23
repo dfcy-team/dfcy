@@ -379,8 +379,6 @@ def confirm_purchase_order(actor, order_id, *, expected_version, idempotency_key
     for line in lines:
         require_orderable_sku(line.sku)
     with domain_write():
-        from .payment_terms import supplier_terms
-        order.supplier_terms_snapshot = supplier_terms(order.supplier)
         order.status, order.confirmed_at, order.version = PurchaseOrder.Status.CONFIRMED, timezone.now(), order.version + 1
         order.save()
         from .supplier_products import enrich_snapshot
@@ -405,7 +403,8 @@ def create_supplier_shipment(actor, payload, *, idempotency_key):
     key, digest = _key(idempotency_key), request_hash(payload)
     previous = SupplierShipment.objects.filter(tenant_id=actor.tenant_id, creation_key=key).first()
     if previous:
-        _order(actor, previous.order_id)
+        from .shipments import shipment_for
+        shipment_for(actor, previous.pk)
         return _matching_replay(previous, digest)
     external = actor.user_type == CustomUser.UserType.EXTERNAL
     rows = payload.get("lines") or []
@@ -422,18 +421,14 @@ def create_supplier_shipment(actor, payload, *, idempotency_key):
             entry_mode="supplier" if external else "procurement", notes=payload.get("notes", ""),
             creation_key=key, request_hash=digest,
         )
+        from .payment_terms import freeze_shipment_terms
+        freeze_shipment_terms(shipment)
         for index, row in enumerate(rows, 1):
             if external and any(field in row for field in ("unit_price", "purchase_price_snapshot", "supplier_reference_price", "product_reference_price")):
                 raise PermissionDenied("Supplier accounts cannot set purchase prices.")
             sku = _master(ProductSKU, actor, row["sku_id"], is_active=True)
-            candidates = order.lines.filter(sku=sku, is_active=True)
-            if row.get("purchase_line_id"):
-                candidates = candidates.filter(pk=row["purchase_line_id"])
-                if not candidates.exists():
-                    raise ValidationError("Shipment source must match the purchase order and SKU.")
-            elif candidates.count() > 1:
-                raise ValidationError("Select a specific purchase source line for this SKU.")
-            source = candidates.first()
+            from .shipment_sources import resolve_source
+            source = resolve_source(actor, order, sku, row.get("purchase_line_id"))
             qty = _positive_int(row["quantity"])
             prior_qty = (ShipmentLine.objects.filter(is_active=True, purchase_line=source, shipment__status=SupplierShipment.Status.SUBMITTED).aggregate(total=Sum("quantity"))["total"] or 0) if source else 0
             excess = max(0, prior_qty + qty - source.quantity) - max(0, prior_qty - source.quantity) if source else 0
@@ -472,7 +467,8 @@ def shipment_delivery_details(payload, supplier, current=None):
 
 def _internal_shipments(actor):
     orders = internal_orders(actor, PurchaseOrder.objects.all(), MANAGE)
-    return SupplierShipment.objects.filter(tenant_id=actor.tenant_id, order__in=orders)
+    from .shipment_sources import accessible_shipments
+    return accessible_shipments(orders).filter(tenant_id=actor.tenant_id)
 
 
 @transaction.atomic

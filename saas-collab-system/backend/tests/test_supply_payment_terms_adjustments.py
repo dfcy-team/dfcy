@@ -30,7 +30,7 @@ def test_payment_terms_adjustment_is_audited_versioned_and_idempotent(world):
 
     initial = client.get(path)
     assert initial.status_code == 200
-    assert initial.data["data"]["version"] == 0
+    assert initial.data["data"]["version"] == 1
     assert initial.data["data"]["days"] == 14
     assert initial.data["data"]["reminder_days"] == 3
     world["supplier"].payment_term_days = 90
@@ -39,18 +39,18 @@ def test_payment_terms_adjustment_is_audited_versioned_and_idempotent(world):
 
     payload = {"days": 0, "start": "reconciliation_date", "reminder_days": 0,
         "reconciliation_date": today.isoformat(), "due_date_override": None,
-        "reason": "供应商确认账单日期", "expected_version": 0}
+        "reason": "供应商确认账单日期", "expected_version": initial.data["data"]["version"]}
     headers = {"HTTP_IDEMPOTENCY_KEY": "terms-api-adjust"}
     saved = client.put(path, payload, format="json", **headers)
     assert saved.status_code == 200, saved.data
     assert saved.data["data"]["anchor_date"] == today.isoformat()
     assert saved.data["data"]["due_date"] == today.isoformat()
-    assert saved.data["data"]["version"] == 1
-    assert len(saved.data["data"]["history"]) == 1
+    assert saved.data["data"]["version"] == 2
+    assert len(saved.data["data"]["history"]) == 2
 
     replay = client.put(path, payload, format="json", **headers)
     assert replay.status_code == 200
-    assert replay.data["data"]["version"] == 1
+    assert replay.data["data"]["version"] == 2
     changed = {**payload, "days": 5}
     rejected = client.put(path, changed, format="json", **headers)
     assert rejected.status_code == 422
@@ -173,4 +173,5 @@ def test_shipment_and_domestic_freight_terms_are_independent(world):
     domestic = client.get(BASE + f"costs/domestic_freight/{shipment.pk}/payment-terms/").data["data"]
     assert goods["days"] == 30
     assert domestic["days"] == 5
-    assert goods["version"] == domestic["version"] == 0
+    assert goods["version"] == 1
+    assert domestic["version"] == 0
