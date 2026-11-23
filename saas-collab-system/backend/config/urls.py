@@ -6,6 +6,7 @@ from apps.integrations.developer_gateway import invoke as developer_invoke
 
 
 urlpatterns = [
+    path("api/internal/marketing/flash-sales/", include("apps.flash_sales.urls")),
     path('api/developer-gateway/v1/<int:app_id>/<slug:endpoint_code>/', developer_invoke, name='developer-gateway'),
     path("api/internal/demo-data-sync/", include("apps.demo_sync.urls")),
     path('api/supply-notifications/files/<int:attempt_id>/<str:token>/', PublicDownload.as_view(), name='sc2-public-notification-file'),
