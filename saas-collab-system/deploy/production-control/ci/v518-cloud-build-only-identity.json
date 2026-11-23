@@ -1,24 +1,28 @@
 {
   "schema_version": 1,
   "repository": "dfcy-team/dfcy",
-  "controller_base": "287847be708b3a296c7949ef8def5be6f5f07954",
-  "source_sha": "89a5457035c43f8fc6d032d32275721b49f9c54a",
-  "source_tree": "3bd698034bd3fc64ed7acb82a4febebf40bd237f",
-  "source_parent": "2151b639a307c5d476e7aeb4758217aed11ca8ac",
+  "controller_base": "6de91f9731de944c7d3716c51a8e7276a24e0260",
+  "source_sha": "7d132c0cc372db9c1747a5ded7dac523ceedea2b",
+  "source_tree": "d2fc6c7fc286365c2c174018d4559cb513f5b33d",
+  "source_parent": "89a5457035c43f8fc6d032d32275721b49f9c54a",
   "reconciled_base": "cd7c991d222703cec4f7d7eb6cc1237664217908",
   "vm_base": "9728c548cce4c21d9cbc99aea7407298b4056fc7",
-  "source_material_sha256": "f8e79fa7810d85c6304aa644f273e356d94e8a9fba03f79b37d434d738f36b4d",
-  "migration_sha256": "d51ba76b2d4cfe08c31d2e93c7b927e6a506e538ec7087206185efbd66a5a27e",
+  "source_material_sha256": "e1899198d3edfa6fd63607b6c96409c3de48456938568861315b64a2e721be4c",
+  "migration_sha256": "4e893f79423794a03bc79ea8b740bfe9dd03785f8fe2d1f35a17060ec5e7f53a",
   "migration_files": 558,
-  "release_notes_sha256": "77791a9fd987409866afa3798b476c32d8e128c75e0dcba3e26f54741ab20c4d",
+  "release_notes_sha256": "e5189f402304a16f9a3522beb05467ba6c59483746529fe9a6000df2d35cfb41",
   "release_version": "2.44.518",
-  "release_date": "2026-11-22",
+  "release_date": "2026-11-23",
   "redis_image": "redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99",
   "source_pr": 622,
   "source_ref": "release/v518-cloud-reconciled-20261121",
   "notes_exception_approved": true,
   "bounded_minimatch_risk_accepted": true,
   "source_chain": [
+    [
+      "7d132c0cc372db9c1747a5ded7dac523ceedea2b",
+      "89a5457035c43f8fc6d032d32275721b49f9c54a"
+    ],
     [
       "89a5457035c43f8fc6d032d32275721b49f9c54a",
       "2151b639a307c5d476e7aeb4758217aed11ca8ac"
@@ -69,6 +73,8 @@
     "saas-collab-system/backend/apps/integrations/store_authorization_service.py",
     "saas-collab-system/backend/apps/integrations/tests/test_internal_api_clients.py",
     "saas-collab-system/backend/apps/integrations/tests/test_tiktok_migration_compatibility.py",
+    "saas-collab-system/backend/apps/masterdata/migrations/0028_alter_inventoryabcentry_evidence.py",
+    "saas-collab-system/backend/apps/masterdata/models.py",
     "saas-collab-system/backend/apps/permissions/frontend_permission_surface.json",
     "saas-collab-system/backend/apps/permissions/menu_registry.json",
     "saas-collab-system/backend/apps/permissions/permission_manifest.json",
@@ -76,6 +82,7 @@
     "saas-collab-system/backend/tests/test_credential_wait_state_contract.py",
     "saas-collab-system/backend/tests/test_flash_pacing_lease.py",
     "saas-collab-system/backend/tests/test_flash_rate_scope.py",
+    "saas-collab-system/backend/tests/test_inventory_abc_json_default_sql.py",
     "saas-collab-system/backend/tests/test_menu_permission_registry.py",
     "saas-collab-system/backend/tests/test_permission_lifecycle.py",
     "saas-collab-system/backend/tests/test_v518_refresh_recovery_compat.py",
@@ -97,11 +104,11 @@
   "cloud_cutover_authorized": false,
   "formal_registration_authorized": false,
   "status": "SOURCE_STRICT_CI_VERIFIED_CONTROL_NOT_PUBLISHED",
-  "pr_files_sha256": "2b1ebc383df3be0a8c764502d2db38b563e375afbaf7716e2973c13870a58695",
-  "pr_file_count": 1045,
+  "pr_files_sha256": "e95ccc47c872c804f02e79b5a219f2be6b4ff678e4563e57b84dc111b5e48613",
+  "pr_file_count": 1046,
   "strict_ci_runs": {
-    "phase2-ci.yml": 44997459463,
-    "phase3-ci.yml": 44997470665
+    "phase2-ci.yml": 45090551002,
+    "phase3-ci.yml": 45090563304
   },
   "security_risk_resolved": false
 }
