@@ -41,6 +41,7 @@
         <el-button type="primary" @click="applyFilters">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
         <el-button type="primary" :disabled="!canManage" @click="openCreate">新增送样</el-button>
+        <el-button v-if="canManage" @click="openImport">导入送样</el-button>
       </div>
 
       <p class="field-hint">时间均为北京时间（UTC+8）。</p>
@@ -240,6 +241,14 @@
       </template>
     </el-dialog>
 
+    <SampleImportDialog
+      v-if="importOpened"
+      :key="`${auth.currentUser?.id}:${auth.currentUser?.active_membership_id}`"
+      v-model="importVisible"
+      :can-manage="canManage"
+      @imported="load"
+    />
+
     <el-drawer v-model="detailVisible" direction="rtl" size="560px" :with-header="false">
       <div class="detail-drawer" v-if="detailSample">
         <div class="drawer-heading"><div><span>送样履约详情</span><h2>{{ displayValue(detailSample.fulfillment_no) }}</h2><small>{{ displayValue(detailSample.outreach_task_name || detailSample.outreach_task_no) }}</small></div><el-button text @click="detailVisible = false">×</el-button></div>
@@ -275,7 +284,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { formatTaskDateTime } from './taskDateTime';
 import { recordSourceLabel, publishedEvidenceNotice, matchedVideoCount } from './recordEvidence';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -306,6 +315,7 @@ import {
 import { creatorHandleFirst } from './creatorLabel';
 import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
+const SampleImportDialog = defineAsyncComponent(() => import('./SampleImportDialog.vue'));
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
@@ -322,6 +332,8 @@ const loading = ref(false);
 const saving = ref(false);
 const influencerLoading = ref(false);
 const visible = ref(false);
+const importOpened = ref(false);
+const importVisible = ref(false);
 const detailVisible = ref(false);
 const detailSample = ref(null);
 const editingSample = ref(null);
@@ -552,6 +564,12 @@ async function load() {
 function applyFilters() {
   page.value = 1;
   load();
+}
+
+function openImport() {
+  if (!canManage.value) return;
+  importOpened.value = true;
+  importVisible.value = true;
 }
 
 function resetFilters() {
