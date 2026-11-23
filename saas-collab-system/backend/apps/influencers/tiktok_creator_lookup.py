@@ -57,7 +57,7 @@ def available_tiktok_lookup_stores(actor):
 
 
 def lookup_tiktok_creator(*, actor, influencer_id, store_id):
-    influencer = Influencer.objects.filter(tenant_id=actor.tenant_id, pk=influencer_id).first()
+    influencer = Influencer.objects.filter(tenant_id=actor.tenant_id, pk=influencer_id, is_deleted=False).first()
     if influencer is None or str(influencer.platform).lower() != "tiktok":
         raise ValidationError("Only an existing TikTok influencer can be queried.")
     profile = InfluencerProfile.objects.filter(tenant_id=actor.tenant_id, influencer=influencer).first()

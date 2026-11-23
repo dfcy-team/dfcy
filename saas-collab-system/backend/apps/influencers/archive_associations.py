@@ -37,7 +37,7 @@ def archive_group_data(influencer, *, user=None, permission_code="influencers.vi
     member_ids = InfluenceArchiveMembership.objects.filter(
         tenant_id=influencer.tenant_id, group_id=membership.group_id,
     ).values("influencer_id") if membership else []
-    rows = Influencer.objects.filter(tenant_id=influencer.tenant_id).filter(
+    rows = Influencer.objects.filter(tenant_id=influencer.tenant_id, is_deleted=False).filter(
         Q(pk=influencer.pk) | Q(pk__in=member_ids),
     ).select_related("profile").order_by("id")
     if user is not None:
@@ -133,6 +133,8 @@ def create_related_archive(*, user, source_id, archive, expected_updated_at):
     for member in members:
         require_object(user, member, "influencers.manage")
     require_object(user, source, "influencers.manage")
+    if source.is_deleted:
+        raise ValidationError({'is_deleted': '该档案已删除，请先恢复档案。'})
     group = get_object_or_404(
         InfluenceArchiveGroup.objects.select_for_update(), tenant_id=user.tenant_id, pk=membership.group_id,
     ) if membership else None

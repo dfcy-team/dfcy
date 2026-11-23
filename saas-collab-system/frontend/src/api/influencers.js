@@ -110,7 +110,8 @@ export const INFLUENCER_PLATFORM_LABELS = Object.freeze({
   tiktok: 'TikTok',
   facebook: 'Facebook',
   instagram: 'Instagram',
-  youtube: 'YouTube'
+  youtube: 'YouTube',
+  shopee: 'Shopee'
 });
 
 export const INFLUENCER_CONTACT_CHANNEL_LABELS = Object.freeze({
@@ -255,6 +256,14 @@ export const fetchInfluencer = (id, params = {}) => requestWithMockFallback(
 // Identity editing and aggregate writes must not fall back to synthetic success.
 export const fetchInfluencerForm = (id) => requestApi({
   method: 'get', url: `${API_ROOT}/${encodeURIComponent(id)}/`, params: { include_form: 'true' }
+});
+
+export const deleteInfluencerArchive = (id, version) => requestApi({
+  method: 'delete', url: `${API_ROOT}/${encodeURIComponent(id)}/archive-deletion/`, ...ifMatchHeaders(version)
+});
+
+export const restoreInfluencerArchive = (id, version) => requestApi({
+  method: 'post', url: `${API_ROOT}/${encodeURIComponent(id)}/archive-deletion/`, ...ifMatchHeaders(version)
 });
 
 export const saveInfluencerForm = (id, payload, version) => requestApi({

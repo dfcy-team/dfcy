@@ -109,6 +109,59 @@ def test_nickname_draft_requires_permitted_store_and_gets_country(scoped):
     assert InfluencerProfile.objects.get(influencer_id=r.data['data']['id']).market == 'PH'
 
 
+@pytest.mark.parametrize('identity', [{'nickname': 'All scope draft'}, {'handle': 'all.scope.account'}])
+def test_all_scope_sampling_draft_keeps_store_country_for_scoped_colleagues(scoped, identity):
+    d = scoped
+    d['scope'].scope_type = 'all'
+    d['scope'].config = {}
+    d['scope'].save()
+    response = d['client'].post(ROOT + 'resolve/', {**identity, 'store_id': d['store'].pk}, format='json')
+    assert response.status_code == 201, response.data
+    creator_id = response.data['data']['id']
+    assert InfluencerProfile.objects.get(influencer_id=creator_id).market == 'PH'
+    d['scope'].scope_type = 'custom'
+    d['scope'].config = {'platform_ids': [d['platform'].pk], 'warehouse_ids': [d['warehouse'].pk]}
+    d['scope'].save()
+    response = d['client'].get(ROOT + 'resolve/', {'q': identity.get('nickname') or identity['handle']})
+    assert response.status_code == 200, response.data
+    assert [row['id'] for row in response.data['data']['results']] == [creator_id]
+
+
+def test_all_scope_resolve_validates_supplied_store_and_does_not_rewrite_existing_market(scoped):
+    d = scoped
+    d['scope'].scope_type = 'all'
+    d['scope'].save()
+    other = Tenant.objects.create(code='draft-other', name='Other')
+    platform = PlatformMaster.objects.create(tenant=other, code='tk', name='TikTok')
+    foreign = StoreMaster.objects.create(tenant=other, platform=platform, code='foreign', name='Foreign', country_code='PH')
+    count = Influencer.objects.count()
+    response = d['client'].post(ROOT + 'resolve/', {'nickname': 'Forbidden draft', 'store_id': foreign.pk}, format='json')
+    assert response.status_code == 404, response.data
+    assert Influencer.objects.count() == count
+    response = d['client'].post(ROOT + 'resolve/', {'nickname': 'Malformed draft', 'store_id': 'oops'}, format='json')
+    assert response.status_code == 400, response.data
+    existing = d['creators'][2]
+    response = d['client'].post(ROOT + 'resolve/', {'nickname': existing.name, 'store_id': d['store'].pk}, format='json')
+    assert response.status_code == 200, response.data
+    existing.profile.refresh_from_db()
+    assert existing.profile.market == '泰国'
+
+
+def test_sampling_operator_can_create_new_creator_without_archive_manage(scoped):
+    d = scoped
+    d['role'].permissions.remove(Permission.objects.get(code='influencers.manage'))
+    response = d['client'].post(ROOT + 'resolve/', {
+        'nickname': 'new.sampling.creator', 'store_id': d['store'].pk,
+        'request_key': 'sampling-only-new-creator',
+    }, format='json')
+    assert response.status_code == 201, response.data
+    creator_id = response.data['data']['id']
+    assert InfluencerProfile.objects.get(influencer_id=creator_id).market == 'PH'
+    # Sampling permission must not silently grant full archive editing.
+    response = d['client'].get(f'{ROOT}{creator_id}/', {'include_form': 'true'})
+    assert response.status_code == 403, response.data
+
+
 def test_task_target_list_detail_and_progress_use_same_country_scope(scoped):
     from apps.influencers.models import OutreachTarget
     d = scoped
