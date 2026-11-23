@@ -370,3 +370,28 @@ def test_store_summary_query_count_is_constant_as_store_count_grows():
     assert len(small_queries) <= 30
     assert len(many_queries) <= 30
     assert len(many_queries) == len(small_queries)
+
+@pytest.mark.django_db
+def test_tiktok_board_and_operations_share_order_currency_spend(monkeypatch):
+    from decimal import Decimal
+    from apps.sales_management import tiktok_gmvmax
+    user, tenant, platform, store, run, client = _fixture('tk-shared-currency')
+    _grant(user, 'analytics.view')
+    platform.platform_type = 'tiktok'
+    platform.save(update_fields=['platform_type'])
+    run.sync_job.integration_config.platform = 'tiktok'
+    run.sync_job.integration_config.save(update_fields=['platform'])
+    store.currency = 'USD'
+    store.save(update_fields=['currency'])
+    _order(tenant, platform, store, run, 'tk-shared', currency='PHP', amount='100')
+    def costs(user, stores, start, end, *, target_currencies):
+        assert target_currencies[store.id] == 'PHP'
+        return ({(store.id, DAY, 'PHP'): Decimal('20')} if str(start) == DAY else {}), set(), True
+    monkeypatch.setattr(tiktok_gmvmax, 'gmvmax_spend', costs)
+    board = client.get('/api/internal/commerce/realtime-board/', {'date_from': DAY, 'date_to': DAY})
+    ops = client.get(URL, {'date_from': DAY, 'date_to': DAY, 'view': 'stores'})
+    assert board.status_code == ops.status_code == 200
+    b = next(g for g in board.json()['data']['currency_groups'] if g['currency'] == 'PHP')
+    o = next(g for g in ops.json()['data']['currency_groups'] if g['currency'] == 'PHP')
+    assert Decimal(b['ad_spend']) == Decimal(o['ad_spend']) == Decimal('20')
+    assert Decimal(b['store_roi']) == Decimal(o['roi']) == Decimal('5')

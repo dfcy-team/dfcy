@@ -545,3 +545,26 @@ def test_today_trend_uses_local_hours_and_previous_day_comparison():
     assert group["previous_hourly_trend"] == [{"date":"16:00","sales_amount":"40","order_count":1}]
     assert group["recent_trend"][0]["date"] == "2026-08-16"
     assert group["sales_amount"] == "100"
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("expense,incomplete", [("20", False), ("0", False), ("20", True)])
+def test_board_tiktok_gmvmax_contributes_spend_and_roi(monkeypatch, expense, incomplete):
+    user, tenant, platform, store, run, client = _fixture("tk-gmv-" + expense + str(incomplete))
+    platform.platform_type = "tiktok"
+    platform.save(update_fields=["platform_type"])
+    run.sync_job.integration_config.platform = "tiktok"
+    run.sync_job.integration_config.save(update_fields=["platform"])
+    _grant(user, "analytics.view")
+    _order(tenant, platform, store, run, "tk", amount="100")
+    monkeypatch.setattr("apps.sales_management.tiktok_gmvmax.gmvmax_spend", lambda *args, **kwargs: (
+        {(store.id, DAY, "PHP"): Decimal(expense)}, {store.id} if incomplete else set(), True,
+    ))
+    response = client.get(URL, {"date_from": DAY, "date_to": DAY})
+    assert response.status_code == 200
+    group = response.json()["data"]["currency_groups"][0]
+    assert Decimal(group["ad_spend"]) == Decimal(expense)
+    assert group["store_roi"] == ("5" if expense == "20" else None)
+    assert group["ad_platforms"] == ["tiktok"]
+    assert "Shopee" not in group["ad_rate_platform_scope"]
+    if incomplete:
+        assert "在途" in group["ad_reason"]
