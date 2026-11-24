@@ -59,3 +59,30 @@ def cny_summary(request, groups, sales_field, ad_sales_field=None, ad_spend_fiel
         "coverage": {"sales_currency_count": coverage["sales"], "ad_spend_currency_count": coverage["ad_spend"]},
         "ad_partial": any(group.get("ad_status") in {"estimated", "provisional", "partial"} for group in groups),
     }
+
+
+def cny_store_rankings(request, groups):
+    rates = tenant_cny_rates(request.user.tenant)
+    stores = {}
+    for group in groups:
+        currency = group["currency"]
+        rate = _decimal((rates.get(currency) or {}).get("rate"))
+        for row in group.get("store_ranking", []):
+            target = stores.setdefault(row["store_id"], {
+                "store_id": row["store_id"], "store_name": row["store_name"],
+                "country_code": row.get("country_code"), "sales_amount": Decimal(0),
+                "order_count": 0, "original_amounts": [], "missing_rates": [],
+            })
+            amount = _decimal(row["sales_amount"])
+            target["order_count"] += row["order_count"]
+            target["original_amounts"].append({"currency": currency, "sales_amount": row["sales_amount"]})
+            if rate is None or rate <= 0 or amount is None:
+                target["missing_rates"].append(currency)
+            else:
+                target["sales_amount"] += amount / rate
+    rows = list(stores.values())
+    for row in rows:
+        row["sales_amount"] = None if row["missing_rates"] else format(row["sales_amount"], "f")
+    sales = sorted(rows, key=lambda row: (row["sales_amount"] is None, -Decimal(row["sales_amount"] or 0), row["store_id"]))
+    orders = sorted(rows, key=lambda row: (-row["order_count"], row["store_id"]))
+    return {"currency": "CNY", "store_count": len(rows), "sales_amount": sales, "order_count": orders}

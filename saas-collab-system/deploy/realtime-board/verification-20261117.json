@@ -1,0 +1,50 @@
+{
+  "backend_tests": {
+    "passed": 12
+  },
+  "frontend_tests": {
+    "passed": 46
+  },
+  "resource_guard_tests": {
+    "passed": 7
+  },
+  "public_http": {
+    "status": "PASS",
+    "anonymous_status": 401,
+    "sales_seconds": [
+      0.094,
+      0.103,
+      0.113,
+      0.115,
+      0.14
+    ],
+    "inventory_seconds": [
+      0.102,
+      0.142,
+      0.088,
+      0.083,
+      0.289
+    ],
+    "while_background_refresh_seconds": [
+      0.072,
+      0.133,
+      0.113,
+      0.128,
+      0.11
+    ]
+  },
+  "restore_test": {
+    "restored": 7,
+    "reapplied": 7,
+    "container_ids_unchanged": true
+  },
+  "runtime_check": {
+    "beijing_time": "2026-11-17T10:11:00+08:00",
+    "timer": "active",
+    "recent_ticks_without_errors": 4,
+    "dedicated_service_restarts": 0
+  },
+  "manual_acceptance": "passed: normal display, automatic refresh, no routine snapshot notice, inventory populated",
+  "release_registered": true,
+  "registered_version": "2.44.461"
+}

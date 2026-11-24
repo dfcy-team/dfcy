@@ -1,0 +1,53 @@
+{
+  "date": "2026-11-17",
+  "backend_tests_passed": 32,
+  "frontend_tests_passed": 49,
+  "production_http_status": 200,
+  "display_currency": "CNY",
+  "source_read_seconds": 0.31,
+  "cached_sales_seconds": [
+    0.115,
+    0.106,
+    0.164,
+    0.153,
+    0.176
+  ],
+  "cached_inventory_seconds": [
+    0.303,
+    0.307,
+    0.31,
+    0.406,
+    0.355
+  ],
+  "cached_reads_during_long_refresh_seconds": [
+    0.276,
+    0.226,
+    0.147,
+    0.171,
+    0.251
+  ],
+  "shipped_by_store_local_day_as_of_110257": {
+    "2026-11-10": 52,
+    "2026-11-11": 150,
+    "2026-11-12": 39,
+    "2026-11-13": 80,
+    "2026-11-14": 55,
+    "2026-11-15": 108,
+    "2026-11-16": 250
+  },
+  "note": "Collector continues running; observations change as records arrive. Counts are distinct orders on first dispatch, not packages or fully shipped orders.",
+  "manual_acceptance": "passed: observed-synced scope label, blue bars and pointer values",
+  "version_registered": true,
+  "readonly_reconciliation": {
+    "status": "PASS",
+    "matched_currency_days": 14,
+    "observed_orders": 897,
+    "transaction": "REPEATABLE READ READ ONLY",
+    "warehouse_sync_tasks_started": 0,
+    "warehouse_sync_config_changes": 0
+  },
+  "historical_backfill_owner": "existing scheduled dispatcher; explicitly outside board scope",
+  "public_static_verification": "PASS: current homepage mapping and root/chart assets match deployed artifacts",
+  "release_registered": true,
+  "registered_version": "2.44.461"
+}

@@ -261,7 +261,7 @@ def test_query_count_does_not_grow_with_rank_rows():
     assert len(queries) <= 8
 
 @pytest.mark.django_db
-def test_category_inventory_keeps_each_currency_spu_scope():
+def test_category_inventory_includes_skus_without_sales_or_listings():
     f = _fixture('category-currency-scope')
     category = ProductCategory.objects.create(tenant=f.tenant, level=1, code='1', name='Category')
     f.sku.spu.category_node = category
@@ -273,4 +273,39 @@ def test_category_inventory_keeps_each_currency_spu_scope():
     rows = [dict(inventory_category_id=category.id, inventory_spu_ids=[spu], inventory_countries=['PH']) for spu in [f.sku.spu_id, other_spu.id]]
     groups = [dict(currency=currency, product_rankings={'category': {'sales_amount': [row]}}) for currency, row in zip(['USD', 'EUR'], rows)]
     attach_board_inventory(SimpleNamespace(user=f.user, _permission_resolution_cache=None), groups)
-    assert [row['inventory']['available_qty'] for row in rows] == [4, 7]
+    assert [row['inventory']['available_qty'] for row in rows] == [11, 11]
+
+
+@pytest.mark.django_db
+def test_board_keeps_stale_notice_when_latest_stock_is_over_24_hours_old():
+    f = _fixture("stock-older-than-day")
+    _snapshot(f, "source-old", qty=8, hours_ago=25)
+    inventory = _attach(f, [_row(f)])["sku_ranking"][0]["inventory"]
+    assert inventory["status"] == "stale"
+    assert inventory["label"] == "没有24小时内的有效库存快照"
+    assert inventory["available_qty"] is None
+    assert inventory.get("in_transit_qty") is None
+
+
+@pytest.mark.django_db
+def test_stock_only_category_needs_no_listing_or_sale_and_respects_country():
+    from apps.sales_management.board_inventory import add_stock_only_categories
+
+    f = _fixture("stock-only-category")
+    category = ProductCategory.objects.create(tenant=f.tenant, level=1, code="1", name="Warehouse category")
+    f.sku.spu.category_node = category
+    f.sku.spu.save(update_fields=["category_node"])
+    _snapshot(f, "stock-only", qty=12, transit=3, provided=["available_qty", "in_transit_qty"])
+    groups = {
+        "PHP": {"product_rankings": {}},
+        "THB": {"product_rankings": {}},
+    }
+    request = SimpleNamespace(user=f.user, _permission_resolution_cache=None)
+    added = add_stock_only_categories(request, groups, {"PHP": {"PH"}, "THB": {"TH"}})
+    attach_board_inventory(request, groups)
+    row = added["PHP", "sales_amount"][0]
+    assert row["units_sold"] == 0
+    assert row["sales_amount"] == "0"
+    assert row["inventory"]["available_qty"] == 12
+    assert row["inventory"]["in_transit_qty"] == 3
+    assert added["THB", "sales_amount"] == []
