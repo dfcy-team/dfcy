@@ -131,10 +131,11 @@ class TikTokCollectionAdapter(ProductionReadonlyAdapter):
             else:
                 from apps.influencers.tiktok_creator_lookup import lookup_tiktok_creator
                 result = lookup_tiktok_creator(actor=self.actor, influencer_id=int(unit),
-                    store_id=self.authorization.store_id, commit_receipt=callback)
+                    store_id=self.authorization.store_id, commit_receipt=callback, search_handle=True)
                 if result.get("status") == "candidate":
                     callback({"created": 0, "updated": 0, "skipped": 1,
-                              "identity_status": "candidate", "reason": result.get("reason")})
+                              "identity_status": "candidate", "reason": result.get("reason"),
+                              "candidate": result.get("candidate", {})})
             receipt = CollectionUnitReceipt.objects.get(sync_run=run, unit_key=key)
         return {"records": [{"unit_key": key}], "receipt_id": receipt.pk,
                 "next_cursor": prefix + str(index + 1) if index + 1 < len(plan["units"]) else ""}
