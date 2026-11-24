@@ -169,9 +169,11 @@
         v-if="total"
         v-model:current-page="page"
         v-model:page-size="pageSize"
+        :page-sizes="[25, 50, 100, 200]"
         :total="total"
-        layout="total, prev, pager, next"
+        layout="total, sizes, prev, pager, next"
         @current-change="load"
+        @size-change="applyFilters"
       />
     </el-card>
 
@@ -515,7 +517,7 @@ const activityError = ref(false);
 let activityTimer;
 const total = ref(0);
 const page = ref(1);
-const pageSize = ref(20);
+const pageSize = ref(50);
 const loading = ref(false);
 let listRequest = 0;
 const saving = ref(false);
