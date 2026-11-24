@@ -72,6 +72,17 @@ def test_archive_migrations_cannot_reuse_registered_release():
     archived_migration_sha = "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838"
     root = Path(__file__).resolve().parents[1]
     unregistered_migrations = {
+        "apps/influencers/migrations/0052_tiktok_product_performance_vm.py",
+        "apps/integrations/migrations/0071_feishu_native_approval.py",
+        "apps/integrations/migrations/0072_finance_handoff.py",
+        "apps/integrations/migrations/0073_automatic_refresh_commit_recovery.py",
+        "apps/supply_chain/migrations/0081_domestic_expense_groups.py",
+        "apps/supply_chain/migrations/0082_domestic_expense_payments.py",
+        "apps/supply_chain/migrations/0083_wms_document_links.py",
+        "apps/supply_chain/migrations/0084_payment_fx_snapshots.py",
+        "apps/supply_chain/migrations/0085_receipt_difference_decisions.py",
+        "apps/workflows/migrations/0007_paymentapprovalflow_finance_handler.py",
+
         # Local increments and alignment-only merge nodes are not archived releases.
         "apps/alerts/migrations/0008_inventory_warning_snapshot.py",
         "apps/masterdata/migrations/0025_inventory_observation_settings.py",

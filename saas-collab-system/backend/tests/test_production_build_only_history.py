@@ -177,6 +177,17 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
     for path in sorted(controller_backend.glob("apps/*/migrations/*.py")):
         relative = path.relative_to(controller_backend).as_posix()
         if relative in {
+            "apps/influencers/migrations/0052_tiktok_product_performance_vm.py",
+            "apps/integrations/migrations/0071_feishu_native_approval.py",
+            "apps/integrations/migrations/0072_finance_handoff.py",
+            "apps/integrations/migrations/0073_automatic_refresh_commit_recovery.py",
+            "apps/supply_chain/migrations/0081_domestic_expense_groups.py",
+            "apps/supply_chain/migrations/0082_domestic_expense_payments.py",
+            "apps/supply_chain/migrations/0083_wms_document_links.py",
+            "apps/supply_chain/migrations/0084_payment_fx_snapshots.py",
+            "apps/supply_chain/migrations/0085_receipt_difference_decisions.py",
+            "apps/workflows/migrations/0007_paymentapprovalflow_finance_handler.py",
+
             # V398–V404 migrations postdate this frozen archive.
             "apps/integrations/migrations/0061_creator_video_capability_choices.py",
             "apps/integrations/migrations/0062_developer_platform_scope.py",

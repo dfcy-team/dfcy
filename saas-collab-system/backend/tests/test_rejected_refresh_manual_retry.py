@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 import pytest
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -60,7 +61,8 @@ def test_manual_retry_keeps_uncertain_or_live_recovery_fenced(case, changed):
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize('balance', ['12.50', 'NaN', None])
-def test_advertising_validation_uses_ads_balance_and_never_shop_identity(case, monkeypatch, balance):
+@override_settings(DEBUG=True)
+def test_advertising_validation_uses_ads_balance_and_never_shop_identity(case, monkeypatch, balance, tmp_path):
     from unittest.mock import Mock
     from apps.integrations import shopee_advertising
     config = case.auth.integration_config
@@ -76,12 +78,13 @@ def test_advertising_validation_uses_ads_balance_and_never_shop_identity(case, m
     request = Mock(return_value={'data_timestamp': 1700000000, 'total_balance': balance})
     monkeypatch.setattr(CheckedClient, '_ads_request', request)
     monkeypatch.setattr(shopee_advertising, 'ShopeeAdvertisingReadonlyClient', CheckedClient)
-    if balance == '12.50':
-        result = automatic.validate_refreshed_authorization(case.auth)
-        assert result['records'][0]['kind'] == 'balance'
-    else:
-        with pytest.raises(ValidationError):
-            automatic.validate_refreshed_authorization(case.auth)
+    with override_settings(CREDENTIAL_CUSTODY_PATH=str(tmp_path / 'synthetic-custody')):
+        if balance == '12.50':
+            result = automatic.validate_refreshed_authorization(case.auth)
+            assert result['records'][0]['kind'] == 'balance'
+        else:
+            with pytest.raises(ValidationError):
+                automatic.validate_refreshed_authorization(case.auth)
     request.assert_called_once_with('get_total_balance', {})
     assert clients[0].resource_type == 'advertising_report'
     assert clients[0].http.max_retries == 0

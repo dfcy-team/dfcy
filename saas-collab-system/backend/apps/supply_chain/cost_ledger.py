@@ -46,8 +46,10 @@ def fingerprints_for_entries(entries):
         revisions[key] = row.current_revision
     distribution = list(DispatchAllocation.objects.filter(shipment_line_id__in=[line.pk for line in lines],
         membership__active_guard=True, membership__batch__status='active').order_by('membership__batch_id', 'shipment_line_id').values('membership__batch_id', 'shipment_line_id', 'quantity'))
+    from .domestic_expense_costs import snapshots
+    expense_groups = snapshots(entries[0].tenant_id, shipment_ids)
     data = dict(lines=grouped, inbounds=inbounds, inbound_lines=inbound_lines, terminations=terminations,
-        quantities=quantities, revisions=revisions, distribution=distribution, taxes=contract_cost_allocations(shipment_ids))
+        quantities=quantities, revisions=revisions, distribution=distribution, taxes=contract_cost_allocations(shipment_ids), expense_groups=expense_groups)
     return {key: costs.inputs(*owner, data=data)[1] for key, owner in owners.items()}
 
 

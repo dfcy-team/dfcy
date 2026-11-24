@@ -734,7 +734,8 @@ def inputs(kind, obj, *, data=None):
     contract_taxes = contract_cost_allocations(shipment_ids) if data is None else [row for row in data['taxes'] if row['shipment_id'] in shipment_ids]
     if contract_taxes: source['contract_cost_taxes'] = contract_taxes
     from .domestic_expense_costs import snapshots
-    expense_groups = snapshots(obj.tenant_id, shipment_ids)
+    expense_groups = (snapshots(obj.tenant_id, shipment_ids) if data is None or 'expense_groups' not in data
+        else [row for row in data['expense_groups'] if row['shipment_id'] in shipment_ids])
     if expense_groups:
         source['domestic_expense_groups'] = expense_groups
     if 'supplier_borne_shipments' in source:

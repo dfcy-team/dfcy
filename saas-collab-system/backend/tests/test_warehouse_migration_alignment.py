@@ -7,11 +7,12 @@ from django.db.migrations.loader import MigrationLoader
 def test_warehouse_and_main_histories_have_one_integration_leaf():
     loader = MigrationLoader(None)
     assert not loader.detect_conflicts()
-    target = ('integrations','0066_warehouse_order_lookup_jobs_vm')
+    target = ('integrations','0073_automatic_refresh_commit_recovery')
     assert loader.graph.leaf_nodes('integrations') == [target]
     ancestors = loader.graph.forwards_plan(target)
     assert ('integrations','0060_gmv_max_audit_lookup_index') in ancestors
     assert ('integrations','0060_best_ecapi_platform') in ancestors
+    assert ('integrations','0066_warehouse_order_lookup_jobs_vm') in ancestors
     state = loader.project_state()
     assert state.apps.get_model('integrations','DeveloperEndpoint')._meta.get_field('warehouse_account')
     assert state.apps.get_model('masterdata','PlatformMaster')._meta.get_field('warehouse_connector_key')
