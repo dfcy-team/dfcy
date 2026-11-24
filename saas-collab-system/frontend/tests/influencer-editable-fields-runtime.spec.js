@@ -20,7 +20,11 @@ const stubs = {
   ElDialog: { props: ['modelValue'], template: '<section v-if="modelValue"><slot /><slot name="footer" /></section>' },
   ElDrawer: { template: '<div />' },
   ElTable: { template: '<div />' },
-  ElPagination: { template: '<div />' },
+  ElPagination: {
+    props: ['currentPage', 'pageSize', 'pageSizes'],
+    emits: ['update:pageSize', 'size-change'],
+    template: '<div />',
+  },
   ElForm: { template: '<div><slot /></div>' },
   ElFormItem: { props: ['label'], template: '<div :data-label="label"><slot /></div>' },
   ElInput: {
@@ -63,6 +67,29 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it.each([
+    [OutreachTaskList, 'outreach-tasks', task],
+    [SampleFulfillmentList, 'sample-fulfillments', sample],
+  ])('defaults to 50 and resets to page one when changing size (%s)', async (component, resource, row) => {
+    const fallback = request.getMockImplementation();
+    const directList = config => config.url.endsWith(`/${resource}/`) && !config.params?.recent_requirements && !config.params?.priority_only;
+    request.mockImplementation(config => directList(config)
+      ? Promise.resolve({ success: true, data: { count: 300, results: [row] } })
+      : fallback(config));
+    const wrapper = render(component);
+    await flushPromises();
+    const latest = () => request.mock.calls.map(([config]) => config).findLast(directList).params;
+    expect(latest().page_size).toBe(50);
+    const pagination = wrapper.getComponent(stubs.ElPagination);
+    expect(pagination.props('pageSizes')).toEqual([25, 50, 100, 200]);
+    wrapper.vm.page = 3;
+    wrapper.vm.filters.search = 'needle';
+    pagination.vm.$emit('update:pageSize', 200);
+    pagination.vm.$emit('size-change', 200);
+    await flushPromises();
+    expect(latest()).toMatchObject({ page: 1, page_size: 200, search: 'needle' });
+    wrapper.unmount();
+  });
   it('offers blacklist filtering and links the status-only action to the archive', async () => {
     const wrapper = render(SampleFulfillmentList);
     await flushPromises();
