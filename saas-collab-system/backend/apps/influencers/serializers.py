@@ -847,6 +847,10 @@ class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
 
     items = SampleItemSerializer(many=True, required=False)
     fulfillment_no = serializers.CharField(max_length=80, required=False)
+    sample_sent_at = serializers.DateTimeField(
+        required=False, input_formats=["%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z"],
+        error_messages={"invalid": "请填写带时区的送样时间，精确到秒。"},
+    )
     type_no = serializers.CharField(max_length=80, required=False)
     append_items = SampleItemSerializer(many=True, required=False, write_only=True)
     items_mode = serializers.ChoiceField(
@@ -862,6 +866,7 @@ class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
         model = SampleFulfillment
         fields = (
             "sample_order_no",
+            "sample_sent_at",
             "fulfillment_no",
             "type_no",
             "notes",

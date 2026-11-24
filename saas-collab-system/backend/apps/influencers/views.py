@@ -1090,6 +1090,17 @@ class SampleFulfillmentOptionsView(ScopedInfluencerView):
         ]
         if _query_bool(request.query_params.get("owners_only", "false"), field="owners_only"):
             return success_response({"owners": owner_payload})
+        if _query_bool(request.query_params.get("filters_only", "false"), field="filters_only"):
+            # Keep historical stores filterable, including when showing deleted samples.
+            filter_stores = StoreMaster.objects.filter(
+                tenant=request.user.tenant,
+            ).filter(
+                Exists(visible_samples.filter(store_id=OuterRef("pk")))
+            ).order_by("name", "id")
+            return success_response({
+                "owners": owner_payload,
+                "stores": list(filter_stores.values("id", "name", "country_code")),
+            })
         tasks = OutreachTask.objects.filter(
             tenant=request.user.tenant,
             is_deleted=False,

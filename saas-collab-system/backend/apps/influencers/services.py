@@ -5119,7 +5119,7 @@ def update_sample_fulfillment(
         items_mode = "append"
         item_payloads = append_item_payloads
     has_item_change = item_payloads is not None
-    identifier_only = bool(data) and set(data) <= {"fulfillment_no", "type_no"} and not has_item_change
+    identifier_only = bool(data) and set(data) <= {"fulfillment_no", "type_no", "sample_sent_at"} and not has_item_change
     if not data and not has_item_change:
         raise ValidationError({"detail": "At least one editable fulfillment field is required."})
 
@@ -5133,6 +5133,13 @@ def update_sample_fulfillment(
     for field_name in ("sample_order_no", "notes"):
         if field_name in data:
             changes[field_name] = str(data[field_name] or "").strip()
+    if "sample_sent_at" in data:
+        sent_at = data["sample_sent_at"]
+        if sent_at > timezone.now():
+            raise ValidationError({"sample_sent_at": "送样时间不能晚于当前时间。"})
+        if fulfillment.shipped_at and sent_at > fulfillment.shipped_at:
+            raise ValidationError({"sample_sent_at": "送样时间不能晚于已记录的发货时间。"})
+        changes["sample_sent_at"] = sent_at
     if "link_type" in data:
         if data["link_type"] not in dict(SampleFulfillment.LINK_TYPE_CHOICES):
             raise ValidationError({"link_type": "Unsupported link type."})
@@ -5153,6 +5160,7 @@ def update_sample_fulfillment(
         "fulfillment_no": fulfillment.fulfillment_no,
         "type_no": fulfillment.type_no,
         "sample_order_no": fulfillment.sample_order_no,
+        "sample_sent_at": fulfillment.sample_sent_at.isoformat() if fulfillment.sample_sent_at else None,
         "notes": fulfillment.notes,
         "link_type": fulfillment.link_type,
         "quick_tags": fulfillment.quick_tags,
@@ -5234,6 +5242,7 @@ def update_sample_fulfillment(
             "fulfillment_no": fulfillment.fulfillment_no,
             "type_no": fulfillment.type_no,
             "sample_order_no": fulfillment.sample_order_no,
+            "sample_sent_at": fulfillment.sample_sent_at.isoformat() if fulfillment.sample_sent_at else None,
             "notes": fulfillment.notes,
             "link_type": fulfillment.link_type,
             "quick_tags": fulfillment.quick_tags,
