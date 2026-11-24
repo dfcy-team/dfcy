@@ -437,6 +437,7 @@ def active_influencer_restriction_subquery(tenant):
 class OutreachTask(StateMachineTenantModel):
     protected_state_fields = (
         "status",
+        "paused_from_pending",
         "version",
         "started_at",
         "finalized_at",
@@ -449,6 +450,7 @@ class OutreachTask(StateMachineTenantModel):
     )
     initial_state_values = {
         "status": "pending",
+        "paused_from_pending": False,
         "version": 1,
         "started_at": None,
         "finalized_at": None,
@@ -494,6 +496,7 @@ class OutreachTask(StateMachineTenantModel):
     dispatch_time = models.DateTimeField(default=timezone.now)
     outreach_at = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
+    paused_from_pending = models.BooleanField(default=False, db_default=False, editable=False)
     finalized_at = models.DateTimeField(null=True, blank=True)
     source = models.CharField(max_length=40, default="manual")
     external_id = models.CharField(max_length=160, blank=True, null=True)

@@ -546,7 +546,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             "external_product_id", "sku_prefix", "product_name_snapshot", "product_match_status",
             "product_match_source", "product_matched_at", "priority", "target_count", "linked_count", "dispatcher_id",
             "owner", "owner_name", "owners", "owner_names", "dispatcher_name", "source_owner_name_snapshot", "source_dispatcher_name_snapshot",
-            "dispatch_time", "outreach_at", "status", "started_at", "finalized_at",
+            "dispatch_time", "outreach_at", "status", "started_at", "finalized_at", "paused_from_pending",
             "is_deleted", "deleted_at", "source", "external_id", "version", "notes", "dispatch_requirements",
             "sample_status_summary", "sample_fulfillment_status_summary", "sample_fulfillment_count",
             "sample_fulfillment_influencer_count",

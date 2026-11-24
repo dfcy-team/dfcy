@@ -17,19 +17,19 @@ describe('priority task carousel', () => {
     expect(wrapper.find('.task').text()).toContain('Loaded');
     wrapper.unmount();
   });
-  it('shows one task and wraps through both priority groups', async () => {
+  it('shows three ordered tasks and pages through the remaining tasks', async () => {
     const wrapper = mount(PriorityTaskCarousel, { props: { groups: {
       urgent: [{ id: 1, task_no: 'A', task_name: 'First' }],
-      high: [{ id: 2, task_no: 'B', task_name: 'Second' }],
+      high: [2, 3, 4, 5].map(id => ({ id, task_no: String(id), task_name: 'High priority' })),
     } } });
-    expect(wrapper.findAll('.task')).toHaveLength(1);
-    expect(wrapper.find('.task').text()).toContain('First');
-    await wrapper.get('[aria-label="下一条重点任务"]').trigger('click');
-    expect(wrapper.find('.task').text()).toContain('Second');
-    await wrapper.get('[aria-label="下一条重点任务"]').trigger('click');
-    expect(wrapper.find('.task').text()).toContain('First');
-    await wrapper.get('[aria-label="上一条重点任务"]').trigger('click');
-    expect(wrapper.find('.task').text()).toContain('Second');
+    const taskNos = () => wrapper.findAll('.task strong').map(node => node.text());
+    expect(taskNos()).toEqual(['A', '2', '3']);
+    await wrapper.get('[aria-label="下一组重点任务"]').trigger('click');
+    expect(taskNos()).toEqual(['4', '5']);
+    await wrapper.get('[aria-label="下一组重点任务"]').trigger('click');
+    expect(taskNos()).toEqual(['A', '2', '3']);
+    await wrapper.get('[aria-label="上一组重点任务"]').trigger('click');
+    expect(taskNos()).toEqual(['4', '5']);
     await wrapper.setProps({ groups: { urgent: [], high: [] } });
     expect(wrapper.findAll('.task')).toHaveLength(0);
     expect(wrapper.text()).toContain('暂无紧急');

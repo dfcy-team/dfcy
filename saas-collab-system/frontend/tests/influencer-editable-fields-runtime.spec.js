@@ -118,8 +118,8 @@ describe('editable task number and sample type', () => {
     const activity = wrapper.get('[aria-labelledby="activity-title"]');
     expect(activity.text()).toContain('Demonstrate the product');
     expect(activity.text()).toContain('已暂停');
-    const priority = wrapper.get('.priority-task');
-    expect(priority.text()).toBe('DRJL480480舒棉绒建联');
+    const priority = wrapper.get('.priority-carousel .task');
+    expect(priority.text()).toContain('DRJL480480舒棉绒建联');
     expect(wrapper.get('[aria-labelledby="priority-title"]').findAll('button')).toHaveLength(0);
     await priority.trigger('click');
     await flushPromises();
