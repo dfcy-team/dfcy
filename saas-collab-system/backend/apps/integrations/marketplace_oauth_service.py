@@ -361,8 +361,9 @@ def _refresh_marketplace_authorization(record, *, actor, expected_token_id=None)
         raise ValidationError("授权令牌已变化，请刷新页面后重试。")
     from .automatic_refresh import _attempt_key
     from .models import AutomaticRefreshAttempt
+    from .refresh_commit_recovery import manual_refresh_blocked
     pending = AutomaticRefreshAttempt.objects.filter(pk=_attempt_key(record)).first()
-    if pending and (pending.commit_recovery or {}).get("phase") in {"exchange_in_flight", "commit_pending"}:
+    if manual_refresh_blocked(record, pending):
         raise ValidationError("该续期正在自动恢复提交，请勿重复刷新；可等待重试结果或重新授权。")
     if record.platform == "lazada" and "local:no-refresh" in (record.scopes or []):
         raise ValidationError("该 Lazada 授权按原令牌导入，禁止手动或自动刷新。")

@@ -416,6 +416,14 @@ def validate_refreshed_authorization(record):
 
         return LazadaReadonlyClient(record.integration_config, record, http_client=http_client).validate_token()
 
+    from .models import marketplace_authorization_api_type
+    if record.platform == "shopee" and marketplace_authorization_api_type(record.integration_config) == "advertising":
+        from .shopee_advertising import ShopeeAdvertisingReadonlyClient
+
+        client = ShopeeAdvertisingReadonlyClient(record.integration_config, record, http_client=http_client)
+        client.resource_type = SyncJob.ResourceType.ADVERTISING_REPORT
+        return client.fetch_advertising(None, {"advertising_datasets": ["balance"]})
+
     from .marketplace_oauth_service import resolve_oauth_provider
 
     provider = resolve_oauth_provider(record.platform, record.integration_config)
