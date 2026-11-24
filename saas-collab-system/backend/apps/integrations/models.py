@@ -306,6 +306,7 @@ class AutomaticRefreshAttempt(models.Model):
     attempt_count = models.PositiveSmallIntegerField(default=1)
     failure_category = models.CharField(max_length=40, default="", blank=True)
     next_retry_at = models.DateTimeField(null=True, blank=True)
+    commit_recovery = models.JSONField(default=dict, null=True, blank=True)
 
 
 class CredentialMutationRequest(models.Model):
@@ -2421,3 +2422,5 @@ class FeishuBusinessReminder(models.Model):
 
 from .warehouse_api_models import WarehouseApiAttempt  # noqa: E402,F401
 from .lazada_api_models import LazadaApiSnapshot, LazadaAdvertisingDailySpend  # noqa: E402,F401
+
+from .feishu_approval_models import FeishuApprovalMapping, FeishuApprovalInstance, FeishuApprovalEvent, FeishuFinanceHandoff  # noqa: E402,F401

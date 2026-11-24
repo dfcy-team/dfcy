@@ -34,13 +34,15 @@ def payment_flow_collection(request):
     from apps.accounts.models import CustomUser
     from apps.tenants.models import Department
     if request.method == "GET":
-        rows = PaymentApprovalFlow.objects.filter(tenant_id=request.user.tenant_id).select_related("reviewer").order_by("flow_key", "-version")
+        rows = PaymentApprovalFlow.objects.filter(tenant_id=request.user.tenant_id).select_related("reviewer", "finance_handler").order_by("flow_key", "-version")
         return success_response([{"id": r.pk, "flow_key": r.flow_key, "version": r.version, "payment_kind": r.payment_kind,
             "nature": r.nature, "department_key": r.department_key, "minimum_amount": str(r.minimum_amount),
             "payment_kinds": r.payment_kinds or [r.payment_kind], "natures": r.natures or [r.nature],
             "department_keys": r.department_keys if r.department_keys else ([r.department_key] if r.department_key else []), "notify_feishu": r.notify_feishu,
             "maximum_amount": str(r.maximum_amount) if r.maximum_amount is not None else None,
             "reviewer_id": r.reviewer_id, "reviewer_name": r.reviewer.full_name or r.reviewer.username,
+            "finance_handler_id": r.finance_handler_id,
+            "finance_handler_name": (r.finance_handler.full_name or r.finance_handler.username) if r.finance_handler_id else None,
             "published": r.published, "active": r.active} for r in rows])
     data = request.data
     try:
@@ -67,13 +69,26 @@ def payment_flow_collection(request):
         if type(data.get("notify_feishu", True)) is not bool: raise ValueError("invalid notify_feishu")
         reviewer = CustomUser.objects.get(pk=data["reviewer_id"], tenant_id=request.user.tenant_id,
             is_active=True, user_type=CustomUser.UserType.INTERNAL)
+        finance_handler_id = data.get("finance_handler_id")
+        finance_handler = None
+        if finance_handler_id not in (None, ""):
+            from apps.permissions.services import check_user_permission, user_has_finance_permission
+            from apps.permissions.ui_p6_scopes import finance_values_allowed
+            finance_handler = CustomUser.objects.get(pk=finance_handler_id, tenant_id=request.user.tenant_id,
+                is_active=True, user_type=CustomUser.UserType.INTERNAL)
+            if (not check_user_permission(finance_handler, "supply.v2.view") or
+                not check_user_permission(finance_handler, "supply.v2.manage") or
+                not user_has_finance_permission(finance_handler, "finance.reconcile") or
+                not finance_values_allowed(finance_handler, "finance.reconcile", platform="", currency="CNY")):
+                raise ValueError("invalid finance handler")
         latest = PaymentApprovalFlow.objects.filter(tenant_id=request.user.tenant_id, flow_key=data["flow_key"]).order_by("-version").first()
         version = (latest.version + 1) if latest else 1
         if not data.get("flow_key") or len(data["flow_key"]) > 64: raise ValueError("invalid flow key")
         row = PaymentApprovalFlow.objects.create(tenant=tenant, flow_key=data["flow_key"], version=version,
             payment_kind=kinds[0], nature=natures[0], department_key=departments[0] if len(departments)==1 else "",
             payment_kinds=kinds, natures=natures, department_keys=departments, notify_feishu=data.get("notify_feishu", True),
-            minimum_amount=minimum, maximum_amount=maximum if maximum is not None else None, reviewer=reviewer)
+            minimum_amount=minimum, maximum_amount=maximum if maximum is not None else None, reviewer=reviewer,
+            finance_handler=finance_handler)
         if data.get("publish") is True:
             PaymentApprovalFlow.objects.filter(tenant_id=request.user.tenant_id, flow_key=row.flow_key, published=True, active=True).exclude(pk=row.pk).update(active=False)
             row.published = True
@@ -129,6 +144,21 @@ def payment_flow_reviewers(request):
         scope_allows_value(u, "workflow.approvals.review", "approval_types", "finance") and
         scope_allows_value(u, "workflow.approvals.view", "approval_types", "finance") and
         check_user_permission(u, "supply.v2.view") and check_user_permission(u, "supply.v2.manage") and
+        user_has_finance_permission(u, "finance.reconcile") and
+        finance_values_allowed(u, "finance.reconcile", platform="", currency="CNY")]
+    return success_response([{"id": u.pk, "name": u.full_name or u.username} for u in rows])
+
+
+@api_view(["GET"])
+@permission_classes([IsApprovalManager])
+def payment_flow_finance_handlers(request):
+    """Eligible independent payment handlers; intentionally separate from approval reviewers."""
+    from apps.accounts.models import CustomUser
+    from apps.permissions.services import check_user_permission, user_has_finance_permission
+    from apps.permissions.ui_p6_scopes import finance_values_allowed
+    users = CustomUser.objects.filter(tenant_id=request.user.tenant_id, user_type=CustomUser.UserType.INTERNAL, is_active=True)
+    rows = [u for u in users if check_user_permission(u, "supply.v2.view") and
+        check_user_permission(u, "supply.v2.manage") and
         user_has_finance_permission(u, "finance.reconcile") and
         finance_values_allowed(u, "finance.reconcile", platform="", currency="CNY")]
     return success_response([{"id": u.pk, "name": u.full_name or u.username} for u in rows])

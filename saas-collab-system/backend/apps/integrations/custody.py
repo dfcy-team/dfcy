@@ -139,7 +139,7 @@ def validate_custody_service_url(value):
 
 
 class CustodyBackend(ABC):
-    def lookup_reference_by_operation(self, operation_id, *, close=False):
+    def lookup_reference_by_operation(self, operation_id, *, close=False, include_reference=False):
         raise CustodyError("Custody operation reconciliation is unavailable.")
 
     @abstractmethod
@@ -233,13 +233,16 @@ class HttpCustodyBackend(CustodyBackend):
         finally:
             kwargs.clear()
 
-    def lookup_reference_by_operation(self, operation_id, *, close=False):
+    def lookup_reference_by_operation(self, operation_id, *, close=False, include_reference=False):
         payload = self._request_json("POST", "/tokens/operation", body={"operation_id": operation_id, "close": close})
         if payload == {"found": False}:
             return payload
         if payload.get("found") is not True:
             raise CustodyError("Custody operation reconciliation was not confirmed.")
         result = _reference_result(payload)
+        if include_reference:
+            result["reference_version"] = payload.get("reference_version", payload.get("version"))
+            return {"found": True, **result, "status": payload.get("status", "")}
         return {"found": True, "credential_id": result["credential_id"], "token_id": result["token_id"],
                 "status": payload.get("status", "")}
 
@@ -277,7 +280,7 @@ class HttpCustodyBackend(CustodyBackend):
 
 
 class FileCustodyBackend(CustodyBackend):
-    def lookup_reference_by_operation(self, operation_id, *, close=False):
+    def lookup_reference_by_operation(self, operation_id, *, close=False, include_reference=False):
         return self._store.lookup_operation(operation_id, close=close)
 
     """Adapter for the operator-owned local custody volume."""

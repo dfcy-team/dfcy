@@ -66,6 +66,18 @@ def confirm_inbound(actor, pk, payload, key):
             raise ValidationError('入库来源发生变化，请核对批次与发货明细。')
         if line.received_quantity != line.expected_quantity and not line.difference_note.strip():
             raise ValidationError('实收数量与应收不同，请填写差异原因。')
+    # A later receipt changes the net difference for this shipment line. Once
+    # that difference has an active financial decision, require an explicit
+    # reversal before accepting another receipt against the same source line.
+    from .receipt_difference_models import ReceiptDifferenceDecision
+    shipment_line_ids = {line.shipment_line_id for line in lines}
+    decided = ReceiptDifferenceDecision.objects.filter(
+        tenant_id=actor.tenant_id, shipment_id__in={line.shipment_line.shipment_id for line in lines},
+        source_snapshot__shipment_line_id__in=list(shipment_line_ids), reverses__isnull=True,
+        reversal__isnull=True,
+    ).exists()
+    if decided:
+        raise ValidationError('该发货明细已有有效的收货差异财务处理；请先撤销原处理，再确认后续入库。')
     with domain_write():
         receipt = InternalStockReceipt.objects.create(tenant=actor.tenant, created_by=actor,
             inbound=obj, warehouse=warehouse, receipt_ref=f'SC2-RECEIPT-{obj.pk}-{uuid4().hex[:12].upper()}')

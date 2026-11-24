@@ -3,6 +3,8 @@ from decimal import Decimal
 
 
 def source_links(kind, obj):
+    if kind == 'domestic_expense':
+        return source_links('domestic_freight', obj.shipment)
     if kind == 'purchase':
         return [{'label': f'采购单 {obj.number}', 'href': f'/supply-chain/purchase-orders?order_id={obj.pk}'}]
     if kind in ('shipment', 'domestic_freight'):

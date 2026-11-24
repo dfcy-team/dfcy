@@ -1,16 +1,28 @@
 <template>
-  <section class="operations" :aria-busy="loading">
+  <section :key="view" class="operations" :aria-busy="loading">
     <header class="operations-head">
       <div><p class="eyebrow">日常经营 · 授权店铺</p><h1>销售工作台</h1><p>先看店铺表现，再定位下降商品及排查依据。</p></div>
       <details class="more"><summary>更多分析</summary><nav aria-label="更多销售分析"><button v-for="link in links" :key="link.path" @click="router.push(link.path)">{{ link.label }} ↗</button><button @click="$emit('legacy')">明细查询与周期分析</button></nav></details>
     </header>
+    <div v-if="view === 'products'" class="drilldown-context">
+      <button type="button" @click="backToStores">返回店铺汇总</button>
+      <strong>{{ selectedStoreName || applied.store_id }} · 商品明细</strong>
+    </div>
     <form class="filters" @submit.prevent="apply">
-      <label>平台<select v-model="draft.platform" @change="draft.store_id = ''"><option value="">全部授权平台</option><option v-for="option in platforms" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-      <label>站点<select v-model="draft.region" @change="draft.store_id = ''"><option value="">全部站点</option><option v-for="site in regions" :key="site" :value="site">{{ site }}</option></select></label>
-      <label>店铺<el-select v-model="selectedStores" multiple clearable filterable collapse-tags
-        aria-label="店铺" placeholder="全部授权店铺" :multiple-limit="100" class="store-filter">
+      <el-select v-model="draft.platform" class="scope-select" aria-label="平台" placeholder="选择平台"
+        clearable :value-on-clear="''" @change="draft.store_id = ''">
+        <el-option label="全部授权平台" value="" />
+        <el-option v-for="option in platforms" :key="option.value" :label="option.label" :value="option.value" />
+      </el-select>
+      <el-select v-model="draft.region" class="scope-select" aria-label="站点" placeholder="选择站点"
+        clearable :value-on-clear="''" @change="draft.store_id = ''">
+        <el-option label="全部站点" value="" />
+        <el-option v-for="site in regions" :key="site" :label="site" :value="site" />
+      </el-select>
+      <el-select v-model="selectedStoreIds" class="scope-select" aria-label="店铺"
+        placeholder="全部授权店铺" multiple filterable clearable collapse-tags collapse-tags-tooltip :multiple-limit="100">
         <el-option v-for="option in stores" :key="option.value" :label="option.label" :value="String(option.value)" />
-      </el-select></label>
+      </el-select>
       <label>开始日期<input v-model="draft.date_from" type="date" required></label><label>结束日期<input v-model="draft.date_to" type="date" required></label>
       <div class="quick" role="group" aria-label="快捷日期"><button v-for="days in [1,7,15,30]" :key="days" type="button" :class="{ active: isRange(days) }" :aria-pressed="isRange(days)" @click="quick(days)">{{ days === 1 ? '昨日' : `近${days}天` }}</button></div>
       <label class="currency-filter">显示币种<select v-model="currency" @change="changeCurrency"><option value="">CNY（人民币汇总）</option><option v-for="code in currencies" :key="code" :value="code">{{ code }}</option></select></label>
@@ -23,15 +35,15 @@
     <SalesNineSnapshots v-if="snapshotOpen" :scope="applied" @close="snapshotOpen = false" />
     <template v-if="data">
 
-      <section class="kpi-grid" aria-label="经营汇总">
+      <section v-if="!clickedStore" class="kpi-grid" aria-label="经营汇总">
         <article v-for="item in kpis" :key="item.key" class="kpi-card" :class="`tone-${item.key}`"><span class="kpi-icon" aria-hidden="true"><component :is="metricIcons[item.key]" /></span><div><p>{{ item.label }}</p><strong>{{ item.value }}</strong><small>{{ item.note }}</small></div></article>
       </section>
-      <details v-if="data.cny_summary" class="summary-notes"><summary>人民币汇总 · 数据口径</summary><p>原币明细不变 · CNY 视图按国家档案参考汇率折算</p><p>ROI 分子：{{ data.cny_summary.roi_sales_scope }}</p><p>参考汇率日期：{{ data.cny_summary.rate_dates.join('、') || '暂无' }}</p></details>
+      <details v-if="!clickedStore && data.cny_summary" class="summary-notes"><summary>人民币汇总 · 数据口径</summary><p>原币明细不变 · CNY 视图按国家档案参考汇率折算</p><p>ROI 分子：{{ data.cny_summary.roi_sales_scope }}</p><p>参考汇率日期：{{ data.cny_summary.rate_dates.join('、') || '暂无' }}</p></details>
       <p v-if="data.cny_summary?.ad_partial" class="notice">广告数据有在途，后续同步可能更新。</p><p v-if="data.cny_summary?.excluded_currencies?.length" class="notice">未换算币种：{{ data.cny_summary.excluded_currencies.join('、') }}</p>
-      <details class="summary-grid"><summary>各币种汇总（原币） <span>展开查看详情 · {{ visibleGroups.length }} 种</span></summary><div class="currency-cards"><article v-for="group in visibleGroups" :key="group.currency" class="summary-card"><div><span>{{ view === 'stores' ? '非取消订单GMV' : '商品行GMV' }}</span><b>{{ group.currency }}</b></div><strong>{{ amount(group.sales_amount) }}</strong><p :class="direction(group.change_percent)">{{ percent(group.change_percent) }} <span>较前一等长区间</span></p><dl><div><dt>广告花费</dt><dd>{{ adSpendValue(group.ad_spend, group.ad_reason) }} <span v-if="group.ad_spend != null">{{ group.currency }}</span></dd></div><div><dt>{{ group.ad_status === 'provisional' ? '暂估整店ROI' : '整店ROI' }}</dt><dd>{{ roiDisplay(group.roi, group.ad_spend, group.ad_reason) }} <small v-if="group.roi_delta != null">变化 {{ roiValue(group.roi_delta) }} 倍</small></dd></div></dl><p v-if="group.ad_sales_amount != null" class="note">ROI 计算销售额：{{ amount(group.ad_sales_amount) }} {{ group.currency }}</p><p v-if="group.ad_status === 'provisional' || group.ad_status === 'estimated'" class="note">暂估：有在途数据，后续同步后将更新。</p><p v-if="group.ad_basis" class="note">{{ group.ad_basis }}</p><p class="note">{{ group.ad_reason || '已入库数据，后续补采可能调整。' }}</p></article></div></details>
-      <div v-for="(notice,index) in data.notices || []" :key="index" class="notice">{{ typeof notice === 'string' ? notice : notice.message }}</div>
-      <section class="results">
-        <div class="results-head"><div><h2>{{ view === 'stores' ? '店铺经营表现' : `${selectedStoreName} · 商品链接` }}</h2><p>{{ view === 'stores' ? '点击店铺进入商品链接；按GMV降序，单页最多20条。' : '按商品行金额汇总，不含订单层运费税费；点击下降原因查看证据。' }}</p></div><button v-if="returnToDeclines" @click="returnToBoard">← 返回大屏下降排行</button><button v-else-if="view === 'products'" @click="backToStores">← 返回店铺</button>    <div class="list-tools" aria-label="列表显示与排序">
+      <details v-if="!clickedStore" class="summary-grid"><summary>各币种汇总（原币） <span>{{ visibleGroups.length }} 种</span></summary><div class="currency-cards"><article v-for="group in visibleGroups" :key="group.currency" class="summary-card"><div><span>{{ view === 'stores' ? '非取消订单GMV' : '商品行GMV' }}</span><b>{{ group.currency }}</b></div><strong>{{ amount(group.sales_amount) }}</strong><p :class="direction(group.change_percent)">{{ percent(group.change_percent) }} <span>较前一等长区间</span></p><dl><div><dt>广告花费</dt><dd>{{ adSpendValue(group.ad_spend, group.ad_reason) }} <span v-if="group.ad_spend != null">{{ group.currency }}</span></dd></div><div><dt>{{ group.ad_status === 'provisional' ? '暂估整店ROI' : '整店ROI' }}</dt><dd>{{ roiDisplay(group.roi, group.ad_spend, group.ad_reason) }} <small v-if="group.roi_delta != null">变化 {{ roiValue(group.roi_delta) }} 倍</small></dd></div></dl><p v-if="group.ad_sales_amount != null" class="note">ROI 计算销售额：{{ amount(group.ad_sales_amount) }} {{ group.currency }}</p><details v-if="group.ad_basis || group.ad_reason" class="currency-card-notes"><summary>取值说明</summary><p v-if="group.ad_basis" class="note">{{ group.ad_basis }}</p><p v-if="group.ad_reason" class="note">{{ group.ad_reason }}</p></details></article></div></details>
+      <div v-for="(notice,index) in clickedStore ? [] : (data.notices || [])" :key="index" class="notice">{{ typeof notice === 'string' ? notice : notice.message }}</div>
+      <section :key="view" class="results">
+        <div class="results-head"><div><h2>{{ view === 'stores' ? '店铺经营表现' : `${selectedStoreName} · 商品明细` }}</h2><p>{{ view === 'stores' ? '点击店铺进入商品链接；按GMV降序，单页最多20条。' : '按商品行金额汇总，不含订单层运费税费；点击下降原因查看证据。' }}</p></div><button v-if="returnToDeclines" @click="returnToBoard">← 返回大屏下降排行</button><button v-else-if="view === 'products'" @click="backToStores">← 返回店铺</button>    <div class="list-tools" aria-label="列表显示与排序">
       <label>排序<select v-model="sort" :disabled="loading" @change="reloadList"><option value="sales_desc">GMV由高到低</option><option value="change_asc">下降幅度优先</option><option value="loss_desc">下降金额优先</option><option :value="view === 'products' ? 'units_desc' : 'orders_desc'">{{ view === 'products' ? '销量由高到低' : '订单由高到低' }}</option></select></label>
       <label v-if="view === 'products'">记录范围<select v-model="status" :disabled="loading" @change="reloadList"><option value="all">全部商品</option><option value="declines" :disabled="applied.date_from !== applied.date_to">下降超过30%</option><option value="unobserved">本期未观测</option></select></label>
       <details class="column-options"><summary>显示列</summary><div><p>商品身份和本期GMV固定显示；列选择不会发起查询。</p><label v-for="column in availableColumns" :key="column.key"><input v-model="selectedColumns" type="checkbox" :value="column.key" @change="persistColumns">{{ column.label }}</label><button @click="resetColumns">恢复默认</button></div></details>
@@ -47,10 +59,10 @@
             <th v-if="shown('volume')">{{ view === 'stores' ? '有效订单' : '销量' }}</th><th v-if="view === 'stores' && shown('ads')">广告花费</th><th v-if="view === 'stores' && shown('roi')">整店ROI / 差值</th><th v-if="view === 'products' && shown('reason')">下降原因</th>
           </tr></thead><tbody><tr v-for="row in data.rows" :key="`${row.store_id}-${row.product_id || ''}-${row.currency}`">
             <td><button v-if="view === 'stores'" class="text-button" :disabled="!canProducts" :title="canProducts ? '查看商品链接' : '需SKU销售明细权限'" @click="openStore(row)">{{ row.store_name }}</button><template v-else><el-image v-if="row.platform_image_url" :src="row.platform_image_url" :preview-src-list="row.platform_image_urls?.length ? row.platform_image_urls : [row.platform_image_url]" preview-teleported fit="contain" class="ops-product-image"><template #error><span>暂无图片</span></template></el-image><span v-else class="ops-image-empty">暂无图片</span><strong>{{ row.product_name || '未命名商品' }}</strong></template><small>{{ view === 'stores' ? row.country : row.product_id }}</small><small v-if="row.observation_status === 'missing_current'">本期未观测，需核查采集</small></td>
-            <td>{{ displayAmount(row.sales_amount, row.currency) }} <small>{{ currency || 'CNY' }}</small></td>
-            <td v-if="shown('previous')">{{ displayAmount(row.previous_sales_amount, row.currency) }}</td><td v-if="shown('change')" :class="direction(row.change_percent)">{{ percent(row.change_percent) }}</td><td v-if="shown('loss')">{{ displayAmount(row.loss_amount, row.currency) }} <small>{{ currency || 'CNY' }} · 前期减本期</small></td>
+            <td>{{ displayAmount(row.sales_amount, row.currency) }} <small>{{ clickedStore?.currency || currency || 'CNY' }}</small></td>
+            <td v-if="shown('previous')">{{ displayAmount(row.previous_sales_amount, row.currency) }}</td><td v-if="shown('change')" :class="direction(row.change_percent)">{{ percent(row.change_percent) }}</td><td v-if="shown('loss')">{{ displayAmount(row.loss_amount, row.currency) }} <small>{{ clickedStore?.currency || currency || 'CNY' }} · 前期减本期</small></td>
             <td v-if="shown('volume')">{{ (view === 'stores' ? row.order_count : row.units_sold) ?? '—' }} {{ view === 'stores' ? '单' : '件' }}</td>
-            <td v-if="view === 'stores' && shown('ads')">{{ row.ad_spend == null ? adSpendValue(null, row.ad_reason) : displayAmount(row.ad_spend, row.currency) }}<small v-if="row.ad_spend != null">{{ currency || 'CNY' }}</small><details v-if="row.ad_basis" class="ad-basis"><summary>取值依据</summary><p>{{ row.ad_basis }}</p></details></td><td v-if="view === 'stores' && shown('roi')">{{ roiDisplay(row.roi, row.ad_spend, row.ad_reason) }}<small v-if="row.ad_status === 'provisional' || row.ad_status === 'estimated'">暂估：有在途数据，后续同步后将更新。</small><small v-if="row.roi_delta != null">变化 {{ roiValue(row.roi_delta) }} 倍</small></td>
+            <td v-if="view === 'stores' && shown('ads')">{{ row.ad_spend == null ? adSpendValue(null, row.ad_reason) : displayAmount(row.ad_spend, row.currency) }}<small v-if="row.ad_spend != null">{{ clickedStore?.currency || currency || 'CNY' }}</small><details v-if="row.ad_basis" class="ad-basis"><summary>取值依据</summary><p>{{ row.ad_basis }}</p></details></td><td v-if="view === 'stores' && shown('roi')">{{ roiDisplay(row.roi, row.ad_spend, row.ad_reason) }}<small v-if="row.ad_status === 'provisional' || row.ad_status === 'estimated'">暂估：有在途数据，后续同步后将更新。</small><small v-if="row.roi_delta != null">变化 {{ roiValue(row.roi_delta) }} 倍</small></td>
             <td v-if="view === 'products' && shown('reason')"><button class="reason-button" :class="{ flagged: row.diagnosis?.status === 'suspected_decline' }" @click="openReason(row)">{{ row.diagnosis?.title || '查看排查依据' }}</button></td>
           </tr></tbody></table>
         </div>
@@ -59,16 +71,36 @@
       <details class="declines" @toggle="toggleDeclines">
         <summary>需关注商品 · 销售下降 <span>按当前筛选按需读取，最多10项</span></summary>
         <p v-if="!canProducts" class="note">需 SKU 销售明细权限，当前不查询商品数据。</p>
+        <p v-else-if="applied.store_id.includes(',')" class="note">请选择单个店铺或清空店铺筛选后查看下降商品。</p>
         <p v-else-if="!currency" class="note">请先选择单一币种，再读取销售下降商品。</p>
         <div v-else-if="declinesLoading" class="loading" role="status">正在读取销售下降商品…</div>
         <div v-else-if="declinesError" class="notice error" role="alert">{{ declinesError }} <button @click="loadDeclines">重试</button></div>
         <div v-else-if="declinesLoaded && !declines.length" class="empty">当前筛选范围暂无可比较的下降商品。</div>
-        <div v-else-if="declinesLoaded" class="table-scroll"><table><thead><tr><th>商品 / 店铺</th><th>本期 GMV</th><th>前期 GMV</th><th>下降金额</th><th>变化率</th><th>排查</th></tr></thead><tbody><tr v-for="row in declines" :key="`${row.store_id}-${row.product_id}-${row.currency}`"><td><el-image v-if="row.platform_image_url" :src="row.platform_image_url" :preview-src-list="row.platform_image_urls?.length ? row.platform_image_urls : [row.platform_image_url]" preview-teleported fit="contain" class="ops-product-image"/><strong>{{ row.product_name || row.product_id }}</strong><small>{{ row.store_name }} · {{ row.country }} · {{ row.currency }}</small></td><td>{{ amount(row.sales_amount) }}</td><td>{{ amount(row.previous_sales_amount) }}</td><td>{{ amount(row.decline_amount) }} {{ row.currency }}</td><td class="negative">{{ percent(row.change_percent) }}</td><td><button class="reason-button" @click="openDecline(row)">查看详情</button></td></tr></tbody></table></div>
+        <div v-else-if="declinesLoaded" class="table-scroll"><table><thead><tr><th>商品 / 店铺</th><th>本期 GMV</th><th>前期 GMV</th><th>下降金额</th><th>变化率</th><th>排查</th></tr></thead><tbody><tr v-for="row in declines" :key="`${row.store_id}-${row.product_id}-${row.currency}`"><td><el-image v-if="row.platform_image_url" :src="row.platform_image_url" :preview-src-list="[row.platform_image_url]" preview-teleported fit="contain" class="ops-product-image"/><strong>{{ row.product_name || row.product_id }}</strong><small>{{ row.store_name }} · {{ row.country }} · {{ row.currency }}</small></td><td>{{ amount(row.sales_amount) }}</td><td>{{ amount(row.previous_sales_amount) }}</td><td>{{ amount(row.decline_amount) }} {{ row.currency }}</td><td class="negative">{{ percent(row.change_percent) }}</td><td><button class="reason-button" @click="openDecline(row)">查看详情</button></td></tr></tbody></table></div>
       </details>
       <p class="note">按已入库数据比较，采集完整性未确认；零基准、缺失日期不生成变化率。{{ data.generated_at ? `生成时间：${data.generated_at}` : '' }}</p>
     </template>
     <div v-else-if="loading" class="empty" role="status">正在读取店铺经营汇总…</div>
-    <dialog ref="reasonDialog" class="reason-dialog" @close="reason = null" @click="closeBackdrop"><template v-if="reason"><el-image v-if="reason.platform_image_url" :src="reason.platform_image_url" :preview-src-list="[reason.platform_image_url]" :preview-teleported="false" fit="contain" class="ops-product-image"><template #error><span class="ops-image-empty">暂无图片</span></template></el-image><span v-else class="ops-image-empty">暂无图片</span><header><div><p class="eyebrow">LX 巡店SOP · 排查依据</p><h2>{{ reason.product_name || reason.product_id }}</h2></div><button aria-label="关闭原因详情" @click="reasonDialog?.close()">关闭</button></header><p>{{ selectedStoreName }} · {{ applied.date_from }} — {{ applied.date_to }} · {{ reason.currency }}</p><div class="reason-layout"><section><h3>触发与对比</h3><dl><div><dt>本期商品GMV</dt><dd>{{ amount(reason.sales_amount) }} {{ reason.currency }}</dd></div><div><dt>前期商品GMV</dt><dd>{{ amount(reason.previous_sales_amount) }} {{ reason.currency }}</dd></div><div><dt>变化率</dt><dd :class="direction(reason.change_percent)">{{ percent(reason.change_percent) }}</dd></div></dl><p class="note">单日GMV较前日下降超过30%时进入LX排查；其他日期范围仅展示变化。</p></section><section><h3>判断路径</h3><ol><li v-for="(step,index) in reason.diagnosis?.steps || []" :key="index"><strong>{{ step.label }}</strong><p>{{ step.value ?? '缺少数据，暂不能判断' }}</p><small v-if="step.snapshot_at">快照时间：{{ step.snapshot_at }}</small><small v-if="step.status === 'shop_auxiliary'">所属店铺广告辅助数据，不代表该商品</small></li></ol><p v-if="reason.diagnosis?.shop_ad_label" class="note">{{ reason.diagnosis.shop_ad_label }}</p><div class="notice"><strong>{{ reason.diagnosis?.title || '原因待核查' }}</strong><p>变化命中不等于已证实原因。买家、访客、转化、缺货等证据未齐时，不推断经营原因。</p></div><p v-if="reason.diagnosis?.missing?.length" class="note">待补数据：{{ reason.diagnosis.missing.join('、') }}</p></section></div></template></dialog>
+    <dialog ref="reasonDialog" class="reason-dialog" @close="closeEvidence" @click="closeBackdrop"><template v-if="reason"><el-image v-if="reason.platform_image_url" :src="reason.platform_image_url" :preview-src-list="reason.platform_image_urls?.length ? reason.platform_image_urls : [reason.platform_image_url]" :preview-teleported="false" fit="contain" class="ops-product-image"><template #error><span class="ops-image-empty">暂无图片</span></template></el-image><span v-else class="ops-image-empty">暂无图片</span><header><div><p class="eyebrow">LX 巡店SOP · 排查依据</p><h2>{{ reason.product_name || reason.product_id }}</h2></div><button aria-label="关闭原因详情" @click="reasonDialog?.close()">关闭</button></header><p>{{ selectedStoreName }} · {{ applied.date_from }} — {{ applied.date_to }} · {{ reason.currency }}</p><p v-if="evidenceLoading" role="status">正在读取库存、价格和排查依据…</p><p v-if="evidenceError" role="alert">{{ evidenceError }}</p><div class="reason-layout"><section><h3>触发与对比</h3><dl><div><dt>本期商品GMV</dt><dd>{{ amount(reason.sales_amount) }} {{ reason.currency }}</dd></div><div><dt>前期商品GMV</dt><dd>{{ amount(reason.previous_sales_amount) }} {{ reason.currency }}</dd></div><div><dt>变化率</dt><dd :class="direction(reason.change_percent)">{{ percent(reason.change_percent) }}</dd></div></dl><p class="note">单日GMV较前日下降超过30%时进入LX排查；其他日期范围仅展示变化。</p></section><section><h3>{{ reason.diagnosis?.platform === 'tiktok' ? 'TK 销售变化' : '判断路径' }}</h3><ol><li v-for="(step,index) in reason.diagnosis?.steps || []" :key="index"><strong>{{ step.label }}</strong><p>{{ step.value ?? '缺少数据，暂不能判断' }}</p><small v-if="step.snapshot_at">快照时间：{{ step.snapshot_at }}</small><small v-if="step.status === 'shop_auxiliary'">所属店铺广告辅助数据，不代表该商品</small></li></ol><p v-if="reason.diagnosis?.shop_ad_label" class="note">{{ reason.diagnosis.shop_ad_label }}</p><div class="notice"><strong>{{ reason.diagnosis?.title || '原因待核查' }}</strong><p>变化命中不等于已证实原因。买家、访客、转化、缺货等证据未齐时，不推断经营原因。</p></div><p v-if="reason.diagnosis?.missing?.length" class="note">待补数据：{{ reason.diagnosis.missing.join('、') }}</p></section><template v-if="reason.diagnosis?.platform === 'tiktok'">
+<section><h3>商品概况</h3><p>{{ selectedStoreName }}</p><p>商品 ID {{ reason.product_id }}</p><p>{{ applied.date_from }} — {{ applied.date_to }} · {{ reason.currency }}</p></section>
+<section v-for="section in reason.diagnosis.sections || []" :key="section.title" class="traffic-evidence"><h3>{{ section.title }}</h3><p class="note">{{ section.scope }}</p><p v-if="section.message" class="note">{{ section.message }}</p><dl><div v-for="metric in section.metrics" :key="metric.label"><dt>{{ metric.label }}</dt><dd>{{ evidenceMetric(metric) }}<small v-if="metric.note">{{ metric.note }}</small></dd></div></dl><p v-if="section.source_updated_at" class="note">数据更新时间：{{ section.source_updated_at }}</p></section>
+<section class="variant-evidence"><h3>GMV Max · 所属店铺辅助数据</h3><p class="note">店铺 / 活动归因口径，包含自然与付费流量。金额为广告原币，不分摊到当前商品。</p>
+<div class="variant-table-wrap" v-if="reason.diagnosis.gmv_max?.length"><table><thead><tr><th>币种</th><th>已知花费</th><th>归因 GMV</th><th>归因订单</th><th>报表 ROI</th><th>日期覆盖</th></tr></thead><tbody><tr v-for="(ad,i) in reason.diagnosis.gmv_max" :key="i"><td>{{ ad.currency }}</td><td>{{ ad.cost ?? '—' }}</td><td>{{ ad.gross_revenue ?? '—' }}</td><td>{{ ad.orders ?? '—' }}</td><td>{{ ad.roi ?? '—' }}</td><td>{{ ad.stored_days }} / {{ ad.expected_days }} 天</td></tr></tbody></table></div><p v-else class="note">{{ reason.diagnosis.gmv_max_status === 'unavailable' ? '无查看权限或数据暂不可用' : '当前范围暂无已验证快照' }}</p></section>
+</template>
+<section v-if="reason.diagnosis?.variant_details?.length" class="variant-evidence">
+<h3>各规格库存与价格</h3>
+<p>{{ reason.diagnosis.inventory_summary?.status === 'complete' ? '商品共享可用库存合计' : '商品已知共享可用库存小计' }} {{ reason.diagnosis.inventory_summary?.quantity ?? '缺失' }} <small>内部 SKU 去重，取所选日期截止前的 WMS 快照</small></p>
+<p v-if="reason.diagnosis.inventory_summary?.shared_components" class="note">多个规格共用组件库存，各规格可组装数量不能同时兑现，商品总库存需分配组件后核算。</p><div class="variant-table-wrap"><table class="variant-table"><thead><tr><th>规格 / 平台 SKU</th><th>内部 SKU</th><th>可用库存</th><th>仓库 / 快照</th><th>原价</th><th>促销价</th><th>实际售价 / 币种</th></tr></thead>
+<tbody><tr v-for="(v,i) in reason.diagnosis.variant_details" :key="i">
+<td>{{ v.variant }}<small>{{ v.platform_sku || '未提供平台 SKU' }}</small></td>
+<td>{{ v.internal_sku || '未映射' }}<small v-if="v.shared_inventory">共享库存，合计只计一次</small></td>
+<td>{{ v.status === 'not_calculable' ? '组合库存待核算' : (v.available_qty ?? '缺失') }}<small v-if="v.inventory_basis">{{ v.inventory_basis }}</small><small v-if="v.status === 'partial'">部分仓库数据缺失</small></td>
+<td><div v-for="(w,j) in v.warehouses || []" :key="j">{{ w.warehouse }} · {{ w.source_sku }} · {{ w.available_qty }}<small>{{ w.snapshot_at }}</small></div><small v-if="!v.warehouses?.length">无可用快照</small></td>
+<td>{{ v.price?.original_price ?? '—' }}</td><td>{{ v.price?.promotion_price ?? '—' }}</td><td>{{ v.price?.effective_price ?? '—' }} {{ v.price?.currency }}<small v-if="v.price">{{ v.price.source_updated_at || '时间未知' }} · 当前参考价</small></td>
+</tr></tbody></table></div>
+<p v-if="reason.diagnosis.price_status === 'unavailable'" class="note">价格信息无查看权限或暂不可用</p>
+<p v-else class="note">价格按平台 SKU 与变体匹配，展示当前参考价格。历史价格变化仍待对应日期记录验证。</p>
+</section></div></template></dialog>
   </section>
 </template>
 
@@ -89,10 +121,11 @@ type Row = Record<string, any>;
 const router = useRouter(), route = useRoute(), auth = useAuthStore();
 const validIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 const draft = reactive({ ...dateRange(1), platform: '', store_id: '', region: '' });
-const selectedStores = computed<string[]>({
+const selectedStoreIds = computed({
   get: () => draft.store_id ? draft.store_id.split(',') : [],
-  set: values => { draft.store_id = [...new Set(values)].join(','); },
+  set: (ids: string[]) => { draft.store_id = ids.join(','); },
 });
+
 if (route.query.view === 'operations' && typeof route.query.date_from === 'string' && typeof route.query.date_to === 'string') { const dates = { date_from: route.query.date_from, date_to: route.query.date_to }; if (!validRange(dates)) Object.assign(draft, dates); }
 const applied = ref({ ...draft }), view = ref('stores'), page = ref(1), pageSize = 20;
 const data = ref<Row | null>(null), filters = ref<Row>({}), loading = ref(false), error = ref(''), filterError = ref(''), currency = ref('');
@@ -109,6 +142,7 @@ watch([view, () => preferenceKey(auth.currentUser)], () => { selectedColumns.val
 const parentScope = ref<Row | null>(null);
 const exactProductId = ref(''), returnToDeclines = ref(false), autoOpenReason = ref(false);
 const returnScope = ref<Row | null>(null), routeScopeInvalid = ref(false);
+const clickedStore = ref<{ id: string; currency: string } | null>(null);
 const selectedStoreName = ref(''), reason = ref<Row | null>(null), reasonDialog = ref<HTMLDialogElement | null>(null);
 let alive = true, controller: AbortController | null = null, generation = 0;
 let declinesController: AbortController | null = null, declinesGeneration = 0;
@@ -122,7 +156,7 @@ const canProducts = computed(() => canAccessPath(auth.currentUser, '/sales-manag
 const dirty = computed(() => Object.keys(draft).some(key => draft[key as keyof typeof draft] !== applied.value[key as keyof typeof draft]));
 const visibleGroups = computed(() => (data.value?.currency_groups || []).filter((g: Row) => !currency.value || g.currency === currency.value));
 function displayAmount(value: any, code: string) {
-  if (currency.value || code === 'CNY' || value == null) return amount(value);
+  if (clickedStore.value || currency.value || code === 'CNY' || value == null) return amount(value);
   const rate = Number(data.value?.cny_summary?.display_rates?.[code]);
   return rate > 0 ? amount(Number(value) / rate) : '—';
 }
@@ -147,25 +181,27 @@ const links = computed(() => [
   { path: '/sales-management/exports', label: '销售明细导出' }
 ].filter(link => canAccessPath(auth.currentUser, link.path)));
 const roiValue = (value: any, reason?: string) => value == null ? (reason || '数据拉取不全，暂无法计算') : amount(value);
-const adSpendValue = (value: any, reason?: string) => value == null ? (reason ? `广告花费不可用：${reason}` : '广告花费尚未拉取') : amount(value);
+const adSpendValue = (value: any, reason?: string) => value == null && reason?.includes('当前周期暂无有效店铺广告费记录') ? '无广告花费，无法计算ROI' : value == null ? (reason ? `广告花费不可用：${reason}` : '广告花费尚未拉取') : amount(value);
 const roiDisplay = (value: any, spend: any, reason?: string) => value != null ? `${amount(value)} 倍` : spend != null && Number(spend) === 0 ? '广告花费为0，无法计算ROI' : spend == null ? adSpendValue(spend, reason) : (reason || '数据拉取不全，暂无法计算');
 const direction = (value: any) => value == null ? '' : Number(value) < 0 ? 'negative' : Number(value) > 0 ? 'positive' : '';
 async function load() {
   if (routeScopeInvalid.value) return;
+  evidenceController?.abort();
   clearDeclines();
   const id = ++generation; controller?.abort(); controller = new AbortController(); loading.value = true; error.value = ''; data.value = null; reasonDialog.value?.close();
   try {
-    const response = await fetchSalesOperations({ ...applied.value, view: view.value, page: page.value, page_size: pageSize, sort: sort.value, status: status.value, ...(currency.value ? { currency: currency.value } : {}), ...(exactProductId.value ? { product_id: exactProductId.value } : {}) }, controller.signal);
+    const drilldown = view.value === 'products' ? clickedStore.value : null;
+    const queryCurrency = drilldown?.currency || currency.value;
+    const response = await fetchSalesOperations({ ...applied.value, ...(drilldown ? { store_id: drilldown.id } : {}), view: view.value, page: page.value, page_size: pageSize, sort: sort.value, status: status.value, ...(queryCurrency ? { currency: queryCurrency } : {}), ...(exactProductId.value ? { product_id: exactProductId.value } : {}) }, controller.signal);
     if (!alive || generation !== id) return;
     if (!response?.success) throw new Error(response?.message || '经营数据暂不可用。');
     data.value = response.data;
     const found = (response.data?.currency_groups || []).map((g: Row) => g.currency);
-    currencies.value = currency.value ? [...new Set([...currencies.value, ...found])] : found;
+    if (!drilldown) currencies.value = currency.value ? [...new Set([...currencies.value, ...found])] : found;
     if (autoOpenReason.value && exactProductId.value) {
-      reason.value = data.value.rows?.find((row: Row) => String(row.product_id) === exactProductId.value) || null;
+      const selected = data.value.rows?.find((row: Row) => String(row.product_id) === exactProductId.value);
       autoOpenReason.value = false;
-      const openId = id;
-      if (reason.value) await nextTick(() => { if (alive && generation === openId) reasonDialog.value?.showModal(); });
+      if (selected) await openReason(selected);
     }
     if (declinesOpen.value && view.value === 'stores') loadDeclines();
   } catch (failure: any) { if (alive && generation === id) error.value = failure?.message || '经营数据暂不可用，请重试。'; }
@@ -177,15 +213,11 @@ function toggleDeclines(event: Event) {
   if (declinesOpen.value && canProducts.value && currency.value && !declinesLoaded.value && !declinesLoading.value) loadDeclines();
   else if (!declinesOpen.value) clearDeclines();
 }
-function boardStoreScope(storeId: string, storeIds?: string) {
-  const multiple = storeIds || (storeId.includes(',') ? storeId : '');
-  return multiple ? { store_id: '', store_ids: multiple } : { store_id: storeId };
-}
 async function loadDeclines() {
-  if (!canProducts.value || !currency.value || !data.value) return;
+  if (!canProducts.value || !currency.value || !data.value || applied.value.store_id.includes(',')) return;
   const id = ++declinesGeneration; declinesController?.abort(); declinesController = new AbortController(); declinesLoading.value = true; declinesError.value = ''; declines.value = [];
   try {
-    const response = await fetchBoardDeclines({ ...applied.value, ...boardStoreScope(applied.value.store_id), currency: currency.value, metric: 'amount' }, declinesController.signal);
+    const response = await fetchBoardDeclines({ ...applied.value, currency: currency.value, metric: 'amount' }, declinesController.signal);
     if (!alive || id !== declinesGeneration) return;
     if (!response.success || ['mock','degraded'].includes(response.data?.api_status)) throw new Error();
     declines.value = response.data?.rows || []; declinesLoaded.value = true;
@@ -199,24 +231,71 @@ function openDecline(row: Row) {
   Object.assign(draft, { store_id: String(row.store_id) });
   selectedStoreName.value = row.store_name;
   view.value = 'products'; exactProductId.value = row.product_id; returnToDeclines.value = false;
-  currency.value = row.currency || currency.value;
   status.value = 'all'; sort.value = 'change_asc'; page.value = 1; load();
 }
-function apply() { const message = validRange(draft); if (message) { error.value = message; return; } routeScopeInvalid.value = false; exactProductId.value = ''; autoOpenReason.value = false; applied.value = { ...draft }; view.value = 'stores'; page.value = 1; currency.value = ''; currencies.value = []; status.value = 'all'; sort.value = 'sales_desc'; load(); }
+function apply() { const message = validRange(draft); if (message) { error.value = message; return; } routeScopeInvalid.value = false; exactProductId.value = ''; autoOpenReason.value = false; clickedStore.value = null; applied.value = { ...draft }; view.value = 'stores'; page.value = 1; currency.value = ''; currencies.value = []; status.value = 'all'; sort.value = 'sales_desc'; load(); }
 function isRange(days: number) { const range = dateRange(days); return applied.value.date_from === range.date_from && applied.value.date_to === range.date_to; }
 function quick(days: number) { Object.assign(draft, dateRange(days)); apply(); }
-function openStore(row: Row) { if (!canProducts.value) return; parentScope.value = { ...applied.value, currency: currency.value, sort: sort.value }; applied.value = { ...applied.value, store_id: String(row.store_id) }; draft.store_id = String(row.store_id); selectedStoreName.value = row.store_name; view.value = 'products'; exactProductId.value = ''; returnToDeclines.value = false; sort.value = 'change_asc'; status.value = 'all'; currency.value = row.currency; page.value = 1; load(); }
-function backToStores() { if (parentScope.value) { const { currency: previousCurrency, sort: previousSort, ...scope } = parentScope.value; applied.value = scope as typeof applied.value; Object.assign(draft, scope); currency.value = previousCurrency; sort.value = previousSort || 'sales_desc'; } view.value = 'stores'; exactProductId.value = ''; returnToDeclines.value = false; status.value = 'all'; page.value = 1; load(); }
+function openStore(row: Row) {
+  if (!canProducts.value) return;
+  parentScope.value = { ...applied.value, currency: currency.value, sort: sort.value };
+  clickedStore.value = { id: String(row.store_id), currency: row.currency };
+  selectedStoreName.value = row.store_name;
+  view.value = 'products'; exactProductId.value = ''; returnToDeclines.value = false;
+  sort.value = 'change_asc'; status.value = 'all'; page.value = 1; load();
+}
+function backToStores() { const isolated = Boolean(clickedStore.value); clickedStore.value = null; if (parentScope.value) { const { currency: previousCurrency, sort: previousSort, ...scope } = parentScope.value; applied.value = scope as typeof applied.value; if (!isolated) Object.assign(draft, scope); currency.value = previousCurrency; sort.value = previousSort || 'sales_desc'; } view.value = 'stores'; exactProductId.value = ''; returnToDeclines.value = false; status.value = 'all'; page.value = 1; load(); }
 function reloadList() { page.value = 1; load(); }
 function returnToBoard() {
   const source = returnScope.value || applied.value;
   const query = { date_from: source.date_from, date_to: source.date_to,
-    platform: source.platform || '', region: source.region || '', ...boardStoreScope(source.store_id || '', source.store_ids), currency: source.currency || currency.value || '', metric: source.metric || 'amount', view: 'declines' };
+    platform: source.platform || '', region: source.region || '', store_id: source.store_id || '', currency: source.currency || currency.value || '', metric: source.metric || 'amount', view: 'declines' };
   router.push({ path: '/sales-management/realtime-board', query });
 }
 function changeCurrency() { page.value = 1; load(); }
 function goPage(step: number) { page.value += step; load(); }
-async function openReason(row: Row) { const id = generation; reason.value = row; await nextTick(); if (alive && generation === id && reason.value === row) reasonDialog.value?.showModal(); }
+function closeEvidence() {
+  ++evidenceGeneration; evidenceController?.abort(); evidenceLoading.value = false; reason.value = null;
+}
+const evidenceLoading = ref(false), evidenceError = ref('');
+function evidenceMetric(metric: Row) {
+  if (metric.value == null) return metric.empty_label || '暂无数据';
+  if (metric.unit === 'percent' || metric.format === 'percent') {
+    const value = Number(metric.value);
+    return Number.isFinite(value) ? `${(value * 100).toFixed(2)}%` : '暂无数据';
+  }
+  return metric.value;
+}
+let evidenceGeneration = 0;
+let evidenceController: AbortController | null = null;
+async function openReason(row: Row) {
+  const id = ++evidenceGeneration;
+  const scopeGeneration = generation;
+  evidenceController?.abort();
+  evidenceController = new AbortController();
+  reason.value = row;
+  evidenceLoading.value = true; evidenceError.value = '';
+  await nextTick();
+  if (!alive || id !== evidenceGeneration || scopeGeneration !== generation) return;
+  reasonDialog.value?.showModal();
+  try {
+    const response = await fetchSalesOperations({
+      ...applied.value, view: 'products', store_id: String(row.store_id),
+      currency: row.currency, product_id: String(row.product_id), evidence: '1',
+      status: 'all', page: 1, page_size: 1, sort: 'sales_desc',
+    }, evidenceController.signal);
+    if (!alive || id !== evidenceGeneration || scopeGeneration !== generation) return;
+    if (!response?.success) throw new Error(response?.message || '排查依据读取失败');
+    const match = response.data?.rows?.find((item: Row) => String(item.product_id) === String(row.product_id) && String(item.store_id) === String(row.store_id) && item.currency === row.currency);
+    if (!match) throw new Error('当前范围未找到该商品');
+    reason.value = { ...row, ...match };
+  } catch (failure: any) {
+    if (alive && id === evidenceGeneration && scopeGeneration === generation) evidenceError.value = failure?.message || '排查依据读取失败';
+  } finally {
+    if (id === evidenceGeneration) evidenceLoading.value = false;
+  }
+}
+
 function closeBackdrop(event: MouseEvent) { if (event.target === reasonDialog.value) { const rect = reasonDialog.value!.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) reasonDialog.value?.close(); } }
 async function loadFilters() { filterError.value = ''; try { const response = await fetchBoardFilters(); if (!alive) return; if (!response.success || ['mock','degraded'].includes(response.data?.api_status)) throw new Error(); filters.value = response.data; } catch { if (alive) filterError.value = '店铺筛选暂不可用，当前仍按系统授权范围查询。'; } }
 function restoreRouteScope() {
@@ -236,7 +315,7 @@ function restoreRouteScope() {
     error.value = ''; reason.value = null;
     return true;
   }
-  const scalarKeys = ['date_from','date_to','platform','region','store_id','currency','product_id','return_view','return_date_from','return_date_to','return_platform','return_region','return_store_id','return_store_ids','return_currency','return_metric'];
+  const scalarKeys = ['date_from','date_to','platform','region','store_id','currency','product_id','return_view','return_date_from','return_date_to','return_platform','return_region','return_store_id','return_currency','return_metric'];
   if (scalarKeys.some(key => q[key] !== undefined && typeof q[key] !== 'string')) { routeScopeInvalid.value = true; error.value = '下钻参数无效，请从大屏下降排行重新进入。'; return false; }
   if (typeof q.date_from !== 'string' || typeof q.date_to !== 'string') { routeScopeInvalid.value = true; error.value = '下钻日期无效，请从大屏下降排行重新进入。'; return false; }
   const next = { date_from: q.date_from, date_to: q.date_to,
@@ -256,7 +335,6 @@ function restoreRouteScope() {
     platform: typeof q.return_platform === 'string' ? q.return_platform : next.platform,
     region: typeof q.return_region === 'string' ? q.return_region : next.region,
     store_id: typeof q.return_store_id === 'string' ? q.return_store_id : '',
-    ...(q.return_store_ids ? { store_ids: q.return_store_ids } : {}),
     currency: typeof q.return_currency === 'string' ? q.return_currency : (typeof q.currency === 'string' ? q.currency : ''),
     metric: typeof q.return_metric === 'string' ? q.return_metric : 'amount'
   } : null;
@@ -272,16 +350,16 @@ function restoreRouteScope() {
   return true;
 }
 onMounted(() => { if (restoreRouteScope() || !routeScopeInvalid.value) load(); loadFilters(); });
-watch(() => [route.query.view, route.query.date_from, route.query.date_to, route.query.platform, route.query.region, route.query.store_id, route.query.currency, route.query.product_id, route.query.return_view, route.query.return_date_from, route.query.return_date_to, route.query.return_platform, route.query.return_region, route.query.return_store_id, route.query.return_store_ids, route.query.return_currency, route.query.return_metric], () => {
+watch(() => [route.query.view, route.query.date_from, route.query.date_to, route.query.platform, route.query.region, route.query.store_id, route.query.currency, route.query.product_id, route.query.return_view, route.query.return_date_from, route.query.return_date_to, route.query.return_platform, route.query.return_region, route.query.return_store_id, route.query.return_currency, route.query.return_metric], () => {
   ++generation; controller?.abort(); loading.value = false; data.value = null; reason.value = null; reasonDialog.value?.close();
   if (!restoreRouteScope()) return;
   load();
 });
-onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); });
+onBeforeUnmount(() => { alive = false; ++generation; ++evidenceGeneration; controller?.abort(); evidenceController?.abort(); });
 </script>
 
 <style scoped>
-.operations{color:#26364b;padding:8px 4px;font-size:14px;max-width:100%;box-sizing:border-box}.operations-head,.results-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.operations-head h1{font-size:24px;margin:4px 0}.operations-head p,.results-head p{color:#65758a;margin:4px 0;line-height:1.5}.eyebrow{font-size:12px;color:#527696!important}.operations button,.operations input,.operations select,.operations summary{font:inherit;border:1px solid #d7e1ed;border-radius:6px;background:white;padding:7px 10px;color:#33465d;box-sizing:border-box}.operations button,.operations summary{cursor:pointer}.operations button:disabled{opacity:.5;cursor:default}.operations button:focus-visible,.operations input:focus-visible,.operations select:focus-visible,.operations summary:focus-visible{outline:2px solid #3478d4;outline-offset:2px}.operations .primary{background:#2864b4;color:white;border-color:#2864b4}.more{position:relative;flex-shrink:0}.more nav{position:absolute;right:0;z-index:5;padding:8px;background:white;box-shadow:0 8px 28px #23354d20;border:1px solid #dce4ee;border-radius:8px;min-width:210px}.more nav button{display:block;text-align:left;width:100%;border:0}.filters{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr)) auto;align-items:end;gap:8px 10px;margin:14px 0 10px;padding:12px;background:#fff;border:1px solid #e1e8f1;border-radius:6px}.filters label{display:grid;gap:4px;font-size:11px;color:#66768b}.filters select,.filters input{min-width:0;width:100%}.filters .quick{grid-column:1/5;display:flex;gap:6px}.filters .currency-filter{grid-column:5;grid-row:2}.filters>.primary{grid-column:6;grid-row:2}.quick button{font-size:12px;padding:6px 12px}.quick button.active{background:#2864b4;color:white;border-color:#2864b4;font-weight:600}.note{font-size:12px;color:#718196;line-height:1.6}.view-strip,.currency-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;color:#64748b;font-size:12px}.view-strip strong{color:#33465d}.snapshot-state{margin-left:auto;background:#f2f6fb!important}.kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:12px 0}.kpi-card{display:flex;align-items:center;gap:12px;padding:14px 16px;background:#fff;border:1px solid #e1e8f1;border-radius:6px;min-width:0}.kpi-icon{width:34px;height:34px;flex:0 0 34px;border-radius:6px;display:grid;place-items:center;font-size:15px;font-weight:700;background:#edf4ff;color:#477bd1}.tone-ads .kpi-icon{background:#f2efff;color:#8065c9}.tone-roi .kpi-icon{background:#eaf7f1;color:#32946e}.tone-orders .kpi-icon{background:#fff4e9;color:#d28b3b}.kpi-card p{font-size:12px;color:#6b7b90;margin:0 0 4px}.kpi-card strong{display:block;font-size:21px;line-height:1.25;color:#253a56;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.kpi-card small{display:block;color:#8a98aa;font-size:10px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cny-summary{display:grid;grid-template-columns:1fr 2fr;gap:6px 18px;padding:12px 14px;margin:8px 0;border:1px solid #e1e8f1;border-radius:6px;background:#fff}.cny-summary>div,.cny-summary>strong,.cny-summary>p:not(.note){grid-column:1}.cny-summary>strong{font-size:22px;margin:0}.cny-summary>p:not(.note){font-size:11px;margin:0}.cny-summary dl{grid-column:2;grid-row:1/4;display:flex;gap:20px;margin:0}.cny-summary dl>div{display:block;border-left:1px solid #e8edf4;padding-left:16px}.cny-summary dd{text-align:left;font-size:18px;font-weight:600;margin-top:5px}.cny-summary .note{grid-column:1/-1;border-top:1px solid #edf1f6;padding-top:6px;margin:0}.summary-grid{margin:8px 0}.summary-grid>summary{cursor:pointer;color:#52647b;font-size:12px;padding:8px 10px;border:1px solid #e0e7ef;border-radius:6px;background:#f8fafc}.summary-grid>summary span{color:#718196;margin-left:8px}.summary-grid[open]>summary{margin-bottom:8px}.summary-grid[open]{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:10px}.summary-grid>.summary-card{margin:0}.summary-card{padding:14px 16px;border:1px solid #dae4ef;border-radius:6px;background:white}.summary-card>div:first-child{display:flex;justify-content:space-between;color:#63758a;font-size:12px}.summary-card>strong{display:block;font-size:24px;margin:8px 0;font-variant-numeric:tabular-nums}.summary-card dl{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0 4px}.summary-card dl>div{display:flex;justify-content:space-between;gap:8px}.summary-card dd{text-align:right;margin:0;font-variant-numeric:tabular-nums}.summary-card p{margin:6px 0}.summary-card p span{color:#718096;font-size:11px;margin-left:5px}dl{margin:14px 0}dl>div{display:flex;justify-content:space-between;gap:12px;padding:6px 0}dt{color:#66778c}dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}dd small{display:block;color:#6d7f92;margin-top:4px}.notice{padding:10px 14px;margin:10px 0;background:#fff9ed;color:#805f26;border:1px solid #eeddb6;border-radius:6px;line-height:1.6}.notice button{font-size:12px;padding:5px 9px;margin-left:8px}.notice.error{background:#fff2f2;color:#a64040;border-color:#f3cece}.results{margin-top:14px;border:1px solid #e0e7ef;background:white;border-radius:6px;overflow:hidden}.results-head{padding:12px 14px}.results-head h2{font-size:16px;margin:0}.results-head p{font-size:11px}.list-tools{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:8px 14px;color:#63758a;font-size:11px}.list-tools>label{display:flex;align-items:center;gap:6px}.list-tools>span{margin-left:auto}.column-options{position:relative}.column-options>div{position:absolute;right:0;top:100%;z-index:6;min-width:220px;padding:12px;background:white;border:1px solid #dce4ee;border-radius:6px;box-shadow:0 8px 28px #23354d20}.column-options label{display:flex;align-items:center;gap:8px;padding:5px 0}.column-options input{accent-color:#2864b4}.column-options p{line-height:1.5;margin:0 0 8px}.currency-bar{padding:0 14px}.table-scroll{overflow:auto}table{border-collapse:collapse;width:100%;font-size:12px}th,td{padding:9px 12px;text-align:right;border-top:1px solid #e8edf4;white-space:nowrap}th{background:#f0f5fb;color:#536a86;font-weight:600}th:first-child,td:first-child{text-align:left;min-width:190px;max-width:320px}td:first-child strong{display:block;overflow:hidden;text-overflow:ellipsis;max-width:300px}td small{display:block;color:#718196;font-size:10px;margin-top:4px}.ops-product-image{width:40px;height:40px;vertical-align:middle;margin-right:8px}.ops-image-empty{font-size:10px;color:#94a6bf;margin-right:8px}.operations .text-button{border:0;background:none;color:#2864b4;padding:0;text-align:left;font-weight:600;max-width:280px;overflow:hidden;text-overflow:ellipsis}.operations .reason-button{font-size:11px;padding:6px 8px}.operations .reason-button.flagged{color:#a34d24;background:#fff5e9;border-color:#f0d2ab}.negative{color:#c64a43}.positive{color:#16856c}.pagination{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px;border-top:1px solid #e8edf4;font-size:11px;color:#687a90}.pagination>span{margin-right:auto}.pagination button{font-size:11px;padding:5px 8px}.empty,.loading{padding:36px 16px;text-align:center;color:#718196}.reason-dialog{width:min(940px,calc(100vw - 32px));max-height:85vh;overflow:auto;border:0;border-radius:10px;padding:22px;color:#243247;box-shadow:0 20px 100px #15284440}.reason-dialog::backdrop{background:#15284466}.reason-dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.reason-dialog h2{font-size:19px;margin:4px 0}.reason-dialog>p{color:#718196;font-size:11px}.reason-layout{display:grid;grid-template-columns:1fr 1.35fr;gap:18px;margin-top:18px}.reason-layout section{padding:14px;border:1px solid #e0e7ef;border-radius:6px}.reason-layout h3{font-size:13px;margin:0 0 12px}.reason-layout li{padding-bottom:7px;font-size:12px}.reason-layout li p{color:#65758b;line-height:1.5}@media(max-width:760px){.operations{padding:4px 0}.operations-head{gap:8px}.operations-head h1{font-size:21px}.filters{grid-template-columns:repeat(2,minmax(0,1fr));padding:10px}.filters .quick{grid-column:1/-1;grid-row:3;flex-wrap:wrap}.filters .currency-filter{grid-column:1;grid-row:4}.filters>.primary{grid-column:2;grid-row:4}.kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.kpi-card{padding:10px;gap:8px}.kpi-card strong{font-size:17px}.cny-summary{grid-template-columns:1fr}.cny-summary>div,.cny-summary>strong,.cny-summary>p:not(.note),.cny-summary dl,.cny-summary .note{grid-column:1;grid-row:auto}.cny-summary dl{flex-wrap:wrap}.snapshot-state{margin-left:0}.list-tools>span{width:100%}.reason-layout{grid-template-columns:1fr}.pagination{flex-wrap:wrap}.summary-grid[open]{grid-template-columns:minmax(0,1fr)}}@media(max-width:360px){.kpi-grid{grid-template-columns:minmax(0,1fr)}.filters{grid-template-columns:minmax(0,1fr)}.filters .quick,.filters .currency-filter,.filters>.primary{grid-column:1;grid-row:auto}}
+.operations{color:#26364b;padding:8px 4px;font-size:14px;max-width:100%;box-sizing:border-box}.operations-head,.results-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.operations-head h1{font-size:24px;margin:4px 0}.operations-head p,.results-head p{color:#65758a;margin:4px 0;line-height:1.5}.eyebrow{font-size:12px;color:#527696!important}.operations button,.operations input,.operations select,.operations summary{font:inherit;border:1px solid #d7e1ed;border-radius:6px;background:white;padding:7px 10px;color:#33465d;box-sizing:border-box}.operations button,.operations summary{cursor:pointer}.operations button:disabled{opacity:.5;cursor:default}.operations button:focus-visible,.operations input:focus-visible,.operations select:focus-visible,.operations summary:focus-visible{outline:2px solid #3478d4;outline-offset:2px}.operations .primary{background:#2864b4;color:white;border-color:#2864b4}.more{position:relative;flex-shrink:0}.more nav{position:absolute;right:0;z-index:5;padding:8px;background:white;box-shadow:0 8px 28px #23354d20;border:1px solid #dce4ee;border-radius:8px;min-width:210px}.more nav button{display:block;text-align:left;width:100%;border:0}.filters{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr)) auto;align-items:end;gap:8px 10px;margin:14px 0 10px;padding:12px;background:#fff;border:1px solid #e1e8f1;border-radius:6px}.filters label{display:grid;gap:4px;font-size:11px;color:#66768b}.filters select,.filters input{min-width:0;width:100%}.filters .quick{grid-column:1/5;display:flex;gap:6px}.filters .currency-filter{grid-column:5;grid-row:2}.filters>.primary{grid-column:6;grid-row:2}.quick button{font-size:12px;padding:6px 12px}.quick button.active{background:#2864b4;color:white;border-color:#2864b4;font-weight:600}.note{font-size:12px;color:#718196;line-height:1.6}.view-strip,.currency-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;color:#64748b;font-size:12px}.view-strip strong{color:#33465d}.snapshot-state{margin-left:auto;background:#f2f6fb!important}.kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:12px 0}.kpi-card{display:flex;align-items:center;gap:12px;padding:14px 16px;background:#fff;border:1px solid #e1e8f1;border-radius:6px;min-width:0}.kpi-icon{width:34px;height:34px;flex:0 0 34px;border-radius:6px;display:grid;place-items:center;font-size:15px;font-weight:700;background:#edf4ff;color:#477bd1}.tone-ads .kpi-icon{background:#f2efff;color:#8065c9}.tone-roi .kpi-icon{background:#eaf7f1;color:#32946e}.tone-orders .kpi-icon{background:#fff4e9;color:#d28b3b}.kpi-card p{font-size:12px;color:#6b7b90;margin:0 0 4px}.kpi-card strong{display:block;font-size:21px;line-height:1.25;color:#253a56;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.kpi-card small{display:block;color:#8a98aa;font-size:10px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cny-summary{display:grid;grid-template-columns:1fr 2fr;gap:6px 18px;padding:12px 14px;margin:8px 0;border:1px solid #e1e8f1;border-radius:6px;background:#fff}.cny-summary>div,.cny-summary>strong,.cny-summary>p:not(.note){grid-column:1}.cny-summary>strong{font-size:22px;margin:0}.cny-summary>p:not(.note){font-size:11px;margin:0}.cny-summary dl{grid-column:2;grid-row:1/4;display:flex;gap:20px;margin:0}.cny-summary dl>div{display:block;border-left:1px solid #e8edf4;padding-left:16px}.cny-summary dd{text-align:left;font-size:18px;font-weight:600;margin-top:5px}.cny-summary .note{grid-column:1/-1;border-top:1px solid #edf1f6;padding-top:6px;margin:0}.summary-grid{margin:8px 0}.summary-grid>summary{cursor:pointer;color:#52647b;font-size:12px;padding:8px 10px;border:1px solid #e0e7ef;border-radius:6px;background:#f8fafc}.summary-grid>summary span{color:#718196;margin-left:8px}.summary-grid[open]>summary{margin-bottom:8px}.summary-grid[open]{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:10px}.summary-grid>.summary-card{margin:0}.summary-card{padding:14px 16px;border:1px solid #dae4ef;border-radius:6px;background:white}.summary-card>div:first-child{display:flex;justify-content:space-between;color:#63758a;font-size:12px}.summary-card>strong{display:block;font-size:24px;margin:8px 0;font-variant-numeric:tabular-nums}.summary-card dl{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0 4px}.summary-card dl>div{display:flex;justify-content:space-between;gap:8px}.summary-card dd{text-align:right;margin:0;font-variant-numeric:tabular-nums}.summary-card p{margin:6px 0}.summary-card p span{color:#718096;font-size:11px;margin-left:5px}dl{margin:14px 0}dl>div{display:flex;justify-content:space-between;gap:12px;padding:6px 0}dt{color:#66778c}dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}dd small{display:block;color:#6d7f92;margin-top:4px}.notice{padding:10px 14px;margin:10px 0;background:#fff9ed;color:#805f26;border:1px solid #eeddb6;border-radius:6px;line-height:1.6}.notice button{font-size:12px;padding:5px 9px;margin-left:8px}.notice.error{background:#fff2f2;color:#a64040;border-color:#f3cece}.results{margin-top:14px;border:1px solid #e0e7ef;background:white;border-radius:6px;overflow:hidden}.results-head{padding:12px 14px}.results-head h2{font-size:16px;margin:0}.results-head p{font-size:11px}.list-tools{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:8px 14px;color:#63758a;font-size:11px}.list-tools>label{display:flex;align-items:center;gap:6px}.list-tools>span{margin-left:auto}.column-options{position:relative}.column-options>div{position:absolute;right:0;top:100%;z-index:6;min-width:220px;padding:12px;background:white;border:1px solid #dce4ee;border-radius:6px;box-shadow:0 8px 28px #23354d20}.column-options label{display:flex;align-items:center;gap:8px;padding:5px 0}.column-options input{accent-color:#2864b4}.column-options p{line-height:1.5;margin:0 0 8px}.currency-bar{padding:0 14px}.table-scroll{overflow:auto}table{border-collapse:collapse;width:100%;font-size:12px}th,td{padding:9px 12px;text-align:right;border-top:1px solid #e8edf4;white-space:nowrap}th{background:#f0f5fb;color:#536a86;font-weight:600}th:first-child,td:first-child{text-align:left;min-width:190px;max-width:320px}td:first-child strong{display:block;overflow:hidden;text-overflow:ellipsis;max-width:300px}td small{display:block;color:#718196;font-size:10px;margin-top:4px}.ops-product-image{width:40px;height:40px;vertical-align:middle;margin-right:8px}.ops-image-empty{font-size:10px;color:#94a6bf;margin-right:8px}.operations .text-button{border:0;background:none;color:#2864b4;padding:0;text-align:left;font-weight:600;max-width:280px;overflow:hidden;text-overflow:ellipsis}.operations .reason-button{font-size:11px;padding:6px 8px}.operations .reason-button.flagged{color:#a34d24;background:#fff5e9;border-color:#f0d2ab}.negative{color:#c64a43}.positive{color:#16856c}.pagination{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px;border-top:1px solid #e8edf4;font-size:11px;color:#687a90}.pagination>span{margin-right:auto}.pagination button{font-size:11px;padding:5px 8px}.empty,.loading{padding:36px 16px;text-align:center;color:#718196}.reason-dialog{width:min(940px,calc(100vw - 32px));max-height:85vh;overflow:auto;border:0;border-radius:10px;padding:22px;color:#243247;box-shadow:0 20px 100px #15284440}.reason-dialog::backdrop{background:#15284466}.reason-dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.reason-dialog h2{font-size:19px;margin:4px 0}.reason-dialog>p{color:#718196;font-size:11px}.reason-layout{display:grid;grid-template-columns:1fr 1.35fr;gap:18px;margin-top:18px}.reason-layout section{padding:14px;border:1px solid #e0e7ef;border-radius:6px}.reason-layout h3{font-size:13px;margin:0 0 12px}.variant-table-wrap{overflow-x:auto}.variant-table{border-collapse:collapse;min-width:520px;width:100%;font-size:11px}.variant-table th,.variant-table td{padding:6px;border-bottom:1px solid #e0e7ef;text-align:left}.variant-table small{display:block;color:#718196}.reason-layout li{padding-bottom:7px;font-size:12px}.reason-layout li p{color:#65758b;line-height:1.5}@media(max-width:760px){.operations{padding:4px 0}.operations-head{gap:8px}.operations-head h1{font-size:21px}.filters{grid-template-columns:repeat(2,minmax(0,1fr));padding:10px}.filters .quick{grid-column:1/-1;grid-row:3;flex-wrap:wrap}.filters .currency-filter{grid-column:1;grid-row:4}.filters>.primary{grid-column:2;grid-row:4}.kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.kpi-card{padding:10px;gap:8px}.kpi-card strong{font-size:17px}.cny-summary{grid-template-columns:1fr}.cny-summary>div,.cny-summary>strong,.cny-summary>p:not(.note),.cny-summary dl,.cny-summary .note{grid-column:1;grid-row:auto}.cny-summary dl{flex-wrap:wrap}.snapshot-state{margin-left:0}.list-tools>span{width:100%}.reason-layout{grid-template-columns:1fr}.pagination{flex-wrap:wrap}.summary-grid[open]{grid-template-columns:minmax(0,1fr)}}@media(max-width:360px){.kpi-grid{grid-template-columns:minmax(0,1fr)}.filters{grid-template-columns:minmax(0,1fr)}.filters .quick,.filters .currency-filter,.filters>.primary{grid-column:1;grid-row:auto}}
 
 .operations-head{align-items:center;margin-bottom:12px}.operations-head .eyebrow{display:none}.operations-head>div{display:flex;align-items:center;gap:16px}.operations-head h1{margin:0;font-size:23px}.operations-head p{margin:0;font-size:12px}
 .filters{margin-top:0;grid-template-columns:repeat(3,minmax(100px,1fr)) repeat(2,minmax(125px,.9fr)) auto;gap:12px}.filters>label:not(.currency-filter){flex-direction:row;align-items:center;gap:8px}.filters>label select,.filters>label input{min-width:0;width:100%}.filters>.primary{grid-column:6;grid-row:1}.filters .quick{grid-column:1/5;grid-row:2}.filters .currency-filter{grid-column:5/7;grid-row:2;display:flex;flex-direction:row;justify-content:flex-end;align-items:center}.filters .currency-filter select{width:110px}
@@ -292,12 +370,14 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); });
 .filters>label{white-space:nowrap}.filters>label select,.filters>label input{flex:1;width:0}.filters .currency-filter select{flex:none;width:110px}
 @media(max-width:600px){.filters>label:not(.currency-filter) select,.filters>label:not(.currency-filter) input{flex:none;width:100%}}
 .ad-basis{width:180px;margin:4px 0 0 auto;text-align:left;white-space:normal}.operations .ad-basis summary{padding:2px 0;border:0;background:none;color:#2864b4;font-size:11px}.ad-basis p{margin:6px 0;line-height:1.6;overflow-wrap:anywhere;font-size:11px;color:#64748b}
-.filters>label:not(.currency-filter){min-width:0}
-.filters>label:not(.currency-filter) select,.filters>label:not(.currency-filter) input{height:36px;padding:0 11px;font-size:12px}
-.filters .store-filter{min-width:0;flex:1}
-.filters .store-filter :deep(.el-select__wrapper){min-height:36px;font-size:12px}
-.summary-grid[open]{display:block}
-.currency-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:10px;padding:8px 0}
-.currency-cards>.summary-card{min-width:0;margin:0;align-self:start}
-@media(max-width:600px){.filters .store-filter{flex:none;width:100%}}
+.scope-select{width:100%;min-width:0}
+.operations .summary-grid[open]{display:block;grid-template-columns:none}
+.filters .scope-select :deep(.el-select__wrapper){min-height:34px;border-radius:6px;box-shadow:0 0 0 1px #d4dfed inset;padding:0 10px;background:#fff}
+.filters .scope-select :deep(.el-select__wrapper.is-focused){box-shadow:0 0 0 1px #2864b4 inset}
+.currency-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:10px;padding:10px}
+.currency-cards .summary-card{min-width:0;margin:0;align-self:start}
+.currency-card-notes{margin-top:8px}
+.operations .currency-card-notes summary{padding:4px 0;border:0;background:none;color:#2864b4;font-size:11px}
+.drilldown-context{display:flex;align-items:center;gap:12px;margin:8px 0}
+.reason-layout .variant-evidence{grid-column:1/-1}.variant-evidence small{display:block;color:#718196;font-size:11px}.variant-evidence table{min-width:900px}
 </style>

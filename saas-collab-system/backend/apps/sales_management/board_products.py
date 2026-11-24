@@ -11,7 +11,7 @@ DIMENSIONS = ("store_spu", "store_sku", "product_spu", "product_sku", "category"
 
 
 def _base_queryset(valid_orders):
-    return SalesOrderItem.objects.filter(sales_order__in=valid_orders)
+    return SalesOrderItem.objects.filter(sales_order__in=valid_orders).exclude(internal_sku__inventory_type="virtual")
 
 
 def _ranked(queryset, keys):

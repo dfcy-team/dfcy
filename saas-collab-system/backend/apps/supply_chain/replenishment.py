@@ -56,6 +56,8 @@ def confirmed_reference_deductions(pipe, submitted, reserved):
 
 
 def restore_snapshot_suggestion(row):
+    from .snapshot_payload import unpack_payload
+    row = unpack_payload(row)
     reference = row.get('recognized_reference') or {}
     if not reference.get('has_observed_basis') or 'confirmed_deductions' in reference:
         return row

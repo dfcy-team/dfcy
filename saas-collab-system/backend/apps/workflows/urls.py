@@ -4,6 +4,7 @@ from . import views
 
 
 urlpatterns = [
+    path("payment-flow-finance-handlers/", views.payment_flow_finance_handlers, name="workflow-payment-flow-finance-handlers"),
     path("payment-flow-reviewers/", views.payment_flow_reviewers, name="workflow-payment-flow-reviewers"),
     path("payment-flow-departments/", views.payment_flow_departments, name="workflow-payment-flow-departments"),
     path("payment-flows/", views.payment_flow_collection, name="workflow-payment-flow-list"),

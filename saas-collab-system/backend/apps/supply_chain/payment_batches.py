@@ -20,6 +20,7 @@ from .shipment_sources import accessible_shipments
 from .payment_item_models import PaymentItem
 from .payment_request_models import SupplyPaymentRequest as PR, SupplyPaymentBatch as Batch, SupplyPaymentBatchVoucher as Voucher, active_vouchers
 from .payment_requests import _snap, _current, finance_allowed
+from .payment_fx import effective_snapshot
 from .payment_plan_links import find_plan_line
 from .payment_request_evidence import ConfirmInput, conflict
 from .payment_vouchers import _validate_file
@@ -34,6 +35,7 @@ KINDS = ('shipment', 'domestic_freight', 'batch', 'inbound')
 
 class CreateInput(serializers.Serializer):
     currency = serializers.RegexField(r'^[A-Z]{3}$',required=False)
+    exchange_rate = serializers.DecimalField(max_digits=20,decimal_places=8,required=False)
     payee_account_id = serializers.IntegerField(min_value=1)
     reason = serializers.CharField(max_length=10000)
     lines = serializers.ListField(min_length=1, max_length=20, child=serializers.DictField())
@@ -134,10 +136,13 @@ def _manual_allowed(actor, batch):
 
 
 def _data(actor, b, *, compact=False):
+    stored_lines=list(b.lines.all())
+    total_original=sum((r.amount for r in stored_lines),Decimal(0))
+    batch_rate,batch_cny=effective_snapshot(b.currency,total_original,b.exchange_rate,b.cny_amount)
     if compact:
-        lines=list(b.lines.all())
+        lines=stored_lines
         reversed_all=bool(lines) and all(r.payment_id and r.payment.reversal.exists() for r in lines)
-        return {'id':b.pk,'version':b.version,'currency':b.currency,'amount':str(sum((r.amount for r in lines),Decimal(0))),
+        return {'id':b.pk,'version':b.version,'currency':b.currency,'exchange_rate':str(batch_rate) if batch_rate is not None else None,'cny_amount':str(batch_cny) if batch_cny is not None else None,'amount':str(sum((r.amount for r in lines),Decimal(0))),
             'status':'reversed' if reversed_all else b.status if b.status in ('paid','cancelled') else b.approval.status if b.approval_id else b.status}
     from .payment_approval_api import approval_required
     required = approval_required(actor)
@@ -149,16 +154,17 @@ def _data(actor, b, *, compact=False):
         can_post = False
     lines=[]
     for r in request_lines:
+        effective_rate, effective_cny = effective_snapshot(r.currency, r.amount, r.exchange_rate, r.cny_amount)
         source = costs._payment_owner(actor, r.kind, r.source_id, VIEW)
         lines.append({'id':r.pk,'kind':r.kind,'source_id':r.source_id,'number':getattr(source,'number',str(source.pk)),
             **(r.item_snapshot.get('transport') or _transport_details(r.kind, source)),
-            'amount':str(r.amount),'currency':r.currency,'fee_item_id':r.fee_item_id,'fee_item_name':r.item_snapshot.get('name'),
+            'amount':str(r.amount),'currency':r.currency,'exchange_rate':str(effective_rate) if effective_rate is not None else None,'cny_amount':str(effective_cny) if effective_cny is not None else None,'fee_item_id':r.fee_item_id,'fee_item_name':r.item_snapshot.get('name'),
             'payment_id':r.payment_id,'plan_id':r.plan_id or None,'plan_line_id':r.plan_line_id or None,'plan_snapshot':r.plan_snapshot,
             'status':'reversed' if r.payment_id and (r.payment.reverses_id or r.payment.reversal.exists()) else 'paid' if r.payment_id else 'pending'})
     vouchers=[{'id':v.pk,'file_name':v.file_name,'media_type':v.media_type,'byte_size':v.byte_size,'sha256':v.sha256} for v in active_vouchers(b.vouchers.all()).defer('content').order_by('id')]
     status=b.approval.status if b.approval_id else b.status
     group_status='reversed' if lines and all(x['status']=='reversed' for x in lines) else 'paid' if b.status=='paid' else 'cancelled' if b.status=='cancelled' else status
-    return {'id':b.pk,'version':b.version,'currency':b.currency,'status':group_status,
+    result = {'id':b.pk,'version':b.version,'currency':b.currency,'exchange_rate':str(batch_rate) if batch_rate is not None else None,'cny_amount':str(batch_cny) if batch_cny is not None else None,'status':group_status,
         'amount':str(sum((Decimal(r['amount']) for r in lines),Decimal(0))),'reason':b.reason,'lines':lines,
         'account_snapshot':{**b.account_snapshot,'account_number':costs._mask_account_number(b.account_snapshot.get('account_number',''))},
         'approval_id':b.approval_id,'vouchers':vouchers,'notification_status':b.notification_status,'notification_error':b.notification_error,
@@ -172,6 +178,22 @@ def _data(actor, b, *, compact=False):
         'can_notify':bool(b.approval_id and b.status=='submitted' and finance_allowed(actor,b.currency) and check_user_permission(actor,MANAGE)),
         'can_confirm':bool(b.approval_id and status=='approved' and vouchers and b.status=='submitted' and can_post and check_user_permission(actor,MANAGE)),
         'can_reverse':b.status=='paid' and any(r['status']=='paid' for r in lines) and not any(r['status']=='reversed' for r in lines) and _paid_batch_allowed(actor,request_lines)}
+
+    from apps.integrations.feishu_native_approval import native_status, payment_form_options
+    result['feishu_form'] = payment_form_options(actor, b, 'supply_payment_batch')
+    result['native_approval'] = native_status(b.approval) if b.approval_id else None
+    from apps.integrations.feishu_finance_handoff import finance_data
+    result['finance_handoff'] = finance_data(b.approval) if b.approval_id else None
+    if result['finance_handoff']:
+        result['can_upload'] = False
+        if result['finance_handoff']['status'] != 'received' or b.approval.workflow_snapshot.get('finance_handler_id') != actor.pk:
+            result['can_confirm'] = False
+    if result['native_approval']:
+        result['can_cancel'] = False
+        result['can_notify'] = False
+        if result['native_approval']['status'] != 'finished' or result['native_approval'].get('provider_status') != 'APPROVED':
+            result['can_confirm'] = False
+    return result
 
 class BatchCollection(InternalAPI):
     def get(self, request):
@@ -204,7 +226,7 @@ class BatchCollection(InternalAPI):
         if len(line_keys)!=len(set(line_keys)): raise ValidationError('同一来源及费用项目不能在批次中重复。')
         account=costs.PayeeAccount.objects.filter(tenant_id=actor.tenant_id,active=True,pk=p['payee_account_id'],**costs._payee_owner(lines[0][0]['kind'],lines[0][1])).first()
         if not account or any(costs._payee_owner(v['kind'],obj)!=costs._payee_owner(lines[0][0]['kind'],lines[0][1]) for v,obj in lines): raise ValidationError('收款账户无效或与批次对象不匹配。')
-        keyval=key(request); digest=services.request_hash({'account':account.pk,'reason':p['reason'],'lines':p['lines'],**({'currency':p['currency']} if p.get('currency') else {})})
+        keyval=key(request); digest=services.request_hash({'account':account.pk,'reason':p['reason'],'lines':p['lines'],**({'currency':p['currency']} if p.get('currency') else {}),**({'exchange_rate':p['exchange_rate']} if p.get('exchange_rate') is not None else {})})
         old=Batch.objects.select_for_update().filter(tenant_id=actor.tenant_id,idempotency_key=keyval).first()
         if old:
             if old.request_hash!=digest: raise ValidationError('幂等键已用于不同内容。')
@@ -216,7 +238,12 @@ class BatchCollection(InternalAPI):
         _source_batch_currency(actor, [(v['kind'], obj) for v,obj in lines])
         if len(resolved)>1: raise ValidationError({'currency':'批次来源币种不一致，不能合并付款。'})
         batch_currency=next(iter(resolved),'')
-        with domain_write(): b=Batch.objects.create(currency=batch_currency,tenant=actor.tenant,created_by=actor,payee_account=account,account_snapshot=costs._payee_data(account),reason=p['reason'],idempotency_key=keyval,request_hash=digest)
+        total_original=sum((v['amount'] for v,obj in lines),Decimal(0))
+        from .payment_fx import snapshot as fx_snapshot
+        batch_rate,_=fx_snapshot(batch_currency,total_original,p.get('exchange_rate'))
+        line_cny_values=[fx_snapshot(batch_currency,v['amount'],batch_rate)[1] for v,obj in lines]
+        batch_cny=(sum(line_cny_values,Decimal(0)) if all(value is not None for value in line_cny_values) else None)
+        with domain_write(): b=Batch.objects.create(currency=batch_currency,exchange_rate=batch_rate,cny_amount=batch_cny,tenant=actor.tenant,created_by=actor,payee_account=account,account_snapshot=costs._payee_data(account),reason=p['reason'],idempotency_key=keyval,request_hash=digest)
         planned_source={}; planned_item={}
         for v,obj in lines:
             fee_item=None; item={}
@@ -251,7 +278,8 @@ class BatchCollection(InternalAPI):
                 item_paid=PaymentRecord.objects.filter(tenant_id=actor.tenant_id,**{v['kind']:obj},fee_item=fee_item,reverses__isnull=True,reversal__isnull=True).aggregate(v=Sum('amount'))['v'] or Decimal(0)
                 planned_item[item_key]=planned_item.get(item_key,Decimal(0))+v['amount']
                 if planned_item[item_key]+item_reserved+item_paid>Decimal(item['amount']): raise ValidationError('申请金额超过费用项目剩余应付金额。')
-            with domain_write(): PR.objects.create(currency=b.currency,tenant=actor.tenant,created_by=actor,kind=v['kind'],source_id=v['source_id'],amount=v['amount'],payee_account=account,account_snapshot=costs._payee_data(account),fee_item=fee_item,item_snapshot=item,plan=plan,plan_line_id=v.get('plan_line_id',''),plan_snapshot=({**plan_line,'line_id':v['plan_line_id']} if plan_line else {}),reason=p['reason'],status='draft',batch=b,idempotency_key='batch-child-'+services.request_hash({'batch':b.pk,'kind':v['kind'],'source':v['source_id'],'item':fee_item.pk if fee_item else None}),request_hash=services.request_hash(v))
+            _,line_cny=fx_snapshot(b.currency,v['amount'],batch_rate)
+            with domain_write(): PR.objects.create(currency=b.currency,exchange_rate=batch_rate,cny_amount=line_cny,tenant=actor.tenant,created_by=actor,kind=v['kind'],source_id=v['source_id'],amount=v['amount'],payee_account=account,account_snapshot=costs._payee_data(account),fee_item=fee_item,item_snapshot=item,plan=plan,plan_line_id=v.get('plan_line_id',''),plan_snapshot=({**plan_line,'line_id':v['plan_line_id']} if plan_line else {}),reason=p['reason'],status='draft',batch=b,idempotency_key='batch-child-'+services.request_hash({'batch':b.pk,'kind':v['kind'],'source':v['source_id'],'item':fee_item.pk if fee_item else None}),request_hash=services.request_hash(v))
         return Response({'data':_data(actor,b)},status=201)
 
 class BatchCandidates(InternalAPI):
@@ -362,7 +390,7 @@ class BatchAction(InternalAPI):
                 for line in lines]
             flow, flows = resolve_payment_flow(actor=actor, sources=sources)
             # The first source is the payment_batch rule; it controls batch notification.
-            snapshot = {'rule_id': flow.pk, 'flow_key': flow.flow_key, 'version': flow.version, 'payment_kind': 'payment_batch', 'source_kinds': sorted({line.kind for line in lines}), 'notify_feishu': flow.notify_feishu, 'reviewer_id': flow.reviewer_id,
+            snapshot = {'rule_id': flow.pk, 'flow_key': flow.flow_key, 'version': flow.version, 'payment_kind': 'payment_batch', 'source_kinds': sorted({line.kind for line in lines}), 'notify_feishu': flow.notify_feishu, 'reviewer_id': flow.reviewer_id, 'finance_handler_id': flow.finance_handler_id,
                 'rules': [{'rule_id': r.pk, 'flow_key': r.flow_key, 'version': r.version, 'payment_kind': r.payment_kind, 'nature': r.nature, 'department_key': r.department_key, 'minimum_amount': str(r.minimum_amount), 'maximum_amount': str(r.maximum_amount) if r.maximum_amount is not None else None} for r in flows]}
             approval=ApprovalRequest.objects.create(tenant=actor.tenant,approval_type='finance',title=f'批量付款申请 #{b.pk}（{len(lines)}项）',business_type='supply_payment_batch',business_id=str(b.pk),requested_by=actor,designated_reviewer=flow.reviewer,workflow_snapshot=snapshot,reason=f'{ref}；总额{total}；{b.reason}',idempotency_key=f'paybatch:{b.pk}')
             b.approval=approval; b.status='submitted'; b.version+=1
@@ -375,13 +403,20 @@ class BatchAction(InternalAPI):
                 b.save(update_fields=['approval','status','version','updated_at'])
             from apps.workflows.services import write_workflow_audit
             write_workflow_audit(approval,resource_type='approval',actor=actor,action='submit',to_status='pending',detail={'line_count':len(lines)})
-            try:
-                from apps.integrations.feishu_delivery import notify_approval
-                with transaction.atomic(): result=notify_approval(approval.pk)
-                b.notification_error=''; b.notification_status=result.get('status','queued')
-            except Exception: b.notification_status='error'; b.notification_error='飞书通知入队失败，请检查通知配置后重试。'
+            from apps.integrations.feishu_native_approval import queue_payment_approval
+            native = queue_payment_approval(approval, b, form_input=request.data.get('feishu'))
+            if native:
+                b.notification_status='native_queued'; b.notification_error=''
+            else:
+                try:
+                    from apps.integrations.feishu_delivery import notify_approval
+                    with transaction.atomic(): result=notify_approval(approval.pk)
+                    b.notification_error=''; b.notification_status=result.get('status','queued')
+                except Exception: b.notification_status='error'; b.notification_error='飞书通知入队失败，请检查通知配置后重试。'
             with domain_write(): b.save(update_fields=['notification_status','notification_error'])
         elif action=='cancel':
+            if b.approval_id and b.approval.workflow_snapshot.get('approval_provider') == 'feishu':
+                raise ValidationError('此申请由飞书统一处理，请在飞书撤回；已通过申请需由财务复核。')
             if b.status=='paid' or b.created_by_id!=actor.pk: raise PermissionDenied()
             if not (request.data.get('reason') or '').strip(): raise ValidationError({'reason':'取消原因必填。'})
             if b.approval_id and b.approval.status=='pending':
@@ -393,6 +428,8 @@ class BatchAction(InternalAPI):
                 for r in lines: r.status='cancelled'; r.save(update_fields=['status','updated_at'])
         elif action=='notify':
             if not b.approval_id or b.status!='submitted' or not finance_allowed(actor,b.currency): raise PermissionDenied()
+            if b.approval.workflow_snapshot.get('approval_provider') == 'feishu':
+                raise ValidationError('飞书审批正在处理，请在飞书查看；提交异常由后台安全重试。')
             from apps.integrations.feishu_delivery import notify_approval
             try:
                 with transaction.atomic(): result=notify_approval(b.approval_id)
@@ -402,7 +439,9 @@ class BatchAction(InternalAPI):
             with domain_write(): b.save(update_fields=['notification_status','notification_error','updated_at'])
         elif action in ('confirm', 'manual_confirm'):
             if not finance_allowed(actor,_batch_auth_currency(actor,b,lines),unknown_as_cny=False): raise PermissionDenied()
-            data=ConfirmInput(data=request.data); data.is_valid(raise_exception=True); p=data.validated_data
+            from apps.integrations.feishu_finance_handoff import finance_payload
+            body=finance_payload(b.approval,request.data) if b.approval_id else request.data
+            data=ConfirmInput(data=body); data.is_valid(raise_exception=True); p=data.validated_data
             post_batch(actor,b,lines,p, manual=action == 'manual_confirm')
         elif action=='reverse':
             if not _paid_batch_allowed(actor,lines): raise PermissionDenied()
@@ -426,6 +465,9 @@ class BatchVouchers(InternalAPI):
         services._tenant_lock(request.user)
         b=Batch.objects.select_for_update().filter(tenant_id=request.user.tenant_id,pk=pk).first()
         if not b: raise NotFound()
+        from apps.integrations.feishu_finance_handoff import finance_data
+        if b.approval_id and finance_data(b.approval):
+            raise ValidationError('本批次的付款凭证由飞书财务办理回传，请在飞书上传。')
         lines=list(b.lines.all())
         for line in lines: costs._payment_owner(request.user,line.kind,line.source_id,MANAGE)
         if not check_user_permission(request.user,MANAGE): raise PermissionDenied()
@@ -482,6 +524,13 @@ class BatchVoucherDownload(InternalAPI):
 @transaction.atomic
 def post_batch(actor,b,lines,p, *, manual=False):
     services._tenant_lock(actor)
+    authoritative = None
+    if b.approval_id:
+        from apps.integrations.feishu_finance_handoff import require_finance_postable
+        authoritative = require_finance_postable(actor,b.approval,p)
+    if b.approval_id and authoritative is None:
+        from apps.integrations.feishu_native_approval import ensure_native_postable
+        ensure_native_postable(b.approval)
     auth_currency=_batch_auth_currency(actor,b,lines)
     if not check_user_permission(actor,MANAGE) or not finance_allowed(actor,auth_currency,unknown_as_cny=False): raise PermissionDenied()
     if not b.currency and auth_currency:
@@ -509,6 +558,7 @@ def post_batch(actor,b,lines,p, *, manual=False):
         if r.fee_item_id: body['fee_item_id']=r.fee_item_id
         if r.currency != b.currency: raise ValidationError('合并付款币种与明细不一致。')
         if r.currency: body['currency']=r.currency
+        if r.exchange_rate is not None: body['exchange_rate']=r.exchange_rate
         pkey=f'payment-request-{r.pk}'; costs.create_payment(actor,r.kind,r.source_id,body,pkey,
             verified_batch=b, verified_batch_currency=auth_currency if manual else None)
         payments.append(PaymentRecord.objects.get(tenant=actor.tenant,idempotency_key=pkey))
@@ -542,6 +592,18 @@ def _batch_auth_currency(actor,b,lines):
     resolved=_source_batch_currency(actor,sources)
     if any(row.currency!=b.currency for row in lines):
         raise ValidationError({'currency':'批次币种与当前来源不一致，请核对后重新提交。'})
+    batch_rate, batch_cny = effective_snapshot(
+        b.currency, sum((row.amount for row in lines), Decimal(0)), b.exchange_rate, b.cny_amount)
+    if (batch_rate is None) != (batch_cny is None):
+        raise ValidationError({'cny_amount':'批次汇率快照不完整，请重新核对。'})
+    if any(effective_snapshot(row.currency,row.amount,row.exchange_rate,row.cny_amount)[0] != batch_rate for row in lines):
+        raise ValidationError({'exchange_rate':'批次汇率与明细不一致，请重新核对。'})
+    effective_pairs=[effective_snapshot(row.currency,row.amount,row.exchange_rate,row.cny_amount) for row in lines]
+    if any((rate is None) != (cny is None) for rate,cny in effective_pairs):
+        raise ValidationError({'cny_amount':'批次存在不完整的明细汇率快照。'})
+    total_cny = sum((cny for rate,cny in effective_pairs if cny is not None), Decimal(0))
+    if batch_cny != (total_cny if all(cny is not None for rate,cny in effective_pairs) else None):
+        raise ValidationError({'cny_amount':'批次人民币金额与明细不一致，请重新核对。'})
     return resolved
 
 

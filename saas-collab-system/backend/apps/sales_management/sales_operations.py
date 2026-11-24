@@ -30,7 +30,7 @@ ZERO = Decimal("0")
 
 
 def _params(request):
-    allowed = {"date_from", "date_to", "platform", "store_id", "currency", "region", "view", "page", "page_size", "sort", "status", "product_id"}
+    allowed = {"date_from", "date_to", "platform", "store_id", "currency", "region", "view", "page", "page_size", "sort", "status", "product_id", "evidence"}
     if set(request.query_params) - allowed or any(len(request.query_params.getlist(key)) != 1 for key in request.query_params):
         raise ValidationError({"filters": "仅支持起止日期、平台、店铺、币种、视图、商品 ID 和分页参数，每项只能提供一次。"})
     today = timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE))
@@ -101,6 +101,9 @@ def _params(request):
     previous_end, previous_start = start - timedelta(days=1), start - timedelta(days=days)
     # Exact-product drills are a single target; a stale parent-page offset must
     # never hide that target after SQL has narrowed the aggregate.
+    evidence = request.query_params.get("evidence", "0")
+    if evidence not in {"0", "1"} or (evidence == "1" and (view != "products" or not product_id)):
+        raise ValidationError({"evidence": "排查依据必须指定单个商品。"})
     return {
         "date_from": start, "date_to": end,
         "previous_from": previous_start, "previous_to": previous_end,
@@ -383,7 +386,7 @@ def _payload(request):
     )
     from .tiktok_spend import attach_tiktok_basis
     attach_tiktok_basis(request, rows, currency_groups)
-    if p["view"] == "products":
+    if p["view"] == "products" and request.query_params.get("evidence") == "1":
         _diagnosis_evidence(request, p, rows)
     notices = []
     if p["view"] == "products":
@@ -463,8 +466,21 @@ def _diagnosis_evidence(request, params, rows):
     from django.db import DatabaseError, transaction
     from datetime import datetime, time, timedelta
     from zoneinfo import ZoneInfo
-    from rest_framework.exceptions import PermissionDenied, ValidationError
+    from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
+    # Evidence is requested explicitly for one product, including products
+    # that did not trigger yesterday's decline rule.
+    for row in rows:
+        if not row.get("diagnosis"):
+            row["diagnosis"] = {
+                "status": "reference", "title": "商品经营排查",
+                "steps": [
+                    {"label": "本期 GMV", "value": row.get("sales_amount"), "status": "evidence"},
+                    {"label": "前期 GMV", "value": row.get("previous_sales_amount"), "status": "evidence"},
+                    {"label": "下单数", "value": row.get("order_count"), "status": "evidence"},
+                ],
+                "missing": ["商品访客数", "转化率", "库存", "促销及价格变化"],
+            }
     diagnosis_rows = [r for r in rows if r.get("diagnosis")]
     if not diagnosis_rows:
         for row in rows:
@@ -472,6 +488,9 @@ def _diagnosis_evidence(request, params, rows):
             row.pop("_variant_count", None)
             row.pop("_platform_variant_id", None)
         return
+    platform_types = dict(StoreMaster.objects.filter(
+        tenant=request.user.tenant, pk__in={r["store_id"] for r in diagnosis_rows},
+    ).values_list("pk", "platform__platform_type"))
     store_ids = {r["store_id"] for r in diagnosis_rows}
     ad_by_store = {}
     ad_unavailable = False
@@ -499,8 +518,8 @@ def _diagnosis_evidence(request, params, rows):
 
     identities = {}
     for row in diagnosis_rows:
-        if row.get("_variant_count") == 1 and row.get("_platform_variant_id"):
-            identities[(row["_platform_id"], row["store_id"], row["product_id"], row["_platform_variant_id"])] = row
+        if row.get("_platform_id") is not None and row.get("product_id"):
+            identities[(row["_platform_id"], row["store_id"], row["product_id"])] = row
     mapped = {}
     if identities:
         try:
@@ -510,19 +529,27 @@ def _diagnosis_evidence(request, params, rows):
                     store_id__in={key[1] for key in identities},
                     platform_id__in={key[0] for key in identities},
                     platform_product_id__in={key[2] for key in identities},
-                    platform_variant_id__in={key[3] for key in identities},
-                    internal_sku__isnull=False,
-                    internal_sku__tenant=request.user.tenant,
-                ).values("platform_id", "store_id", "platform_product_id", "platform_variant_id", "internal_sku_id")
+                ).values("platform_id", "store_id", "platform_product_id", "platform_variant_id", "platform_sku", "variant", "internal_sku_id", "internal_sku__sku_code", "internal_sku__product_type")
                 candidates = {}
                 for detail in details:
-                    key = (detail["platform_id"], detail["store_id"], detail["platform_product_id"], detail["platform_variant_id"])
-                    candidates.setdefault(key, set()).add(detail["internal_sku_id"])
-                mapped = _unique_sku_candidates(candidates)
+                    key = (detail["platform_id"], detail["store_id"], detail["platform_product_id"])
+                    candidates.setdefault(key, []).append(detail)
+                mapped = {key: value for key, value in candidates.items() if key in identities}
         except (DatabaseError, PermissionDenied):
             mapped = {}
 
-    sku_ids = set(mapped.values())
+    sku_ids = {d["internal_sku_id"] for variants in mapped.values() for d in variants if d["internal_sku_id"] is not None}
+    from apps.products.models import ProductBundleComponent
+    bundle_ids = {v["internal_sku_id"] for variants in mapped.values() for v in variants
+                  if v.get("internal_sku__product_type") == "bundle"}
+    components = {}
+    if bundle_ids:
+        for component in ProductBundleComponent.objects.filter(
+            tenant=request.user.tenant, bundle_sku_id__in=bundle_ids,
+            component_sku__tenant=request.user.tenant,
+        ).values("bundle_sku_id", "component_sku_id", "quantity"):
+            components.setdefault(component["bundle_sku_id"], []).append(component)
+        sku_ids.update(c["component_sku_id"] for cs in components.values() for c in cs)
     stock_by_sku = {}
     if sku_ids:
         try:
@@ -539,10 +566,86 @@ def _diagnosis_evidence(request, params, rows):
         except (PermissionDenied, ValidationError, DatabaseError):
             stock_by_sku = {}
 
+    bundle_stock = {}
+    for bundle_id, recipe in components.items():
+        warehouses = {(f["site_code"], f["warehouse_id"]) for c in recipe
+                      for f in stock_by_sku.get(c["component_sku_id"], [])}
+        results = []
+        for site, warehouse in sorted(warehouses):
+            capacities, times = [], []
+            warehouse_name = ""
+            for component in recipe:
+                facts = [f for f in stock_by_sku.get(component["component_sku_id"], [])
+                         if (f["site_code"], f["warehouse_id"]) == (site, warehouse)]
+                if not facts or any("available_qty" not in (f["provided_quantity_fields"] or []) for f in facts):
+                    break
+                warehouse_name = facts[0]["warehouse__name"]
+                capacities.append(max(0, sum(f["available_qty"] for f in facts)) // component["quantity"])
+                times.extend(f["snapshot_at_utc"] for f in facts)
+            if len(capacities) == len(recipe):
+                results.append(dict(internal_sku_id=bundle_id, site_code=site, warehouse_id=warehouse,
+                    warehouse__name=warehouse_name, source_sku="组件可组装",
+                    available_qty=min(capacities), provided_quantity_fields=["available_qty"],
+                    snapshot_at_utc=min(times)))
+        bundle_stock[bundle_id] = results
+
+    price_by_product = {}
+    price_status = "unavailable"
+    try:
+        from apps.permissions.services import check_user_permission
+        if check_user_permission(request.user, "influencers.catalog.view"):
+            from apps.influencers.models import SkuPriceSnapshot
+            from apps.influencers.scopes import filter_queryset, require_scope
+            require_scope(request.user, "influencers.catalog.view")
+            prices = filter_queryset(request.user, SkuPriceSnapshot.objects.filter(
+                tenant=request.user.tenant, listing__store_id__in=store_ids,
+                listing__external_product_id__in={r["product_id"] for r in diagnosis_rows},
+            ), "influencers.catalog.view").order_by("external_sku", "variant_id", "-source_updated_at", "-id")
+            for price in prices.values("listing__store_id", "listing__external_product_id",
+                    "external_sku", "variant_id", "variant_name", "original_price", "promotion_price",
+                    "effective_price", "currency", "source_updated_at"):
+                key = (price["listing__store_id"], price["listing__external_product_id"])
+                price_by_product.setdefault(key, []).append(price)
+            price_status = "missing"
+    except (PermissionDenied, ValidationError, DatabaseError):
+        price_status = "unavailable"
+
     for row in diagnosis_rows:
         diagnosis = row.get("diagnosis")
         if not diagnosis:
             continue
+        diagnosis["platform"] = platform_types.get(row["store_id"], "")
+        diagnosis["sections"] = []
+        if diagnosis["platform"] == "tiktok":
+            diagnosis["traffic_status"] = "not_collected"
+            from apps.sales_management.tiktok_product_evidence import product_traffic_section, video_section
+            video = video_section(request.user, store_id=row["store_id"], product_id=row["product_id"],
+                date_from=params["date_from"], date_to=params["date_to"])
+            diagnosis["traffic_status"] = video["status"]
+            product_traffic = product_traffic_section(request.user, store_id=row["store_id"], product_id=row["product_id"],
+                date_from=params["date_from"], date_to=params["date_to"])
+            diagnosis["sections"] = [
+                video,
+                product_traffic,
+            ]
+            diagnosis["steps"] = [s for s in diagnosis["steps"] if s["label"] != "商品访客数"]
+            diagnosis["missing"] = [m for m in diagnosis.get("missing", []) if m not in ("商品访客数", "转化率")]
+            if product_traffic["status"] != "available":
+                diagnosis["missing"].append("商品整体流量")
+            try:
+                from apps.reports.tiktok_ads_services import daily_spend_report
+                report = daily_spend_report(request.user, {
+                    "store_id": row["store_id"], "date_from": params["date_from"],
+                    "date_to": params["date_to"], "page": 1, "page_size": 20,
+                })
+                overview = report.get("gmv_max_overview") or []
+                diagnosis["gmv_max"] = [
+                    {k: item.get(k) for k in ["currency", "cost", "gross_revenue", "orders", "roi", "complete", "stored_days", "expected_days"]}
+                    for item in overview
+                ]
+                diagnosis["gmv_max_status"] = "available" if overview else "missing"
+            except (NotFound, PermissionDenied, ValidationError, DatabaseError):
+                diagnosis["gmv_max_status"] = "unavailable"
         ad = ad_by_store.get((row["store_id"], row["currency"]))
         if ad:
             diagnosis["steps"].extend([
@@ -554,13 +657,69 @@ def _diagnosis_evidence(request, params, rows):
             diagnosis["shop_ad_label"] = "以下为所属店铺广告数据，不代表该商品；转化率分母未确认，未计算转化率。"
         else:
             diagnosis["shop_ad_data"] = False
-        sku = mapped.get((row["_platform_id"], row["store_id"], row["product_id"], row.get("_platform_variant_id")))
-        stock = stock_by_sku.get(sku) if sku else None
-        if stock:
-            for fact in stock:
-                diagnosis["steps"].append(_wms_snapshot_step(fact))
-        else:
-            diagnosis["steps"].append({"label": "WMS截止昨日的共享库存快照", "value": None, "status": "missing"})
+        variants = mapped.get((row.get("_platform_id"), row["store_id"], row["product_id"]), [])
+        details = []
+        unique_skus = set()
+        qty_by_sku = {}
+        for variant in variants:
+            sku_id = variant["internal_sku_id"]
+            if sku_id is not None:
+                unique_skus.add(sku_id)
+            is_bundle = variant.get("internal_sku__product_type") == "bundle"
+            facts = bundle_stock.get(sku_id, []) if is_bundle else stock_by_sku.get(sku_id, [])
+            valid_facts = [f for f in facts if "available_qty" in (f["provided_quantity_fields"] or [])]
+            qty = sum((f["available_qty"] or 0) for f in valid_facts) if valid_facts else None
+            is_bundle = variant.get("internal_sku__product_type") == "bundle"
+            if sku_id is not None and qty is not None:
+                qty_by_sku.setdefault(sku_id, qty)
+            is_bundle = variant.get("internal_sku__product_type") == "bundle"
+            entry = {
+                "variant_id": variant.get("platform_variant_id"),
+                "shared_inventory": sum(v["internal_sku_id"] == sku_id for v in variants) > 1 if sku_id else False,
+                "variant": variant.get("variant") or variant.get("platform_variant_id") or "未命名规格",
+                "platform_sku": variant.get("platform_sku") or "",
+                "internal_sku": variant.get("internal_sku__sku_code") or "",
+                "available_qty": qty,
+                "warehouses": [{"warehouse": f.get("warehouse__name"), "source_sku": f.get("source_sku"), "available_qty": f.get("available_qty"), "snapshot_at": f["snapshot_at_utc"].isoformat()} for f in valid_facts],
+                "snapshot_at": max((f["snapshot_at_utc"] for f in valid_facts), default=None).isoformat() if valid_facts else None,
+                "inventory_basis": "按当前组件配方、同仓库存换算可组装数量，组件可能与其他规格共享" if is_bundle else "WMS 可用库存",
+                "status": "evidence" if qty is not None and len(valid_facts) == len(facts) else ("partial" if qty is not None else "missing"),
+            }
+            details.append(entry)
+        resources = {}
+        for variant in variants:
+            sku = variant["internal_sku_id"]
+            resources[sku] = {c["component_sku_id"] for c in components.get(sku, [])} if sku in bundle_ids else {sku}
+        resource_owner = {}
+        shared_components = False
+        for sku, ids in resources.items():
+            for resource in ids:
+                if resource in resource_owner and resource_owner[resource] != sku:
+                    shared_components = True
+                resource_owner[resource] = sku
+        qtys = list(qty_by_sku.values())
+        diagnosis["variant_details"] = details
+        complete = bool(variants) and all(v["internal_sku_id"] is not None and v["internal_sku_id"] in qty_by_sku for v in variants) and all(d["status"] == "evidence" for d in details)
+        diagnosis["inventory_summary"] = {"quantity": sum(qtys) if qtys and not shared_components else None,
+            "shared_components": shared_components,
+            "status": "shared_components" if shared_components else ("complete" if complete else ("known_subtotal" if qtys else "missing"))}
+        missing = diagnosis.get("missing", [])
+        if complete:
+            diagnosis["missing"] = [m for m in missing if "库存" not in m]
+        elif "库存" not in missing:
+            missing.append("库存")
+        prices = price_by_product.get((row["store_id"], row["product_id"]), [])
+        diagnosis["price_status"] = "reference" if prices else price_status
+        diagnosis["price_details"] = [dict(p, source_label="当前参考价格，未验证历史价格变化") for p in prices]
+        for detail in details:
+            matches = [p for p in prices if p["variant_id"] == detail["variant_id"]
+                       and p["external_sku"] == detail["platform_sku"]]
+            detail["price"] = matches[0] if len(matches) == 1 else None
+        diagnosis["steps"].append({
+            "label": "商品 SKU 去重共享可用库存合计" if complete else "商品 SKU 已知共享可用库存小计",
+            "value": diagnosis["inventory_summary"]["quantity"],
+            "status": "evidence" if complete else "missing",
+        })
     for row in rows:
         row.pop("_platform_id", None)
         row.pop("_variant_count", None)

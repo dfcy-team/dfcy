@@ -19,6 +19,8 @@ class SupplyPaymentBatch(Record):
     payee_account = models.ForeignKey('supply_chain.PayeeAccount', on_delete=models.PROTECT, related_name='payment_batches')
     account_snapshot = models.JSONField(default=dict)
     currency = models.CharField(max_length=3, blank=True, default='', db_default='')
+    exchange_rate = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
+    cny_amount = models.DecimalField(max_digits=24, decimal_places=4, null=True, blank=True)
     reason = models.TextField()
     status = models.CharField(max_length=16, choices=STATUSES, default='draft')
     approval = models.OneToOneField('workflows.ApprovalRequest', on_delete=models.PROTECT, null=True, blank=True, related_name='supply_payment_batch')
@@ -47,13 +49,15 @@ class SupplyPaymentBatchVoucher(Record):
 
 class SupplyPaymentRequest(Record):
     STATUSES = [(x, x) for x in ('draft', 'submitted', 'paid', 'cancelled')]
-    KINDS = [(x, x) for x in ('purchase', 'shipment', 'domestic_freight', 'batch', 'inbound')]
+    KINDS = [(x, x) for x in ('purchase', 'shipment', 'domestic_freight', 'domestic_expense', 'batch', 'inbound')]
     kind = models.CharField(max_length=24, choices=KINDS)
     source_id = models.PositiveBigIntegerField()
     amount = models.DecimalField(max_digits=24, decimal_places=4)
     payee_account = models.ForeignKey('supply_chain.PayeeAccount', on_delete=models.PROTECT, related_name='payment_requests')
     account_snapshot = models.JSONField(default=dict)
     currency = models.CharField(max_length=3, blank=True, default='', db_default='')
+    exchange_rate = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
+    cny_amount = models.DecimalField(max_digits=24, decimal_places=4, null=True, blank=True)
     fee_item = models.ForeignKey('supply_chain.PaymentItem', on_delete=models.PROTECT, null=True, blank=True, related_name='payment_requests')
     plan = models.ForeignKey('supply_chain.PaymentPlanRecord', on_delete=models.PROTECT, null=True, blank=True, related_name='payment_requests')
     plan_line_id = models.CharField(max_length=64, blank=True, default='', db_default='')

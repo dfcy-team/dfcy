@@ -88,6 +88,7 @@ class PaymentInput(serializers.Serializer):
     expected_version = serializers.IntegerField(min_value=0)
     fee_item_id = serializers.IntegerField(min_value=1, required=False)
     currency = serializers.RegexField(r'^[A-Z]{3}$', required=False)
+    exchange_rate = serializers.DecimalField(max_digits=20, decimal_places=8, required=False)
 
 
 class PrepaymentApplicationInput(serializers.Serializer):
@@ -184,6 +185,9 @@ class ProductCostLedgerOptions(InternalAPI):
 class CostTargets(InternalAPI):
     def get(self, request):
         kind = request.query_params.get('kind', 'shipment')
+        if kind == 'domestic_expense':
+            from .domestic_expense_targets import targets
+            return targets(request)
         rows = costs.targets(request.user, kind)
         if kind == 'inbound':
             rows = rows.exclude(

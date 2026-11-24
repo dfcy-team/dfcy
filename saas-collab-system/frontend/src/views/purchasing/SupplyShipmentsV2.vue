@@ -9,7 +9,7 @@
         <template #footer><el-button v-if="hasMoreOrders" link :loading="ordersLoadingMore || orderSearchLoading" @click="loadMoreOrders">加载更多采购订单</el-button><span v-else class="sub">采购订单已加载完</span></template>
       </el-select>
       <el-select v-model="status" clearable placeholder="全部发货状态" aria-label="发货状态" @change="onOrderChange"><el-option label="草稿" value="draft"/><el-option label="已提交" value="submitted"/><el-option label="已清点" value="counted"/><el-option label="已作废" value="cancelled"/></el-select>
-      <el-input v-model="search" clearable placeholder="备注 / SPU / 新旧SKU / 商品名称" aria-label="备注 / SPU / 新旧SKU / 商品名称" maxlength="200" @keyup.enter="onOrderChange" @clear="onOrderChange"/>
+      <el-input v-model="search" clearable placeholder="发货单号 / 备注 / SPU / 新旧SKU / 商品名称" aria-label="发货单号 / 备注 / SPU / 新旧SKU / 商品名称" maxlength="200" @keyup.enter="onOrderChange" @clear="onOrderChange"/>
       <el-button @click="onOrderChange" :disabled="busy">查询</el-button>
     </section>
     <div class="table-scroll shipment-list" :class="{ 'supplier-list': supplier }" v-loading="loading">
@@ -20,7 +20,7 @@
         <el-table-column label="数量" width="85"><template #default="{row}"><strong>{{totalQty(row).toLocaleString()}}</strong><small class="sub">件</small></template></el-table-column>
         <el-table-column v-if="!supplier" label="国内运费承担" min-width="145"><template #default="{row}">{{({company_direct:'我司直付承运商',supplier_advance:'供应商代垫',supplier_borne:'供应商自担'})[row.domestic_freight_settlement_mode||'company_direct']}}</template></el-table-column>
         <el-table-column label="发货状态" width="95"><template #default="{row}"><el-tag size="small" :type="row.status==='submitted'?'success':row.status==='cancelled'?'info':'warning'">{{row.status === 'submitted' && row.inbound_counted_at ? '已清点' : statusText(row.status)}}</el-tag></template></el-table-column>
-        <el-table-column label="集货情况" min-width="120"><template #default="{row}"><span class="collection-state">{{row.delivery_mode==='factory_loading'?'上门装柜':row.collection_arrived?'已到集货中心':'未到集货中心'}}</span><small class="sub">{{allocatedQty(row)}} 已集货 · {{Math.max(0,totalQty(row)-allocatedQty(row))}} 待分配</small></template></el-table-column>
+        <el-table-column label="集货情况" min-width="120"><template #default="{row}"><span class="collection-state">{{collectionStateText(row)}}</span><small class="sub">{{allocatedQty(row)}} 已分配 · {{Math.max(0,totalQty(row)-allocatedQty(row))}} 待分配</small><small v-if="shippedQty(row)>0" class="sub">{{shippedQty(row)}} 已发运 · {{Math.max(0,allocatedQty(row)-shippedQty(row))}} 待发运</small></template></el-table-column>
         <el-table-column label="批次物流" min-width="145"><template #default="{row}"><el-tag size="small" :type="row.logistics_stage==='arrived_warehouse'?'success':row.logistics_stage==='unmarked'?'info':'primary'">{{shipmentLogisticsText(row)}}</el-tag></template></el-table-column>
         <el-table-column label="箱号文件" width="80"><template #default="{row}">{{row.attachments?.length||0}} 份</template></el-table-column>
         <el-table-column label="操作" width="105" fixed="right"><template #default="{row}"><el-button link type="primary" @click="supplier ? openShipment(row) : openShipmentProgress(row)">{{supplier?'查看 / 编辑':'查看进度'}}</el-button></template></el-table-column>
@@ -42,7 +42,7 @@
       <header><div><strong>{{selectedProgress.number}}</strong><p>供应商：{{selectedProgress.supplier_name}} <span>采购单：{{selectedProgress.order_number}}</span> <el-tag size="small">{{statusText(selectedProgress.status)}}</el-tag></p></div><el-button text @click="closeProgress">收起进度</el-button></header>
       <PurchaseContractV2 v-if="selectedProgress.status==='submitted'" :shipment-id="selectedProgress.id" />
       <el-alert v-if="progressError" :title="progressError" type="error" :closable="false"/>
-      <ol class="shipment-timeline"><li :class="{reached:selectedProgress.status==='submitted'}"><span class="node">1</span><div><b>供应商发货</b><el-tag size="small" :type="selectedProgress.status==='submitted'?'success':'info'">{{statusText(selectedProgress.status)}}</el-tag><p>发货数量：{{totalQty(selectedProgress)}} 件</p><p>发货日期：{{selectedProgress.shipment_date||'未填写'}}</p></div></li><li :class="{reached:allocatedQty(selectedProgress)>0}"><span class="node">2</span><div><b>集货发运</b><el-tag size="small" :type="allocatedQty(selectedProgress)?'primary':'info'">{{allocatedQty(selectedProgress)?'已分配':'待集货'}}</el-tag><p>已集货：{{allocatedQty(selectedProgress)}} 件</p><p>待集货：{{Math.max(0,totalQty(selectedProgress)-allocatedQty(selectedProgress))}} 件</p></div></li><li :class="{reached:selectedProgress.dispatch_allocations?.some(item=>item.stage!=='unmarked')}"><span class="node">3</span><div><b>物流跟踪</b><p>{{shipmentLogisticsText(selectedProgress)}}</p><p>开船 → 到港 → 到仓，按批次同步</p></div></li></ol>
+      <ol class="shipment-timeline"><li :class="{reached:selectedProgress.status==='submitted'}"><span class="node">1</span><div><b>供应商发货</b><el-tag size="small" :type="selectedProgress.status==='submitted'?'success':'info'">{{statusText(selectedProgress.status)}}</el-tag><p>发货数量：{{totalQty(selectedProgress)}} 件</p><p>发货日期：{{selectedProgress.shipment_date||'未填写'}}</p></div></li><li :class="{reached:allocatedQty(selectedProgress)>0}"><span class="node">2</span><div><b>集货发运</b><el-tag size="small" :type="allocatedQty(selectedProgress)?'primary':'info'">{{allocatedQty(selectedProgress)?'已分配':'待集货'}}</el-tag><p>已分配：{{allocatedQty(selectedProgress)}} 件</p><p>待分配：{{Math.max(0,totalQty(selectedProgress)-allocatedQty(selectedProgress))}} 件</p></div></li><li :class="{reached:selectedProgress.dispatch_allocations?.some(item=>item.stage!=='unmarked')}"><span class="node">3</span><div><b>物流跟踪</b><p>{{shipmentLogisticsText(selectedProgress)}}</p><p>开船 → 到港 → 到仓，按批次同步</p></div></li></ol>
       <div class="shipment-related"><div class="related-docs"><div><b>相关采购单</b><router-link to="/supply-chain/purchase-orders">{{selectedProgress.order_number}}</router-link></div><div><b>集货批次</b><router-link v-for="batch in selectedProgress.dispatch_allocations||[]" :key="batch.batch_id" :to="`/supply-chain/logistics?batch_id=${batch.batch_id}`">{{batch.batch_number}} · {{batch.quantity}} 件</router-link><span v-if="!selectedProgress.dispatch_allocations?.length">尚未集货</span></div><div><b>装箱附件</b><span>{{selectedProgress.attachments?.length||0}} 份箱号文件</span></div></div><aside class="next-action"><b>下一步操作</b><p>{{selectedProgress.status==='cancelled'?'单据已作废，仅供查阅':selectedProgress.status==='draft'?'完善商品和箱号文件后提交发货':Math.max(0,totalQty(selectedProgress)-allocatedQty(selectedProgress))?'选择剩余数量进行集货发运':'按集货批次跟进运输状态'}}</p><el-button size="small" type="primary" @click="openShipment(selectedProgress)">查看 / 编辑发货单</el-button><router-link v-if="selectedProgress.status==='submitted'" to="/supply-chain/logistics" class="dispatch-next-link">前往集货 / 物流</router-link></aside></div>
     </section>
 
@@ -54,7 +54,10 @@
         <CostSettlementLinkV2 v-if="!supplier && current.status==='submitted'" kind="shipment" :id="current.id" :version="current.version" @updated="onCostUpdated" />
         <div class="form-grid"><el-form-item label="主采购订单"><el-input :model-value="current.order_number" disabled/></el-form-item><el-form-item v-if="canEdit" label="添加来源采购单"><el-select v-model="sourceOrderIds" multiple filterable placeholder="选择同供应商、国家的采购单" :disabled="busy" @change="loadSourceOrders"><el-option v-for="o in compatibleOrders" :key="o.id" :label="`${o.number} · ${o.supplier_name || ''} · ${o.country_code || ''} · ${o.currency || ''}`" :value="o.id"/></el-select></el-form-item><el-form-item label="发货日期 *"><el-date-picker v-model="form.shipment_date" type="date" value-format="YYYY-MM-DD" :disabled="!canEdit"/></el-form-item></div>
         <el-form-item label="发货方式 *"><el-select v-model="form.delivery_mode" :disabled="!canEdit" aria-label="发货方式"><el-option label="送集货中心" value="collection_center"/><el-option label="货柜上门装载" value="factory_loading"/></el-select></el-form-item><el-form-item v-if="form.delivery_mode==='factory_loading'" label="装柜地址（提交时必填）"><el-input v-model="form.loading_address" type="textarea" :disabled="!canEdit" maxlength="4000" aria-label="装柜地址" placeholder="未填写时带入供应商装柜地址或工厂地址"/></el-form-item><p v-if="form.delivery_mode==='factory_loading'" class="sub">货柜到供应商地址装载，无需集货到仓标识；提交后仍按发运批次跟踪开船、到港和目的仓到仓。</p><el-form-item label="备注"><el-input v-model="form.notes" type="textarea" :rows="2" :disabled="!canEdit"/></el-form-item>
-        <DomesticTransportV2 v-if="current.id" :key="current.id" :shipment="current" :supplier="supplier" :editable="canEdit || (!supplier && canManage && current.status==='submitted')" :disabled="busy" @updated="onDomesticUpdated" />
+        <DomesticTransportV2 ref="domesticTransport" :hide-save="!supplier" v-if="current.id" :key="current.id" :shipment="current" :supplier="supplier" :editable="canEdit || (!supplier && canManage && current.status==='submitted')" :disabled="busy" @updated="onDomesticUpdated" />
+        <ShipmentDomesticExpenses ref="domesticExpenses" :transport-defaults="domesticTransport?.form" hide-save v-if="current.id && !supplier" :key="current.id" :shipment="current"
+          :editable="canManage && ['draft','submitted'].includes(current.status)" :disabled="busy" @updated="onDomesticUpdated"/>
+        <el-button v-if="current.id && !supplier && canManage && ['draft','submitted'].includes(current.status)" type="primary" :loading="domesticSaving" :disabled="busy" @click="saveDomesticAll">保存运输与费用</el-button>
         <p v-else class="sub">保存发货草稿后可选择国内承运商和填写运单号。</p>
         <section v-if="current.status==='draft' && canEdit" class="draft-steps" aria-label="发货草稿步骤"><strong>发货流程</strong><span>1 保存草稿</span><i>→</i><span>2 上传全部箱号文件</span><i>→</i><span>3 提交发货</span></section>
         <el-descriptions v-if="current.status==='submitted'" border :column="2" class="notice">
@@ -134,11 +137,13 @@
 </template>
 
 <script setup>
+import { allocatedQty, shippedQty, collectionStateText } from './collectionState.js';
 import '../../styles/supplyTypography.css';
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
+import ShipmentDomesticExpenses from '../../components/supply-chain/ShipmentDomesticExpenses.vue';
 import DomesticTransportV2 from '../../components/supply-chain/DomesticTransportV2.vue';
 import PurchaseContractV2 from '../../components/supply-chain/PurchaseContractV2.vue';
 import CostSettlementLinkV2 from '../../components/supply-chain/CostSettlementLinkV2.vue';
@@ -149,8 +154,10 @@ import { parsePurchaseSkuPaste } from '../../utils/purchaseSkuPaste';
 import { planShipmentSkuPaste, shipmentGoodsValue } from '../../utils/shipmentSkuPaste';
 import { useAuthStore } from '../../stores/auth';
 
-function onDomesticUpdated(data){if(current.value){Object.assign(current.value,data);const row=shipments.value.find(r=>r.id===current.value.id);if(row)Object.assign(row,data);}}
 const props = defineProps({ supplier: { type: Boolean, default: false } });
+const domesticTransport=ref(null), domesticExpenses=ref(null), domesticSaving=ref(false);
+async function saveDomesticAll(){ if(domesticSaving.value)return;domesticSaving.value=true;try{if(await domesticTransport.value?.save()){await nextTick();await domesticExpenses.value?.save();}}finally{domesticSaving.value=false;} }
+function onDomesticUpdated(data){if(current.value){Object.assign(current.value,data);const row=shipments.value.find(r=>r.id===current.value.id);if(row)Object.assign(row,data);}}
 const route = useRoute();
 const auth=useAuthStore();
 const orders=ref([]), orderTotal=ref(0), orderOffset=ref(0), ordersLoadingMore=ref(false), shipments=ref([]), skus=ref([]), skuOptionsLoading=ref(false), skuSearch=ref(''), orderId=ref(route.query.order_id ? Number(route.query.order_id) : ''), status=ref(''), search=ref(''), page=ref(1), limit=ref(20), total=ref(0), loading=ref(false), busy=ref(false), error=ref(''), open=ref(false), current=ref(null), formError=ref(''), fileInput=ref(null), savedPayload=ref('');
@@ -161,7 +168,7 @@ const selectedProgress=ref(null),progressLoading=ref(false),progressError=ref(''
 const shipmentTabs=[{value:'',label:'全部'},{value:'draft',label:'待提交'},{value:'submitted',label:'已发货'},{value:'cancelled',label:'已作废'}];
 function closeProgress(){++progressRequest;selectedProgress.value=null;progressLoading.value=false;}
 function selectShipmentStatus(value){status.value=value;closeProgress();onOrderChange();}
-function allocatedQty(row){return (row.dispatch_allocations||[]).reduce((sum,item)=>sum+Number(item.quantity||0),0);}
+
 async function openShipmentProgress(row){const sequence=++progressRequest;selectedProgress.value=row;progressError.value='';progressLoading.value=true;try{const result=unwrap(await api.fetchShipment(row.id,props.supplier));if(sequence===progressRequest)selectedProgress.value=result;}catch(e){if(sequence===progressRequest)progressError.value=e.message||'读取流程失败';}finally{if(sequence===progressRequest)progressLoading.value=false;}}
 
 const orderSearch = ref('');
@@ -269,8 +276,8 @@ async function loadMoreOrders() {
   if (orderSearch.value) await loadOrderSearchPage();
   else await loadOrderPage();
 }
-async function load(){error.value='';let routeProblem='';const [orderProblem,shipmentProblem]=await Promise.all([loadOrderPage(true),loadShipments()]);if(orderProblem||shipmentProblem)error.value=orderProblem||shipmentProblem;if(orderId.value&&!orders.value.some(o=>String(o.id)===String(orderId.value))){try{const detail=unwrap(await api.fetchShipmentOrder(orderId.value,props.supplier));if(detail.status==='confirmed')orders.value.unshift(detail);else if(route.query.order_id)routeProblem='链接中的采购订单尚未确认，发货单目前不可见。';}catch(e){if(route.query.order_id)routeProblem=`无法读取指定采购订单：${e.message||'请求失败'}`;}}if(routeProblem)error.value=routeProblem;}
-async function loadShipments(){loading.value=true;try{const response=await api.fetchShipments(props.supplier,{limit:limit.value,offset:(page.value-1)*limit.value,...(search.value.trim()?{search:search.value.trim()}:{}),...(status.value?{status:status.value}:{}),...(orderId.value?{order_id:orderId.value}:{})});const data=unwrap(response);shipments.value=rowsOf(data);total.value=Number(response.count||0);return '';}catch(e){const problem=`发货单加载失败：${e.message||'请求失败'}`;error.value=problem;return problem;}finally{loading.value=false;}}
+async function load(){error.value='';let routeProblem='';const shipmentProblem=await loadShipments();const orderProblem=await loadOrderPage(true);if(orderProblem||shipmentProblem)error.value=orderProblem||shipmentProblem;if(orderId.value&&!orders.value.some(o=>String(o.id)===String(orderId.value))){try{const detail=unwrap(await api.fetchShipmentOrder(orderId.value,props.supplier));if(detail.status==='confirmed')orders.value.unshift(detail);else if(route.query.order_id)routeProblem='链接中的采购订单尚未确认，发货单目前不可见。';}catch(e){if(route.query.order_id)routeProblem=`无法读取指定采购订单：${e.message||'请求失败'}`;}}if(routeProblem)error.value=routeProblem;}
+async function loadShipments(){loading.value=true;try{const response=await api.fetchShipments(props.supplier,{summary:1,limit:limit.value,offset:(page.value-1)*limit.value,...(search.value.trim()?{search:search.value.trim()}:{}),...(status.value?{status:status.value}:{}),...(orderId.value?{order_id:orderId.value}:{})});const data=unwrap(response);shipments.value=rowsOf(data);total.value=Number(response.count||0);return '';}catch(e){const problem=`发货单加载失败：${e.message||'请求失败'}`;error.value=problem;return problem;}finally{loading.value=false;}}
 function onOrderChange(){closeProgress();page.value=1;loadShipments();}
 watch(()=>route.query.order_id,(v)=>{if(v){orderId.value=Number(v);onOrderChange();}});
 function statusText(s){return {draft:'草稿',submitted:'已提交',cancelled:'已作废'}[s]||s;}
@@ -429,6 +436,32 @@ function addLine(){if(canEdit.value){lineSearch.value='';onlyLineIssues.value=fa
 async function save(){if(!canEdit.value||busy.value)return false;formError.value='';if(!form.shipment_date||!form.lines.length||form.lines.some(l=>!l.sku_id||!Number.isInteger(Number(l.quantity))||Number(l.quantity)<1)){formError.value='请填写发货日期，并为每行选择 SKU 和大于 0 的整数数量。';return false;}if(form.lines.some(l=>!l.purchase_line_id&&sourceLines.value.filter(x=>String(x.sku_id)===String(l.sku_id)).length>1)){formError.value='同一 SKU 有多条采购来源，请逐行选择具体采购单行。';return false;}busy.value=true;try{const data={...payload(),...(current.value.id?{expected_version:current.value.version}:{order_id:current.value.order_id})};const result=await mutate(`save-${current.value.id||'new'}`,data,key=>current.value.id?api.updateShipment(current.value.id,data,props.supplier,key):api.createShipment(data,props.supplier,key));editForm(result);ElMessage.success('发货草稿已保存。');await loadShipments();return true;}catch(e){formError.value=e.message||'保存失败，草稿内容已保留。';return false;}finally{busy.value=false;}}
 async function savePrices(){if(!canPriceEdit.value||busy.value)return;if(form.lines.some(l=>l.unit_price==null||l.unit_price===''||!Number.isFinite(Number(l.unit_price))||Number(l.unit_price)<0)){formError.value='请为每行填写大于或等于 0 的有效单价。';return;}if(current.value.price_adjustment_requires_reason&&!priceReason.value.trim()){formError.value='已集货的发货单调价必须填写原因。';return;}busy.value=true;formError.value='';try{const lines=form.lines.map(l=>({id:l.id,unit_price:Number(l.unit_price)})),data={expected_version:current.value.version,lines,...(priceReason.value.trim()?{reason:priceReason.value.trim()}:{})};const result=await mutate(`prices-${current.value.id}`,data,key=>api.updateShipmentPrices(current.value.id,data,key));editForm(result);priceReason.value='';ElMessage.success('价格已保存。');await loadShipments();}catch(e){formError.value=e.message||'调价失败';}finally{busy.value=false;}}
 function onCostUpdated(target){if(target&&current.value&&String(target.id)===String(current.value.id))current.value={...current.value,...target};}
+async function withdrawShipment() {
+  if (props.supplier || !canManage.value || busy.value || current.value?.status !== 'submitted') return;
+  let reason;
+  try {
+    const result = await ElMessageBox.prompt('填写撤回原因，撤回后按实际集货清单修改并重新提交。', '撤回修改', {
+      inputValidator: value => !!value?.trim() || '请填写撤回原因',
+      inputPlaceholder: '例如集货实收与供应商发货清单不一致',
+    });
+    reason = result.value.trim();
+  } catch { return; }
+  busy.value = true;
+  formError.value = '';
+  try {
+    const body = { expected_version: current.value.version, reason };
+    const result = await mutate(`withdraw-${current.value.id}`, body,
+      key => api.withdrawShipment(current.value.id, body, key));
+    editForm(result);
+    await openShipment(result);
+    await loadShipments();
+    ElMessage.success('已撤回为草稿，请修改明细后重新提交。');
+  } catch (e) {
+    formError.value = e.message || '撤回失败';
+  } finally {
+    busy.value = false;
+  }
+}
 async function act(action){if(!current.value||!canManage.value&&action==='cancel')return;if(action==='submit'&&dirty.value&&!await save())return;if(action==='submit'&&current.value.delivery_mode==='factory_loading'&&!String(current.value.loading_address||'').trim()){formError.value='货柜上门装载的发货单提交前必须填写装柜地址。';return;}try{await ElMessageBox.confirm(action==='submit'?'提交后供应商发货信息将进入采购协同。':'作废这张发货单？',action==='submit'?'提交发货':'作废发货单',{type:'warning'});}catch{return;}busy.value=true;try{const body={expected_version:current.value.version};const result=await mutate(`${action}-${current.value.id}`,body,key=>action==='submit'?api.submitShipment(current.value.id,body,props.supplier,key):api.cancelShipment(current.value.id,body,props.supplier,key));editForm(result);await loadShipments();ElMessage.success(action==='submit'?'发货单已提交。':'发货单已作废。');}catch(e){formError.value=e.message||'操作失败';}finally{busy.value=false;}}
 async function arrived(){if(props.supplier||!canManage.value||busy.value)return;busy.value=true;try{const body={expected_version:current.value.version};editForm(await mutate(`arrival-${current.value.id}`,body,key=>api.markShipmentArrived(current.value.id,body,key)));await loadShipments();ElMessage.success('已标记到仓。');}catch(e){formError.value=e.message||'标记到仓失败';}finally{busy.value=false;}}
 async function uploadFile(event){const file=event.target.files?.[0];event.target.value='';if(!file)return;if(file.size>10*1024*1024||! /\.(pdf|xlsx|csv|png|jpe?g)$/i.test(file.name)){formError.value='请选择 10MB 以内的 PDF、XLSX、CSV、PNG 或 JPG 文件。';return;}if(!canEdit.value)return;if(dirty.value&&!await save())return;if(!current.value?.id){formError.value='请先保存发货草稿，再上传箱号文件。';return;}busy.value=true;try{const version=current.value.version,result=await mutate(`upload-${current.value.id}-${file.name}`,{version,name:file.name,size:file.size,modified:file.lastModified},key=>api.uploadShipmentAttachment(current.value.id,file,version,props.supplier,key));mergeSnapshot(result);formError.value='';}catch(e){formError.value=e.message||'上传失败';}finally{busy.value=false;}}

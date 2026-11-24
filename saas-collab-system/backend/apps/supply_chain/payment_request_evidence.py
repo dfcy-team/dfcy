@@ -38,9 +38,13 @@ def _row(actor, kind, pk, request_id, *, write=False):
     return row
 
 
-def _approved(row):
+def _approved(row, authoritative=None, *, native_checked=False):
     if row.status == 'cancelled' or not row.approval_id or row.approval.status != 'approved':
         raise ValidationError('仅审批通过且未取消的付款申请可办理。')
+
+    from apps.integrations.feishu_native_approval import ensure_native_postable
+    if not native_checked:
+        ensure_native_postable(row.approval)
 
 
 def conflict(message):
@@ -53,6 +57,9 @@ class RequestVouchers(InternalAPI):
         actor = request.user
         services._tenant_lock(actor)
         row = _row(actor, kind, pk, request_id, write=True)
+        from apps.integrations.feishu_finance_handoff import finance_data
+        if row.approval_id and finance_data(row.approval):
+            raise ValidationError('本申请的付款凭证由飞书财务办理回传，请在飞书上传。')
         if row.status != 'submitted' or not row.approval_id or row.approval.status not in ('pending', 'approved'):
             raise ValidationError('仅待审批或已批准且未入账申请可上传凭证。')
         idem = key(request)
@@ -167,11 +174,14 @@ class RequestConfirm(InternalAPI):
     def post(self, request, kind, pk, request_id):
         actor = request.user
         key(request)
-        data = ConfirmInput(data=request.data)
+        from apps.integrations.feishu_finance_handoff import finance_payload
+        services._tenant_lock(actor)
+        source = _row(actor,kind,pk,request_id,write=True)
+        body = finance_payload(source.approval,request.data) if source.approval_id else request.data
+        data = ConfirmInput(data=body)
         data.is_valid(raise_exception=True)
         p = data.validated_data
-        services._tenant_lock(actor)
-        row = _row(actor, kind, pk, request_id, write=True)
+        row = source
         post_request(actor, row, p)
         return Response({'data': request_data(actor, row)})
 
@@ -180,6 +190,14 @@ class RequestConfirm(InternalAPI):
 def post_request(actor, row, p):
     from apps.permissions.services import check_user_permission
     services._tenant_lock(actor)
+    if row.approval_id:
+        from apps.integrations.feishu_finance_handoff import require_finance_postable
+        authoritative = require_finance_postable(actor,row.approval,p)
+        if authoritative is None:
+            from apps.integrations.feishu_native_approval import ensure_native_postable
+            authoritative = ensure_native_postable(row.approval)
+    else:
+        authoritative = None
     source = costs._payment_owner(actor, row.kind, row.source_id, MANAGE)
     if row.payment_id:
         auth_currency = costs.recorded_payment_currency(actor, row.payment)
@@ -196,7 +214,7 @@ def post_request(actor, row, p):
         if (old.date, old.reference_number, old.notes) != (p['date'], reference, p['notes']):
             raise StateConflict('申请已入账，不能用不同付款内容再次确认。')
         return row
-    _approved(row)
+    _approved(row, authoritative, native_checked=bool(row.approval_id))
     if row.version != p['expected_version']:
         raise StateConflict('付款申请或凭证已变化，请刷新后核对。')
     files = active_vouchers(row.vouchers.all())
@@ -209,6 +227,8 @@ def post_request(actor, row, p):
             'reference_number': reference, 'notes': p['notes'], 'expected_version': state['version']}
     if row.currency:
         body['currency'] = row.currency
+    if row.exchange_rate is not None:
+        body['exchange_rate'] = row.exchange_rate
     if row.fee_item_id:
         body['fee_item_id'] = row.fee_item_id
     costs.create_payment(actor, kind, pk, body, payment_key, verified_request=row)

@@ -846,3 +846,19 @@ from .payment_request_models import (SupplyPaymentRequest, SupplyPaymentRequestV
 from .inbound_notify_models import InboundNotificationConfig, InboundNotificationOutbox
 
 from .supplier_deposit_models import SupplierDepositEntry  # noqa: E402,F401
+
+from .domestic_expense_models import DomesticExpenseGroup  # noqa: E402,F401
+
+class WmsDocumentLink(Record):
+    site_code = models.CharField(max_length=20)
+    warehouse_id = models.PositiveBigIntegerField()
+    external_inbound_id = models.CharField(max_length=191)
+    inbound = models.ForeignKey(InboundOrder, on_delete=models.PROTECT, related_name='manual_wms_links')
+    is_active = models.BooleanField(default=True)
+    reason = models.TextField()
+    preview_snapshot = models.JSONField(default=dict)
+    deactivated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    deactivated_at = models.DateTimeField(null=True, blank=True)
+    deactivate_reason = models.TextField(blank=True)
+
+from .receipt_difference_models import ReceiptDifferenceDecision

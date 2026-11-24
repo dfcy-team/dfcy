@@ -7,4 +7,4 @@ class IntegrationsConfig(AppConfig):
     label = "integrations"
 
     def ready(self):
-        from . import feishu_signals  # noqa: F401
+        from . import feishu_signals, credential_access  # noqa: F401

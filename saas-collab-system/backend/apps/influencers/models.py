@@ -2470,3 +2470,25 @@ class InfluencerRequirementImage(models.Model):
 
     class Meta:
         ordering = ["id"]
+
+
+class TikTokProductPerformanceSnapshot(TenantValidatedModel):
+    """Whitelisted aggregate metrics for one exact shop-local date window."""
+    store = models.ForeignKey(StoreMaster, on_delete=models.PROTECT, related_name="tiktok_product_performance")
+    product_id = models.CharField(max_length=160)
+    window_start = models.DateField()
+    window_end = models.DateField()
+    metrics = models.JSONField(default=dict)
+    source_updated_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    tenant_relation_fields = ("store",)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=("tenant", "store", "product_id", "window_start", "window_end"), name="uniq_tk_prod_perf_window")]
+        indexes = [models.Index(fields=("tenant", "store", "product_id", "window_start"), name="idx_tk_prod_perf_lookup")]
+
+    def clean(self):
+        super().clean()
+        if self.window_end <= self.window_start:
+            raise ValidationError({"window_end": "End date must be exclusive and later than start date."})

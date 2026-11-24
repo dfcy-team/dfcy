@@ -1,5 +1,6 @@
 """Partial receipts release costs against the complete dispatch plan."""
 from decimal import Decimal
+import pytest
 from unittest.mock import patch
 
 from django.test.utils import CaptureQueriesContext
@@ -177,7 +178,8 @@ def test_legacy_snapshot_fallback_and_fingerprint_preserved(world):
     assert costs.inputs('batch', batch)[1] == before[1]
     assert cost_ledger.fingerprints_for_entries(cost_ledger.entries_for(actor))[('batch', batch.pk)] == before[1]
 
-def test_twenty_owner_fingerprints_use_bounded_queries_and_shared_serializer(world):
+@pytest.mark.parametrize("with_domestic_expense", [False, True])
+def test_twenty_owner_fingerprints_use_bounded_queries_and_shared_serializer(world, with_domestic_expense):
     from apps.supply_chain.models import DispatchBatch, DispatchMembership, DispatchAllocation, CostEntry, CostVersion
     actor, api, batch, line = setup_batch(world)
     with domain_write():
@@ -193,6 +195,12 @@ def test_twenty_owner_fingerprints_use_bounded_queries_and_shared_serializer(wor
                 sequence=1, state='estimated', stage='shipped', input_fingerprint='a'*64, source_snapshot={'kind': 'batch'}, summary={'shipped_quantity': 4},
                 creation_key=f'page-cost-{index}', request_hash='a'*64)
             CostEntry.objects.create(tenant=world['tenant'], created_by=actor, cost_version=version, shipment_line=line, quantity=4)
+    if with_domestic_expense:
+        from apps.supply_chain import domestic_expenses
+        line.shipment.refresh_from_db()
+        domestic_expenses.save(actor, line.shipment_id, {'expected_version': line.shipment.version, 'lines': [
+            {'name': 'query-bound expense', 'amount': '1', 'currency': 'CNY', 'payee_type': 'supplier',
+             'payee_id': world['supplier_b'].pk, 'include_in_cost': True, 'method': 'quantity'}]}, 'query-bound-expense')
     entries = list(CostEntry.objects.filter(cost_version__creation_key__startswith='page-cost-').select_related('cost_version__batch'))
     assert len({entry.cost_version.batch_id for entry in entries}) == 20
     with CaptureQueriesContext(connection) as queries:

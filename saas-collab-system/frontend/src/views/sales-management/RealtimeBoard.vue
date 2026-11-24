@@ -433,4 +433,16 @@ onBeforeUnmount(() => { alive = false; filterController?.abort(); ++generation; 
 .store-options { position: absolute; z-index: 20; width: 230px; max-height: 320px; overflow: auto; padding: 8px; background: #142136; border: 1px solid #344359; border-radius: 5px; }
 .store-options label { justify-content: flex-start; padding: 5px 0; cursor: pointer; }
 .store-options label input { min-width: auto; }
+.realtime-board .product-table{overflow-x:auto}
+.realtime-board .product-table table{table-layout:fixed;min-width:820px;width:100%}
+.realtime-board .product-table th:first-child{width:42%}
+.realtime-board .product-table td:first-child{display:table-cell;vertical-align:middle;overflow:hidden}
+.realtime-board .product-table td:first-child>button{display:block;width:100%;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.realtime-board .product-table .product-rank{display:inline-block;vertical-align:middle;margin-right:8px}
+.realtime-board .product-table .board-product-image{display:inline-block;vertical-align:middle;width:40px;height:40px;margin-right:8px}
+.realtime-board .product-table .board-image-empty{display:inline-block;vertical-align:middle;margin-right:8px}
+.realtime-board .product-table strong{display:block;max-width:100%;white-space:normal;overflow-wrap:anywhere;line-height:1.5}
+.realtime-board .product-table td,.realtime-board .product-table th{vertical-align:middle;padding:12px 8px;box-sizing:border-box}
+.realtime-board .product-table td:not(:first-child){white-space:normal;overflow-wrap:anywhere}
+.realtime-board .product-table .inventory-cell{min-width:0;max-width:none}
 </style>

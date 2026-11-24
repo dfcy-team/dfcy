@@ -1,9 +1,9 @@
 import { shallowMount, flushPromises } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const api = vi.hoisted(() => ({ createPaymentFlow:vi.fn(), fetchPaymentFlowDepartments:vi.fn(), fetchPaymentFlowReviewers:vi.fn(), fetchPaymentFlows:vi.fn(), updatePaymentFlowStatus:vi.fn() }));
+const api = vi.hoisted(() => ({ createPaymentFlow:vi.fn(), fetchPaymentFlowDepartments:vi.fn(), fetchPaymentFlowFinanceHandlers:vi.fn(), fetchPaymentFlowReviewers:vi.fn(), fetchPaymentFlows:vi.fn(), updatePaymentFlowStatus:vi.fn() }));
 vi.mock('../src/api/workflow', () => api);
 import PaymentFlowManagement from '../src/views/workflow/PaymentFlowManagement.vue';
-beforeEach(()=>{vi.resetAllMocks(); for(const key of ['fetchPaymentFlows','fetchPaymentFlowDepartments','fetchPaymentFlowReviewers'])api[key].mockResolvedValue({success:true,data:[]});});
+beforeEach(()=>{vi.resetAllMocks(); for(const key of ['fetchPaymentFlows','fetchPaymentFlowDepartments','fetchPaymentFlowReviewers','fetchPaymentFlowFinanceHandlers'])api[key].mockResolvedValue({success:true,data:[]});});
 const mountPage=()=>shallowMount(PaymentFlowManagement,{global:{directives:{loading:()=>{}}}});
 describe('payment flow API failures',()=>{
  it('preserves draft and displays server error when save resolves unsuccessful',async()=>{

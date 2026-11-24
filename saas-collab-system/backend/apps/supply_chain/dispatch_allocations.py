@@ -50,12 +50,18 @@ def reserve(actor, batch, shipments, quantities):
 
 
 def distribution(shipment, *, rows=None):
-    rows = rows if rows is not None else list(active().filter(shipment_line__shipment=shipment).select_related('membership__batch').order_by('pk'))
+    rows = rows if rows is not None else list(active().filter(shipment_line__shipment=shipment).select_related('membership__batch__freight_quote').order_by('pk'))
     groups = {}
     for row in rows:
         batch = row.membership.batch
+        quote_snapshot = batch.freight_quote_snapshot or {}
+        quote = getattr(batch, 'freight_quote', None)
+        billing_basis = quote_snapshot.get('billing_basis') or (quote.billing_basis if quote else '')
+        container_type = quote_snapshot.get('container_type') or (quote.container_type if quote else '')
         group = groups.setdefault(batch.pk, {'batch_id': batch.pk, 'batch_number': batch.number,
-            'stage': batch.stage, 'quantity': 0, 'lines': [],
+            'stage': batch.stage, 'billing_basis': billing_basis,
+            'container_type': container_type,
+            'freight_quote_snapshot': quote_snapshot, 'quantity': 0, 'lines': [],
             'logistics_dates': {f: getattr(batch, f) for f in ('departed_at', 'arrived_port_at', 'arrived_warehouse_at')}})
         group['quantity'] += row.quantity
         group['lines'].append({'shipment_line_id': row.shipment_line_id, 'quantity': row.quantity})

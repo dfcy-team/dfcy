@@ -17,6 +17,7 @@ from .permissions import internal_orders, VIEW, MANAGE
 from .worktool import WorkTool, TransportError, RateLimited
 
 MESSAGES = {'channel_not_verified': '尚未绑定或验证通知通道。', 'missing_binding': '请为此订单明确绑定供应商目标群。',
+    'source_changed': '采购单数量已变化，此通知快照已失效。',
     'binding_changed': '群绑定或发送账号已变化，请核对原目标，未发送时可刷新绑定。',
     'binding_not_verified': '请核实并启用供应商群绑定。', 'channel_disabled': '发送通道未启用。',
     'channel_not_qualified': '真实外部群验收尚未登记或配置已变化。',
@@ -73,6 +74,8 @@ def blocked(obj, reason, *, status='blocked'):
 def guard(obj, *, live=True):
     if obj.order.status != 'confirmed' or not obj.created_by.is_active:
         return 'source_unavailable'
+    if obj.order_version != obj.order.version:
+        return 'source_changed'
     if not obj.binding_id or not obj.target_snapshot:
         return 'missing_binding'
     binding = SupplierGroupBinding.objects.filter(pk=obj.binding_id, tenant=obj.tenant).select_related('channel').first()

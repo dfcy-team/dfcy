@@ -542,3 +542,47 @@ class WmsInboundDocument(InternalAPI):
     def get(self, request, pk):
         from .wms_documents import document_detail
         return Response({'data': document_detail(request.user, pk)})
+
+
+class WmsLinkInput(serializers.Serializer):
+    inbound_id = serializers.IntegerField(min_value=1)
+    expected_version = serializers.IntegerField(min_value=1)
+    preview_token = serializers.CharField()
+    reason = serializers.CharField(max_length=10000)
+
+
+class WmsUnlinkInput(serializers.Serializer):
+    expected_version = serializers.IntegerField(min_value=1)
+    reason = serializers.CharField(max_length=10000)
+
+
+class WmsDocumentCandidates(InternalAPI):
+    def get(self, request, pk):
+        from .wms_document_links import candidates
+        return Response({'data': candidates(request.user, pk, request.query_params.get('search', '').strip()[:160])})
+
+
+class WmsDocumentPreview(InternalAPI):
+    def get(self, request, pk):
+        from .wms_document_links import preview
+        value = request.query_params.get('inbound_id', '')
+        if not str(value).isdigit():
+            raise ValidationError('请选择入库单。')
+        return Response({'data': preview(request.user, pk, int(value))})
+
+
+class WmsDocumentLinks(InternalAPI):
+    def post(self, request, pk):
+        from .wms_document_links import link
+        return Response({'data': link(request.user, pk, validated(WmsLinkInput, request), key(request))})
+
+
+class WmsDocumentUnlink(InternalAPI):
+    def post(self, request, pk, link_id):
+        from .wms_document_links import deactivate
+        return Response({'data': deactivate(request.user, pk, link_id, validated(WmsUnlinkInput, request), key(request))})
+
+class InboundWmsDocuments(InternalAPI):
+    def get(self, request, pk):
+        from .wms_document_links import inbound_documents
+        return Response({'data': inbound_documents(request.user, pk)})

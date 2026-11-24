@@ -68,7 +68,18 @@ def target_for(actor, kind, pk, permission=VIEW):
     raise NotFound('费用单据类型不存在。')
 
 
+def payment_owner_fields(kind, obj):
+    if kind == 'domestic_expense':
+        return {'shipment': obj.shipment, 'domestic_expense_group': obj}
+    if kind == 'domestic_freight':
+        return {'shipment': obj, 'domestic_expense_group__isnull': True}
+    return {'purchase_order' if kind == 'purchase' else kind: obj}
+
+
 def _payee_owner(kind, obj):
+    if kind == 'domestic_expense':
+        return {'supplier_id': obj.supplier_id} if obj.supplier_id else {'freight_company_id': obj.carrier_id}
+
     if kind == 'domestic_freight':
         party_kind, party = domestic_freight.payable_party(obj)
         if party_kind == 'supplier':
@@ -98,8 +109,8 @@ def _payee_owner(kind, obj):
 
 
 def _payee_context(actor, kind, pk, permission=VIEW):
-    if kind == 'purchase':
-        obj = _payment_owner(actor, 'purchase', pk, permission)
+    if kind in ('purchase', 'domestic_expense'):
+        obj = _payment_owner(actor, kind, pk, permission)
     elif kind in ('shipment', 'batch', 'inbound', 'domestic_freight'):
         obj = target_for(actor, 'shipment' if kind == 'domestic_freight' else kind, pk, permission)
     elif kind == 'supplier':
@@ -364,6 +375,7 @@ def prepare_target_financials(kind, rows):
     listed_tax = {}
     payable_tax_details = {}
     if kind == 'shipment':
+        prepare_receipt_adjustments(rows)
         taxes = dict(PurchaseContract.objects.filter(tenant_id=rows[0].tenant_id, shipment_id__in=ids,
             status='issued').values_list('shipment_id', 'settlement_tax_amount'))
         confirmed_taxes = dict(ShipmentPayableTax.objects.filter(
@@ -396,6 +408,11 @@ def prepare_target_financials(kind, rows):
     for row in rows:
         oid = row.pk
         d = due.get(oid)
+        if kind == 'shipment' and d is not None:
+            if d < ZERO:
+                raise ValidationError('发货单优惠合计超过原应付金额。')
+            from .receipt_differences import payable_delta
+            d = max(d - shipment_receipt_adjustment(row)[0] + payable_delta(row), ZERO)
         opening_amount = opening.get(oid, ZERO)
         paid = opening_amount + payments.get(oid, ZERO)
         use = applied.get(oid, ZERO)
@@ -716,6 +733,11 @@ def inputs(kind, obj, *, data=None):
     shipment_ids = {line.shipment_id for line in lines}
     contract_taxes = contract_cost_allocations(shipment_ids) if data is None else [row for row in data['taxes'] if row['shipment_id'] in shipment_ids]
     if contract_taxes: source['contract_cost_taxes'] = contract_taxes
+    from .domestic_expense_costs import snapshots
+    expense_groups = (snapshots(obj.tenant_id, shipment_ids) if data is None or 'expense_groups' not in data
+        else [row for row in data['expense_groups'] if row['shipment_id'] in shipment_ids])
+    if expense_groups:
+        source['domestic_expense_groups'] = expense_groups
     if 'supplier_borne_shipments' in source:
         source['supplier_borne_shipments'].sort()
     source['fees'].sort(key=lambda row: (row['kind'], row['id']))
@@ -822,7 +844,18 @@ def calculate(actor, kind, pk, payload, key, *, force_estimated=False, automatic
         return fee_amounts(owner_kind, owner, revision, issues)
     goods_taxes = {row['shipment_line_id']: Decimal(row['amount']) for contract in source.get('contract_cost_taxes', []) for row in contract['allocations']}
     for shipment in {line.shipment_id: line.shipment for line in lines}.values():
-        collection.update(read_fee('shipment', shipment, revisions[('shipment', shipment.pk)]))
+        legacy = revisions[('shipment', shipment.pk)]
+        groups = source.get('domestic_expense_groups', [])
+        has_expenses = any(group['shipment_id'] == shipment.pk for group in groups)
+        original = (read_fee('shipment', shipment, legacy) if legacy or not has_expenses
+                    else {line.pk: ZERO for line in source_lines('shipment', shipment)})
+        from .domestic_expense_costs import amounts
+        extra = amounts(shipment, groups, issues) if has_expenses else {}
+        collection.update({
+            line_id: None if amount is None or extra.get(line_id, ZERO) is None
+            else amount + extra.get(line_id, ZERO)
+            for line_id, amount in original.items()
+        })
     batch_qty = dispatch_allocations.batch_quantities(obj) if kind == 'batch' else {}
     if kind == 'batch':
         # Cumulative rounding assigns each source fee exactly once, including the unallocated remainder.
@@ -993,7 +1026,73 @@ def record_shipment_discount_adjustment(actor, pk, payload, request_key):
     return row
 
 
+def prepare_receipt_adjustments(shipments):
+    if not shipments:
+        return
+    from .models import InboundLine
+    from django.db.models import Exists, OuterRef
+    lines = list(ShipmentLine.objects.filter(tenant_id=shipments[0].tenant_id,
+        shipment_id__in=[obj.pk for obj in shipments], is_active=True))
+    valid = dispatch_allocations.active().filter(shipment_line_id=OuterRef('shipment_line_id'),
+        membership__batch_id=OuterRef('inbound__batch_id'))
+    receipts = list(InboundLine.objects.filter(tenant_id=shipments[0].tenant_id,
+        shipment_line_id__in=[line.pk for line in lines], inbound__status='confirmed',
+        inbound__batch__status='active', received_quantity__isnull=False).filter(Exists(valid)))
+    for obj in shipments:
+        obj._receipt_lines = [line for line in lines if line.shipment_id == obj.pk]
+        ids = {line.pk for line in obj._receipt_lines}
+        obj._receipt_rows = [row for row in receipts if row.shipment_line_id in ids]
+        obj.__dict__.pop('_receipt_adjustment', None)
+        obj._receipt_adjustment = shipment_receipt_adjustment(obj)
+        del obj._receipt_lines, obj._receipt_rows
+
+
+def shipment_receipt_adjustment(obj):
+    """Confirmed allocated receipts only; never infer shortage from unreceived stock.
+
+    Final-shortage terminations describe outstanding stock, not another deduction
+    from receipts. They remain operational until a payable decision is recorded.
+    """
+    cached = getattr(obj, "_receipt_adjustment", None)
+    if cached is not None:
+        return cached
+    lines = getattr(obj, "_receipt_lines", None)
+    if lines is None:
+        lines = list(obj.lines.filter(is_active=True))
+    totals = {}
+    from .models import InboundLine
+    from django.db.models import Exists, OuterRef
+    valid = dispatch_allocations.active().filter(shipment_line_id=OuterRef('shipment_line_id'),
+        membership__batch_id=OuterRef('inbound__batch_id'))
+    receipt_rows = getattr(obj, "_receipt_rows", None)
+    if receipt_rows is None:
+        receipt_rows = InboundLine.objects.filter(tenant_id=obj.tenant_id,
+            shipment_line_id__in=[line.pk for line in lines],
+            inbound__status='confirmed', inbound__batch__status='active',
+            received_quantity__isnull=False).filter(Exists(valid))
+    for row in receipt_rows:
+        expected, received = totals.get(row.shipment_line_id, (0, 0))
+        totals[row.shipment_line_id] = (expected + row.expected_quantity,
+                                         received + row.received_quantity)
+    details = []
+    for line in lines:
+        expected, received = totals.get(line.pk, (0, 0))
+        # Cap cumulative confirmed expectation at the source quantity before
+        # subtracting actual receipts. Per-receipt overages can offset later
+        # expected receipts, so capping the net difference is incorrect.
+        shortage = max(min(expected, line.quantity) - received, 0)
+        if shortage and line.unit_price is not None:
+            details.append({'shipment_line_id': line.pk, 'sku': line.sku_code_snapshot,
+                'expected_quantity': expected, 'received_quantity': received,
+                'shortage_quantity': shortage,
+                'amount': text_number(money(line.unit_price * shortage))})
+    return sum((Decimal(row['amount']) for row in details), ZERO), details
+
+
 def settlement_amount(kind, obj):
+    if kind == 'domestic_expense':
+        return obj.amount if obj.is_active and obj.shipment.status == 'submitted' else None
+
     if kind == 'domestic_freight':
         if domestic_freight.settlement_mode(obj) == domestic_freight.SUPPLIER_BORNE:
             return ZERO
@@ -1012,7 +1111,8 @@ def settlement_amount(kind, obj):
             due = gross - shipment_discount_total(obj)
             if due < ZERO:
                 raise ValidationError('发货单优惠合计超过原应付金额。')
-            return due
+            from .receipt_differences import payable_delta
+            return max(due - shipment_receipt_adjustment(obj)[0] + payable_delta(obj), ZERO)
     if kind == 'batch':
         record = fee_record(kind, obj)
         revision = record.current_revision if record else None
@@ -1138,6 +1238,15 @@ def save_settlement(actor, kind, pk, payload, key):
 
 
 def _payment_owner(actor, kind, pk, permission=VIEW):
+    if kind == 'domestic_expense':
+        from .domestic_expense_models import DomesticExpenseGroup
+        group = DomesticExpenseGroup.objects.filter(tenant_id=actor.tenant_id, pk=pk, is_active=True).select_related('shipment__order', 'supplier', 'carrier').first()
+        if group is None:
+            raise NotFound('国内运输费用不存在。')
+        from . import shipments
+        shipments.shipment_for(actor, group.shipment_id, permission)
+        return group
+
     if kind == 'purchase':
         rows = internal_orders(actor, PurchaseOrder.objects.all(), permission)
         obj = rows.filter(pk=pk).first()
@@ -1151,6 +1260,8 @@ def _payment_owner(actor, kind, pk, permission=VIEW):
 
 
 def _payment_currency_codes(actor,kind,obj):
+    if kind == 'domestic_expense':
+        return {obj.currency}
     from .cost_models import PaymentPlanRecord, PayableClassificationRecord
     from .payment_plans import _source_currency
     codes=[]
@@ -1204,11 +1315,11 @@ def payment_summary(actor, kind, pk):
         opening = ZERO
     else:
         due = settlement_amount(kind, obj)
-        related = {'shipment': obj} if kind == 'domestic_freight' else {kind: obj}
+        related = payment_owner_fields(kind, obj)
         legacy = (SettlementRecord.objects.filter(tenant_id=actor.tenant_id, **{kind: obj}).select_related('current_revision').first()
             if kind in ('shipment', 'batch') else None)
         opening = legacy.current_revision.recorded_amount if legacy and legacy.current_revision else ZERO
-    purpose = 'domestic_freight' if kind == 'domestic_freight' else 'goods'
+    purpose = 'domestic_freight' if kind in ('domestic_freight', 'domestic_expense') else 'goods'
     entries = list(PaymentRecord.objects.filter(tenant_id=actor.tenant_id, **related, purpose=purpose).select_related('payee_account', 'supplier_deposit_transfer').prefetch_related('reversal').order_by('date', 'id'))
     effective_entries = [row for row in entries if row.reverses_id is None and not row.reversal.all()]
     paid = opening + sum((row.amount for row in effective_entries), ZERO)
@@ -1243,9 +1354,16 @@ def payment_summary(actor, kind, pk):
         # A source PO can only fund its own shipment goods. Additional unlinked
         # lines are assigned to the primary anchor by source_order_ids().
         source_caps = {}
+        shortage_by_line = {row['shipment_line_id']: Decimal(row['amount']) for row in shipment_receipt_adjustment(obj)[1]}
         for line in obj.lines.filter(is_active=True).select_related('purchase_line'):
             source_id = line.purchase_line.order_id if line.purchase_line_id else obj.order_id
-            source_caps[source_id] = source_caps.get(source_id, ZERO) + (line.quantity * line.unit_price if line.unit_price is not None else ZERO)
+            source_caps[source_id] = source_caps.get(source_id, ZERO) + (line.quantity * line.unit_price if line.unit_price is not None else ZERO) - shortage_by_line.get(line.pk, ZERO)
+        from .models import ReceiptDifferenceDecision
+        source_map = {line.pk: (line.purchase_line.order_id if line.purchase_line_id else obj.order_id)
+                      for line in obj.lines.filter(is_active=True).select_related('purchase_line')}
+        for decision in ReceiptDifferenceDecision.objects.filter(tenant_id=obj.tenant_id, shipment=obj):
+            source_id = source_map.get(decision.source_snapshot.get('shipment_line_id'), obj.order_id)
+            source_caps[source_id] = source_caps.get(source_id, ZERO) + decision.payable_delta
         source_caps = _allocate_source_tax(source_caps, contract_payable_tax(obj))
         cross_allocations = dict(BusinessEvent.objects.filter(tenant_id=actor.tenant_id,
             aggregate_type='paymentapplication', action='prepayment_applied',
@@ -1282,9 +1400,15 @@ def payment_summary(actor, kind, pk):
         if snapshot.get('account_number'):
             snapshot['account_number'] = _mask_account_number(snapshot['account_number'])
         return snapshot
+    from .payment_fx import effective_snapshot
+    def payment_fx_fields(row):
+        rate, cny = effective_snapshot((row.account_snapshot or {}).get('currency'), row.amount, row.exchange_rate, row.cny_amount)
+        return {'exchange_rate': str(rate) if rate is not None else None,
+            'cny_amount': str(cny) if cny is not None else None}
     rendered_entries = [{'id': row.pk, 'entry_type': 'payment', 'amount': text_number(row.amount), 'date': row.date,
         'recorded_at': row.created_at, 'reference_number': row.reference_number, 'notes': row.notes, 'account_snapshot': row.account_snapshot,
         'currency': (row.account_snapshot or {}).get('currency') or None,
+        **payment_fx_fields(row),
         'fee_item_id': row.fee_item_id, 'item_snapshot': row.item_snapshot,
         'attachments': vouchers.get(row.pk, []), 'reversed': bool(row.reverses_id or row.reversal.all()),
         'is_reversal': bool(row.reverses_id), 'reversal_reason': row.reversal_reason,
@@ -1429,10 +1553,21 @@ def payment_summary(actor, kind, pk):
         }
     discount_adjustments = shipment_discount_data(obj) if kind == 'shipment' else []
     discount_amount = shipment_discount_total(obj) if kind == 'shipment' else ZERO
+    receipt_summary = {}
+    if kind == 'shipment':
+        shortage_amount, shortage_details = shipment_receipt_adjustment(obj)
+        receipt_summary = {
+            'shipped_goods_amount': text_number(sum((money(line.unit_price * line.quantity)
+                for line in obj.lines.filter(is_active=True) if line.unit_price is not None), ZERO)),
+            'inbound_shortage_amount': text_number(shortage_amount),
+            'inbound_shortage_details': shortage_details,
+            'cash_paid_amount': text_number(paid - opening),
+            'historical_difference_settled_amount': text_number(opening if legacy and legacy.current_revision and (legacy.current_revision.notes or '').startswith('HIST-PH-COUNT-20261106') else ZERO),
+        }
     return {'target': {'kind': kind, 'id': obj.pk, 'number': obj.number, 'source_links': source_links(kind, obj)},
         'process_basis': '按登记顺序展示；逐笔余额按当前应付金额重算，不代表历史时点应付。历史累计仅作期初，不能还原历史逐笔转账。',
         'currency': source_payment_currency(actor,kind,obj),
-        'summary': {'due_amount': text_number(due), 'confirmed_payable_tax': confirmed_tax, 'corporate_payment': corporate_payment, 'discount_amount': text_number(discount_amount), 'contract_tax_amount': text_number(contract.settlement_tax_amount if contract else ZERO), 'contract_cost_tax_amount': text_number(contract.cost_tax_amount if contract else ZERO), 'opening_amount': text_number(opening),
+        'summary': {**receipt_summary, 'due_amount': text_number(due), 'confirmed_payable_tax': confirmed_tax, 'corporate_payment': corporate_payment, 'discount_amount': text_number(discount_amount), 'contract_tax_amount': text_number(contract.settlement_tax_amount if contract else ZERO), 'contract_cost_tax_amount': text_number(contract.cost_tax_amount if contract else ZERO), 'opening_amount': text_number(opening),
             'paid_amount': text_number(paid), 'applied_amount': text_number(applied),
             'remaining_amount': None if due is None else text_number(max(due-paid-(applied if kind != 'purchase' else ZERO), ZERO)),
             'available_prepayment': text_number(available)},
@@ -1449,7 +1584,7 @@ def create_payment(actor, kind, pk, payload, request_key, *, verified_request=No
     obj = _payment_owner(actor, kind, pk, MANAGE)
     if kind == 'purchase' and obj.status != 'confirmed':
         raise ValidationError('采购单须先确认，才能登记定金。')
-    related = {'purchase_order': obj} if kind == 'purchase' else {'shipment': obj} if kind == 'domestic_freight' else {kind: obj}
+    related = payment_owner_fields(kind, obj)
     digest_payload = {**payload, 'kind': kind, 'owner_id': obj.pk}
     event = BusinessEvent.objects.filter(tenant_id=actor.tenant_id, aggregate_type='paymentrecord',
         action='payment_created', request_key=services._key(request_key)).first()
@@ -1504,6 +1639,15 @@ def create_payment(actor, kind, pk, payload, request_key, *, verified_request=No
     if stored_currency and payload.get('currency') != stored_currency:
         raise ValidationError({'currency':'付款币种与已批准申请或批次不一致。'})
     currency=validate_payment_currency(actor,kind,obj,payload.get('currency') or stored_currency)
+    fx_source = verified_request or (verified_batch.lines.filter(tenant_id=actor.tenant_id,kind=kind,source_id=obj.pk,amount=amount,payee_account_id=payload['payee_account_id'],fee_item_id=payload.get('fee_item_id'),payment__isnull=True).first() if verified_batch is not None else None)
+    fx_rate = fx_source.exchange_rate if fx_source is not None else payload.get('exchange_rate')
+    if fx_source is not None and payload.get('exchange_rate') is not None and payload['exchange_rate'] != fx_source.exchange_rate:
+        raise ValidationError({'exchange_rate':'汇率与已批准申请或批次明细不一致。'})
+    from .payment_fx import snapshot as fx_snapshot, effective_snapshot
+    exchange_rate, cny_amount = fx_snapshot(currency, amount, fx_rate)
+    source_rate, source_cny = effective_snapshot(fx_source.currency, fx_source.amount, fx_source.exchange_rate, fx_source.cny_amount) if fx_source is not None else (None, None)
+    if fx_source is not None and (source_rate, source_cny) != (exchange_rate, cny_amount):
+        raise ValidationError({'exchange_rate':'人民币折算金额与已批准申请或批次明细不一致。'})
     active_requests = SupplyPaymentRequest.objects.filter(tenant_id=actor.tenant_id,
         kind=kind, source_id=obj.pk, status='submitted', payment__isnull=True).exclude(
         approval__status__in=['rejected', 'withdrawn']).exclude(
@@ -1542,7 +1686,7 @@ def create_payment(actor, kind, pk, payload, request_key, *, verified_request=No
     with domain_write():
         account_snapshot=_payee_data(account)
         if currency: account_snapshot['currency']=currency
-        row = PaymentRecord.objects.create(tenant=actor.tenant, created_by=actor, **related, purpose='domestic_freight' if kind == 'domestic_freight' else 'goods', amount=amount,
+        row = PaymentRecord.objects.create(tenant=actor.tenant, created_by=actor, **{k:v for k,v in related.items() if '__' not in k}, purpose='domestic_freight' if kind in ('domestic_freight', 'domestic_expense') else 'goods', amount=amount, exchange_rate=exchange_rate, cny_amount=cny_amount,
             date=services._date(payload['date']), reference_number=payload.get('reference_number') or f'PAY-{kind}-{obj.pk}-{services._key(request_key)[:12]}',
             notes=payload.get('notes', ''), payee_account=account, account_snapshot=account_snapshot, fee_item=fee_item, item_snapshot=item_snapshot,
             idempotency_key=services._key(request_key))
@@ -1621,9 +1765,9 @@ def reverse_payment(actor, kind, pk, payment_id, payload, request_key, *, allow_
     services._internal(actor)
     services._tenant_lock(actor)
     obj = _payment_owner(actor, kind, pk, MANAGE)
-    owner_filter = {'purchase_order': obj} if kind == 'purchase' else {'shipment': obj} if kind == 'domestic_freight' else {kind: obj}
+    owner_filter = payment_owner_fields(kind, obj)
     row = PaymentRecord.objects.select_for_update().filter(tenant_id=actor.tenant_id, pk=payment_id, **owner_filter,
-        purpose='domestic_freight' if kind == 'domestic_freight' else 'goods').first()
+        purpose='domestic_freight' if kind in ('domestic_freight', 'domestic_expense') else 'goods').first()
     if row is None:
         raise NotFound('付款记录不存在或无权访问。')
     if hasattr(row, 'supplier_deposit_transfer'):
@@ -1644,8 +1788,8 @@ def reverse_payment(actor, kind, pk, payment_id, payload, request_key, *, allow_
     if payload['expected_version'] != state['version']:
         raise ValidationError('付款记录已变化，请重新加载。')
     with domain_write():
-        reversal = PaymentRecord.objects.create(tenant=actor.tenant, created_by=actor, **owner_filter, purpose=row.purpose,
-            amount=row.amount, date=services._date(payload['date']) if payload.get('date') else row.date,
+        reversal = PaymentRecord.objects.create(tenant=actor.tenant, created_by=actor, **{k:v for k,v in owner_filter.items() if '__' not in k}, purpose=row.purpose,
+            amount=row.amount, exchange_rate=row.exchange_rate, cny_amount=row.cny_amount, date=services._date(payload['date']) if payload.get('date') else row.date,
             reference_number=f'REV-{row.pk}', notes=payload['reason'], payee_account=row.payee_account,
             account_snapshot=row.account_snapshot, fee_item=row.fee_item, item_snapshot=row.item_snapshot,
             idempotency_key=services._key(request_key), reverses=row, reversal_reason=payload['reason'])

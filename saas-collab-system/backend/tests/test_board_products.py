@@ -35,6 +35,12 @@ def test_product_rankings_use_safe_store_keys_system_ids_category_and_valid_sale
             internal_sku=sku, internal_spu=None, platform_product_id="same-product",
             platform_variant_id=variant,
         )
+    virtual_sku = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code="SKU-VIRTUAL",
+        product_name="Virtual ranking noise", inventory_type="virtual")
+    virtual_order = _order(tenant, platform, store, run, "virtual-noise", amount="500")
+    SalesOrderItem.objects.filter(sales_order=virtual_order).update(
+        internal_sku=virtual_sku, internal_spu=None, platform_product_id="virtual-noise",
+        platform_variant_id="virtual")
     PlatformProductDetail.objects.create(tenant=tenant, platform=platform, store=store,
         platform_product_id="same-product", platform_variant_id="red", platform_image_url="https://img.test/red.jpg")
     PlatformProductDetail.objects.create(tenant=tenant, platform=platform, store=store,

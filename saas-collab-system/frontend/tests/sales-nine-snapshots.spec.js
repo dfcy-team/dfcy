@@ -31,9 +31,11 @@ describe('销售09:00快照', () => {
   it('does not query until opened, then carries the applied platform, store, and region', async () => {
     wrapper = mount(SalesOperations); await flushPromises();
     expect(fetchSalesNineSnapshots).not.toHaveBeenCalled();
-    await wrapper.findAll('.filters select')[0].setValue('shopee');
-    await wrapper.findAll('.filters select')[1].setValue('PH');
-    wrapper.getComponent({ name: 'ElSelect' }).vm.$emit('update:modelValue', ['14']);
+    wrapper.findAllComponents({ name: 'ElSelect' })[0].vm.$emit('update:modelValue', 'shopee');
+    await wrapper.vm.$nextTick();
+    wrapper.findAllComponents({ name: 'ElSelect' })[1].vm.$emit('update:modelValue', 'PH');
+    await wrapper.vm.$nextTick();
+    wrapper.findAllComponents({ name: 'ElSelect' })[2].vm.$emit('update:modelValue', ['14']);
     await wrapper.vm.$nextTick();
     await wrapper.find('.filters').trigger('submit'); await flushPromises();
     expect(fetchSalesNineSnapshots).not.toHaveBeenCalled();

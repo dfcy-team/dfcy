@@ -6,6 +6,10 @@ from apps.tenants.models import Tenant
 
 
 class PaymentApprovalFlow(models.Model):
+    finance_handler = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+        related_name="payment_flow_finance_handlings", null=True, blank=True,
+    )
     """Immutable published rule version for the first single reviewer payment flow."""
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="payment_approval_flows")
     flow_key = models.CharField(max_length=64)
@@ -33,7 +37,7 @@ class PaymentApprovalFlow(models.Model):
             old = type(self).objects.get(pk=self.pk)
             if not self.published:
                 raise ValidationError("Published payment flow versions cannot be unpublished.")
-            immutable = ("tenant_id", "flow_key", "version", "payment_kind", "nature", "department_key", "payment_kinds", "natures", "department_keys", "notify_feishu", "minimum_amount", "maximum_amount", "reviewer_id")
+            immutable = ("tenant_id", "flow_key", "version", "payment_kind", "nature", "department_key", "payment_kinds", "natures", "department_keys", "notify_feishu", "minimum_amount", "maximum_amount", "reviewer_id", "finance_handler_id")
             if any(getattr(old, field) != getattr(self, field) for field in immutable):
                 raise ValidationError("Published payment flow versions are immutable.")
         super().save(*args, **kwargs)

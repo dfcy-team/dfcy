@@ -41,8 +41,9 @@ def test_dashboard_allocation_stages_and_current_settlement_only(world):
     assert response.status_code == 200, response.data
     groups=response.data['data']['groups']
     assert Decimal(groups['supplier']['recorded']) == 7
-    assert Decimal(groups['supplier']['amount']) == 20
-    assert Decimal(groups['supplier']['unsettled']) == 13
+    # The confirmed shortage deducts one unit at 2.5 from the shipped 20.
+    assert Decimal(groups['supplier']['amount']) == Decimal('17.5')
+    assert Decimal(groups['supplier']['unsettled']) == Decimal('10.5')
     assert Decimal(groups['carrier']['amount']) == 30
     queue=api.get(BASE+'dashboard/queue/?queue=supplier&limit=1')
     assert queue.status_code==200,queue.data

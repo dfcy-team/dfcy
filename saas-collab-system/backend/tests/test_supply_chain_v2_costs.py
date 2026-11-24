@@ -218,7 +218,8 @@ def test_late_price_revision_delta_and_settlement_difference_without_quantity_or
     assert write(api, f'supplier-shipments/{shipment.pk}/prices/', price, 'no-cause', 'patch').status_code == 422
     assert write(api, f'supplier-shipments/{shipment.pk}/prices/', {**price, 'reason': '供应商结算后价差'}, 'late-price', 'patch').status_code == 200
     assert get(api, 'batch', batch)['latest_cost']['status'] == 'recalculation_required'
-    assert get(api, 'shipment', shipment)['settlement']['adjustment_due'] == '4.0000'
+    # Revised payable 20.5 minus the saved payable 17.5; the shortage is repriced too.
+    assert get(api, 'shipment', shipment)['settlement']['adjustment_due'] == '3.0000'
     revised, _ = calculate(api, 'batch', batch)
     assert revised['status'] == 'confirmed' and revised['summary']['received_total'] == '59.0000'
     assert revised['summary']['pending_total'] == '8.0000'

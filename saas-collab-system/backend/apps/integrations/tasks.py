@@ -11,7 +11,10 @@ from .sync_task_limits import VIDEO_HARD_TIME_LIMIT_SECONDS, VIDEO_SOFT_TIME_LIM
 @shared_task(soft_time_limit=540, time_limit=600)
 def dispatch_feishu_deliveries():
     from .feishu_delivery import dispatch_feishu
-    return dispatch_feishu()
+    from .feishu_native_approval import dispatch_native_approvals
+    native = dispatch_native_approvals()
+    result = dispatch_feishu()
+    return {"notifications": result, "native_approvals": native}
 @shared_task(soft_time_limit=540, time_limit=600)
 def refresh_due_integration_credentials():
     from .automatic_refresh import refresh_due_authorizations
@@ -248,3 +251,15 @@ def refresh_affiliate_ingestion_day(sync_run_id, business_day, generation=None):
         locked.masked_log = log
         locked.save(update_fields=["masked_log"])
     return {"status": "completed", "snapshot_count": len(ids)}
+
+
+@shared_task(soft_time_limit=120, time_limit=150)
+def submit_feishu_native_approval(instance_id):
+    from .feishu_native_approval import submit_instance
+    return submit_instance(instance_id)
+
+
+@shared_task(soft_time_limit=120, time_limit=150)
+def process_feishu_native_event(event_pk):
+    from .feishu_native_approval import process_native_event
+    return process_native_event(event_pk)
