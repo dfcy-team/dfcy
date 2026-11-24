@@ -25,7 +25,7 @@
         <el-select v-model="filters.status" multiple collapse-tags collapse-tags-tooltip clearable placeholder="全部状态" @change="applyFilters">
           <el-option v-for="(label, value) in FULFILLMENT_FILTER_STATUS_LABELS" :key="value" :label="label" :value="value" />
         </el-select>
-        <el-select v-model="filters.owner" clearable filterable placeholder="全部送样负责人" @change="applyFilters">
+        <el-select v-model="filters.owner" multiple collapse-tags collapse-tags-tooltip clearable filterable placeholder="全部送样负责人" @change="applyFilters">
           <el-option v-for="owner in ownerOptions" :key="owner.id" :label="owner.full_name || owner.username" :value="owner.id" />
         </el-select>
         <el-date-picker v-model="filters.createdDateFrom" type="date" value-format="YYYY-MM-DD" placeholder="创建日期起" aria-label="创建日期起" />
@@ -47,11 +47,13 @@
         <el-button @click="resetFilters">重置</el-button>
         <el-button type="primary" :disabled="!canManage" @click="openCreate">新增送样</el-button>
         <el-button v-if="canManage" @click="openImport">导入送样</el-button>
+        <el-button v-if="canManage" :disabled="loading || !selectedSamples.length" :loading="batchCompleting" @click="completeSelectedSamples">批量标记已完成{{ selectedSamples.length ? `（${selectedSamples.length}）` : '' }}</el-button>
         </div>
       </div>
 
       <p class="field-hint">时间均为北京时间（UTC+8）。</p>
-      <el-table v-loading="loading" :data="rows" empty-text="暂无送样履约" @row-click="openDetail">
+      <el-table ref="sampleTable" v-loading="loading" :data="rows" row-key="id" empty-text="暂无送样履约" @row-click="openDetail" @selection-change="selectedSamples = $event">
+        <el-table-column v-if="canManage" type="selection" width="44" :selectable="canCompleteSample" />
         <el-table-column label="送样 / 建联编号" min-width="175">
           <template #default="{ row }">
             <b>{{ displayValue(row.fulfillment_no) }}</b>
@@ -361,7 +363,12 @@ const detailSample = ref(null);
 const editingSample = ref(null);
 const inheritedTask = ref(null);
 const draftKey = ref('');
-const filters = reactive({ search: '', status: [], store: [], owner: null, createdDateFrom: '', createdDateTo: '', includeDeleted: false, ordering: '-created_at' });
+const filters = reactive({ search: '', status: [], store: [], owner: [], createdDateFrom: '', createdDateTo: '', includeDeleted: false, ordering: '-created_at' });
+const sampleTable = ref(null);
+const selectedSamples = ref([]);
+const batchCompleting = ref(false);
+const canCompleteSample = row => !row.is_deleted && row.version > 0 &&
+  ['pending', 'processing', 'shipped', 'delivered', 'published', 'live_creator', 'overdue'].includes(row.status);
 const expandedSkuRows = reactive({});
 const form = reactive({ fulfillment_no: '', type_no: '', outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', sample_sent_at: '', notes: '', link_type: 'YYJL', quick_tags: [] });
 const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '已完成']);
@@ -613,7 +620,10 @@ let listRequest = 0;
 async function load() {
   const request = ++listRequest;
   loading.value = true;
-  const params = { page: page.value, page_size: pageSize.value, search: filters.search, owner: filters.owner, ordering: filters.ordering };
+  sampleTable.value?.clearSelection?.();
+  selectedSamples.value = [];
+  const params = { page: page.value, page_size: pageSize.value, search: filters.search, ordering: filters.ordering };
+  if (filters.owner.length) params.owner = filters.owner.join(',');
   if (filters.status.length) params.status = filters.status.join(',');
   if (filters.store.length) params.store = filters.store.join(',');
   if (filters.createdDateFrom) params.created_date_from = filters.createdDateFrom;
@@ -630,6 +640,36 @@ async function load() {
   }
 }
 
+async function completeSelectedSamples() {
+  if (!canManage.value || loading.value || batchCompleting.value) return;
+  const selectedIds = new Set(selectedSamples.value.map(row => row.id));
+  const targets = rows.value.filter(row => selectedIds.has(row.id) && canCompleteSample(row));
+  if (!targets.length) return;
+  batchCompleting.value = true;
+  try {
+    try {
+      await ElMessageBox.confirm(`将本页勾选的 ${targets.length} 条送样标记为已完成？完成后不可撤销。`, '确认批量完成', { type: 'warning' });
+    } catch { return; }
+    const failed = [];
+    for (const target of targets) {
+      try {
+        const response = await updateSampleFulfillment(target.id, { status: 'completed', confirm_terminal: true }, target.version);
+        if (response.success) continue;
+      } catch { /* Refresh before retrying any unconfirmed record. */ }
+      failed.push(target.fulfillment_no || target.id);
+    }
+    page.value = 1;
+    await load();
+    if (failed.length) {
+      await ElMessageBox.alert(`已确认完成 ${targets.length - failed.length} 条，${failed.length} 条未确认完成。请核对状态再重试：${failed.join('、')}`, '批量完成结果', { type: 'warning' });
+    } else {
+      ElMessage.success(`已完成 ${targets.length} 条送样`);
+    }
+  } finally {
+    batchCompleting.value = false;
+  }
+}
+
 function applyFilters() {
   page.value = 1;
   load();
@@ -642,7 +682,7 @@ function openImport() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', status: [], store: [], owner: null, createdDateFrom: '', createdDateTo: '', includeDeleted: false, ordering: '-created_at' });
+  Object.assign(filters, { search: '', status: [], store: [], owner: [], createdDateFrom: '', createdDateTo: '', includeDeleted: false, ordering: '-created_at' });
   applyFilters();
 }
 

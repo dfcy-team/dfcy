@@ -63,6 +63,42 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('completes only selected, eligible rows on the current page', async () => {
+    const fallback = request.getMockImplementation();
+    const overdue = { ...sample, id: 24, status: 'overdue', version: 6 };
+    const cancelled = { ...sample, id: 25, status: 'cancelled' };
+    request.mockImplementation(config => config.url.endsWith('/sample-fulfillments/')
+      ? Promise.resolve({ success: true, data: { count: 3, results: [sample, overdue, cancelled] } })
+      : fallback(config));
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    wrapper.vm.selectedSamples = [sample, overdue, cancelled, { ...sample, id: 90 }];
+    await wrapper.vm.completeSelectedSamples();
+    expect(writes().map(config => [config.url.split('/').at(-2), config.headers['If-Match']])).toEqual([['23', '"5"'], ['24', '"6"']]);
+    expect(writes().every(config => config.data.status === 'completed' && config.data.confirm_terminal)).toBe(true);
+    wrapper.unmount();
+  });
+  it('sends selected sample owners together and clears them on reset', async () => {
+    const fallback = request.getMockImplementation();
+    request.mockImplementation(config => config.url.endsWith('/sample-fulfillment-options/')
+      ? Promise.resolve({ success: true, data: { stores: [], owners: [{ id: 9, username: 'A' }, { id: 10, username: 'B' }] } })
+      : fallback(config));
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    const latest = () => request.mock.calls.map(([config]) => config)
+      .findLast(config => config.url.endsWith('/sample-fulfillments/')).params;
+    const filter = wrapper.get('select[placeholder="全部送样负责人"]');
+    await filter.setValue(['9']);
+    await flushPromises();
+    expect(latest().owner).toBe('9');
+    await filter.setValue(['9', '10']);
+    await flushPromises();
+    expect(latest()).toMatchObject({ owner: '9,10', page: 1 });
+    await wrapper.findAll('.toolbar button').find(button => button.text() === '重置').trigger('click');
+    await flushPromises();
+    expect(latest()).not.toHaveProperty('owner');
+    wrapper.unmount();
+  });
   it('offers blacklist filtering and links the status-only action to the archive', async () => {
     const wrapper = render(SampleFulfillmentList);
     await flushPromises();
