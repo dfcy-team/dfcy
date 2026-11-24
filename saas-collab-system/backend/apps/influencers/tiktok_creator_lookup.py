@@ -58,17 +58,17 @@ def available_tiktok_lookup_stores(actor):
     return stores
 
 
-def lookup_tiktok_creator(*, actor, influencer_id, store_id, commit_receipt=None):
+def lookup_tiktok_creator(*, actor, influencer_id, store_id, commit_receipt=None, search_handle=False):
     influencer = Influencer.objects.filter(tenant_id=actor.tenant_id, pk=influencer_id, is_deleted=False).first()
     if influencer is None or str(influencer.platform).lower() != "tiktok":
         raise ValidationError("Only an existing TikTok influencer can be queried.")
     profile = InfluencerProfile.objects.filter(tenant_id=actor.tenant_id, influencer=influencer).first()
     creator_id = str(profile.external_influencer_id if profile else "").strip()
-    if not creator_id:
+    if not search_handle and not creator_id:
         return {"status": "candidate", "reason": "external_id_missing", "message": "请人工确认达人 ID 后再查询；不会按昵称自动绑定。"}
-    if not creator_id.isascii() or not creator_id.isdecimal() or not 1 <= len(creator_id) <= 20 or int(creator_id) == 0:
+    if not search_handle and (not creator_id.isascii() or not creator_id.isdecimal() or not 1 <= len(creator_id) <= 20 or int(creator_id) == 0):
         return {"status": "candidate", "reason": "external_id_untrusted", "message": "现有达人 ID 不是可信数字 ID，请人工核对。"}
-    if InfluencerProfile.objects.filter(
+    if not search_handle and InfluencerProfile.objects.filter(
         tenant_id=actor.tenant_id, external_influencer_id=creator_id,
     ).exclude(influencer_id=influencer_id).exists():
         return {"status": "candidate", "reason": "external_id_conflict", "message": "该达人 ID 关联了多个档案，请先人工核对。"}
@@ -93,7 +93,19 @@ def lookup_tiktok_creator(*, actor, influencer_id, store_id, commit_receipt=None
     if authorization.expires_at and authorization.expires_at <= timezone.now():
         raise ValidationError("TikTok Shop 授权已过期，请先完成 SaaS 续期。")
 
-    creator = TikTokReadonlyClient(authorization.integration_config, authorization).fetch_marketplace_creator(creator_id)
+    client = TikTokReadonlyClient(authorization.integration_config, authorization)
+    if search_handle:
+        handle = (influencer.handle or "").strip().lstrip("@")
+        if not handle:
+            return {"status": "candidate", "reason": "handle_missing"}
+        rows = client.search_marketplace_creator_handle(handle)
+        matches = [row for row in rows if str(row.get("username") or "").strip().lstrip("@").casefold() == handle.casefold()]
+        if len(matches) != 1:
+            return {"status": "candidate", "reason": "ambiguous" if matches else "not_on_first_page"}
+        return {"status": "candidate", "reason": "handle_only_unverified",
+                "candidate": {key: str(matches[0].get(key) or "")[:255]
+                              for key in ("username", "creator_open_id", "selection_region")}}
+    creator = client.fetch_marketplace_creator(creator_id)
     username = str(creator.get("username") or "").strip().lstrip("@")
     nickname = str(creator.get("nickname") or "").strip()
     region = str(creator.get("selection_region") or "").strip().upper()

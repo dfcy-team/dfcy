@@ -1463,6 +1463,37 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             raise ValidationError("TikTok Shop rejected the readonly request.")
         return payload
 
+    def search_marketplace_creator_handle(self, handle):
+        self.resource_type = "affiliate_creator_profile"
+        runtime = get_runtime_platform_config("tiktok")
+        scope = runtime.get("affiliate_seller_creator_scope")
+        if not runtime.get("affiliate_seller_creator_read_approved") or not scope or scope not in (self.authorization.scopes or []):
+            raise ValidationError("TikTok creator search is not approved for this shop.")
+        import redis
+        from .oauth_errors import OAUTH_RATE_LIMITED
+        broker = redis.Redis.from_url(settings.CELERY_BROKER_URL, socket_timeout=2, socket_connect_timeout=2)
+        key = "tiktok:creator-search:shared-cooldown"
+        remaining = broker.ttl(key)
+        if remaining >= 0:
+            error = OAuthFlowError(OAUTH_RATE_LIMITED, "Creator search shared cooldown.")
+            error.retry_after = max(1, remaining)
+            raise error
+        self.http.max_retries = 0
+        try:
+            payload = self._request("/affiliate_seller/202508/marketplace_creators/search", method="POST",
+                                    query={"shop_cipher": self.authorization.shop_cipher, "page_size": 12},
+                                    body={"keyword": handle})
+        except OAuthFlowError as exc:
+            if exc.controlled_code == OAUTH_RATE_LIMITED:
+                delay = max(300, int(getattr(exc, "retry_after", 0) or 0))
+                broker.eval("if redis.call('ttl',KEYS[1]) < tonumber(ARGV[1]) then redis.call('set',KEYS[1],1,'EX',ARGV[1]) end return 1", 1, key, delay)
+                exc.retry_after = delay
+            raise
+        rows = (payload.get("data") or {}).get("creators")
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise ValidationError("Invalid TikTok creator search result.")
+        return rows
+
     def fetch_marketplace_creator(self, creator_user_id):
         self.resource_type = "affiliate_creator_profile"
         scope = str(get_runtime_platform_config("tiktok").get("affiliate_seller_creator_scope") or "").strip()
