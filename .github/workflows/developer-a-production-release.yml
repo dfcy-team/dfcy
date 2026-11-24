@@ -255,6 +255,13 @@ jobs:
           ref: ${{ github.sha }}
           path: .v518-cumulative-control
           persist-credentials: false
+      - name: Check out protected V533 cumulative release control
+        if: inputs.action == 'deploy' && inputs.release_sha == '081b87a0a6c2e153ae889b855e3aecbfd2e3ba20'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .v533-cumulative-control
+          persist-credentials: false
       - name: Check out protected V518 R2 cumulative release control
         if: inputs.action == 'deploy' && inputs.release_sha == '9728c548cce4c21d9cbc99aea7407298b4056fc7'
         uses: actions/checkout@v4
@@ -410,6 +417,8 @@ jobs:
             python .v472-cumulative-control/saas-collab-system/deploy/production-control/ci/verify_v472_cumulative_source.py
           elif [[ "$action" = deploy && "$release_sha" = 1d1c50adb6050c2ba35fc968f3ee00c1a14d1901 ]]; then
             python .v518-cumulative-control/saas-collab-system/deploy/production-control/ci/verify_v518_cumulative_source.py
+          elif [[ "$action" = deploy && "$release_sha" = 081b87a0a6c2e153ae889b855e3aecbfd2e3ba20 ]]; then
+            python .v533-cumulative-control/saas-collab-system/deploy/production-control/ci/verify_v533_cumulative_source.py
           elif [[ "$action" = deploy && "$release_sha" = 9728c548cce4c21d9cbc99aea7407298b4056fc7 ]]; then
             python .v518-cumulative-r2-control/saas-collab-system/deploy/production-control/ci/verify_v518_cumulative_r2_source.py
           elif [[ "$action" = deploy && "$release_sha" = a51ed631963adf93b907af4af252b519fd73f89a ]]; then
