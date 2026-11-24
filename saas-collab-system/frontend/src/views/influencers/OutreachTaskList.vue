@@ -885,13 +885,14 @@ async function loadDetailData(task, showLoading = true) {
 async function removeTask(row) {
   if (!canManage.value || !row?.id || row.is_deleted) return;
   try {
-    await ElMessageBox.confirm(`确认删除任务“${displayValue(row.task_no)}”吗？删除将保留后端软删除记录。`, '确认删除', { type: 'warning' });
+    await ElMessageBox.confirm(`确认删除任务“${displayValue(row.task_no)}”及其全部关联送样记录吗？将执行软删除，可在已删除列表中分别恢复；恢复任务不会自动恢复送样。`, '确认删除任务及关联送样', { type: 'warning' });
   } catch {
     return;
   }
   const r = await deleteOutreachTask(row.id, row.version);
   if (!r.success) return ElMessage.error(formatInfluencerError(r));
-  ElMessage.success('任务已删除');
+  if (r.data?.deleted_sample_count > 0) ElMessage.success(`任务及 ${r.data.deleted_sample_count} 条关联送样已删除`);
+  else ElMessage.success('任务已删除');
   if (detailTask.value?.id === row.id) {
     detailVisible.value = false;
     detailTask.value = null;

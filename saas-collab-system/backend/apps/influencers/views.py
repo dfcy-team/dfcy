@@ -1212,7 +1212,9 @@ class OutreachTaskDetailView(ScopedInfluencerView):
             if "conflict" in str(exc.get_codes()):
                 raise Conflict(exc.detail) from exc
             raise
-        return success_response(OutreachTaskSerializer(task, context={"request": request}).data)
+        payload = dict(OutreachTaskSerializer(task, context={"request": request}).data)
+        payload["deleted_sample_count"] = task._cascade_deleted_sample_count
+        return success_response(payload)
 
 
 class OutreachTaskRestoreView(ScopedInfluencerView):

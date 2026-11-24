@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ElMessageBox } from 'element-plus';
 
 const request = vi.hoisted(() => vi.fn());
 const messages = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn(), success: vi.fn() }));
@@ -57,6 +58,26 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('warns about linked samples and reports the server cascade count', async () => {
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    request.mockResolvedValue({ success: true, data: { deleted_sample_count: 2 } });
+    await wrapper.vm.removeTask({ ...task });
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(expect.stringContaining('全部关联送样记录'), '确认删除任务及关联送样', { type: 'warning' });
+    expect(request.mock.calls.some(([config]) => config.method === 'delete' && config.url.endsWith('/outreach-tasks/17/'))).toBe(true);
+    expect(messages.success).toHaveBeenCalledWith('任务及 2 条关联送样已删除');
+    wrapper.unmount();
+  });
+
+  it('does not send a delete request when the cascade warning is cancelled', async () => {
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    ElMessageBox.confirm.mockRejectedValueOnce(new Error('cancel'));
+    await wrapper.vm.removeTask({ ...task });
+    expect(request.mock.calls.some(([config]) => config.method === 'delete')).toBe(false);
+    expect(messages.success).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
   it.each(['task', 'standalone'])('passes the selected store for country-scoped nickname creation (%s)', async (kind) => {
     const wrapper = render(kind === 'task' ? OutreachTaskList : SampleFulfillmentList);
     await flushPromises();

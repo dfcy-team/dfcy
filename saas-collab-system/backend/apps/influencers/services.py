@@ -17,7 +17,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Exists, Model, OuterRef, Q, QuerySet
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.audit.services import write_operation_log
 from apps.audit.models import NotificationMessage
@@ -2012,10 +2012,35 @@ def soft_delete_outreach_target(*, user, task, target, expected_version):
 
 
 @transaction.atomic
-def soft_delete_outreach_task(*, user, task, expected_version):
+def soft_delete_outreach_task(*, user, task, expected_version, cascade_samples=True):
     if expected_version is None:
         raise ValidationError({"version": "Expected task version is required."})
+    _lock_tenant(user)
     task = _locked_task(user, _pk(task))
+    if task.is_deleted or task.version != expected_version:
+        raise ValidationError({"version": "Outreach task was changed by another request."}, code="conflict")
+    samples = []
+    if cascade_samples:
+        from .scopes import filter_queryset, require_object, require_scope
+
+        require_scope(user, "influencers.outreach.manage")
+        require_object(user, task, "influencers.outreach.manage")
+
+        children = SampleFulfillment.objects.filter(tenant=user.tenant, outreach_task=task, is_deleted=False)
+        samples = list(children.select_for_update().order_by("pk"))
+        if samples:
+            message = "无权删除该任务的全部关联送样，任务及送样均未删除。"
+            try:
+                require_scope(user, "influencers.fulfillment.manage")
+                visible_ids = set(filter_queryset(user, children, "influencers.fulfillment.manage").values_list("pk", flat=True))
+            except PermissionDenied as exc:
+                raise PermissionDenied(message) from exc
+            if visible_ids != {sample.pk for sample in samples}:
+                raise PermissionDenied(message)
+        # Reuse audited deletion without recomputing a task being removed.
+        for sample in samples:
+            soft_delete_sample_fulfillment(user=user, fulfillment=sample,
+                                          expected_version=sample.version, recompute_related=False)
     now = timezone.now()
     updated = QuerySet.update(
         OutreachTask.objects.filter(
@@ -2035,7 +2060,11 @@ def soft_delete_outreach_task(*, user, task, expected_version):
             code="conflict",
         )
     task.refresh_from_db()
-    _audit(user, "outreach_delete", "outreach_task", task, after={"is_deleted": True})
+    task._cascade_deleted_sample_count = len(samples)
+    _audit(user, "outreach_delete", "outreach_task", task, after={
+        "is_deleted": True, "deleted_sample_count": len(samples),
+        "deleted_sample_ids": [sample.pk for sample in samples],
+    })
     return task
 
 
@@ -5513,6 +5542,8 @@ def soft_delete_import_source(
             user=user,
             task=task,
             expected_version=task.version,
+            # Import reconciliation must not cascade beyond its source manifest.
+            cascade_samples=False,
         )
         deleted_tasks += 1
 
