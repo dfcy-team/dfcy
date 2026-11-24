@@ -41,6 +41,18 @@ def test_historical_confirmed_currency_reaches_monthly_and_reversal_without_muta
     assert api.get(path).data['data']['can_edit'] is False
 
 
+def test_legacy_explicit_cny_payment_fx_is_effective_read_only(world):
+    actor,api,shipment=pilot(world);set_day(shipment);split(world,actor,shipment)
+    paid=cash(world,actor,shipment,'3.1415','2026-10-01','legacy-explicit-cny',account_snapshot={'nature':'corporate','currency':'CNY'})
+    rev=cash(world,actor,shipment,'3.1415','2026-10-02','legacy-explicit-cny-rev',account_snapshot={'nature':'corporate','currency':'CNY'},reverses=paid,reversal_reason='test')
+    before=list(PaymentRecord.objects.filter(pk__in=[paid.pk,rev.pk]).values_list('exchange_rate','cny_amount'))
+    data=api.get(BASE+f'costs/shipment/{shipment.pk}/payments/').data['data']
+    entries={row['id']:row for row in data['entries'] if row['id'] in (paid.pk,rev.pk)}
+    assert entries[paid.pk]['exchange_rate']=='1' and entries[paid.pk]['cny_amount']=='3.1415'
+    assert entries[rev.pk]['exchange_rate']=='1' and entries[rev.pk]['cny_amount']=='3.1415'
+    assert list(PaymentRecord.objects.filter(pk__in=[paid.pk,rev.pk]).values_list('exchange_rate','cny_amount'))==before
+
+
 @pytest.mark.parametrize('batch',[False,True])
 def test_explicit_request_currency_survives_approval_posting(world,monkeypatch,batch):
     buyer,api,shipment,account,oldrow,actor,client=pending(world,monkeypatch)

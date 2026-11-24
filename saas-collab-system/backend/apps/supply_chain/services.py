@@ -330,11 +330,6 @@ def _termination_preview(order):
             tenant_id=order.tenant_id, kind='purchase', source_id=order.pk,
         ).exclude(status='cancelled').exists()):
         raise ValidationError("该采购单已有付款记录或申请，请先核对财务单据。")
-    # A prepared confirmation notification contains immutable files and summary
-    # for the old quantities. Do not let a queued/partial notification send that
-    # stale snapshot after the order is amended by termination.
-    if order.notificationoutbox_set.filter(prepared_at__isnull=False).exclude(status='delivered').exists():
-        raise ValidationError("采购通知已生成且尚未全部送达，请先处理通知后再终止剩余数量。")
     rows = _termination_rows(order)
     return {'version': order.version, 'rows': rows,
             'preview_token': request_hash({'version': order.version, 'rows': rows})}

@@ -1,11 +1,11 @@
 <template>
   <section class="payment-panel" v-loading="loading">
-    <header><h3>{{({purchase:'采购预付款',shipment:'供应商货款付款',batch:'批次货运付款',domestic_freight:'国内运费付款'})[kind]||'付款与抵扣'}}</h3><el-button :disabled="busy" @click="load">刷新付款记录</el-button></header>
+    <header><h3>{{({purchase:'采购预付款',shipment:'供应商货款付款',batch:'批次货运付款',domestic_freight:'国内运费付款',domestic_expense:'国内运输费用付款'})[kind]||'付款与抵扣'}}</h3><el-button :disabled="busy" @click="load">刷新付款记录</el-button></header>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <template v-if="data">
       <nav class="source-links"><router-link v-for="link in (data.target?.source_links||[])" :key="link.href" :to="link.href">{{link.label}}</router-link></nav>
       <div class="payment-summary">
-        <div><small>{{kind==='purchase'?'采购总额':'应付金额'}}</small><strong>{{display(data.summary.due_amount)}}</strong></div>
+        <div><small>{{kind==='purchase'?'采购总额':kind==='shipment'?'核定应付货款':'应付金额'}}</small><strong>{{display(data.summary.due_amount)}}</strong></div>
         <div><small>{{kind==='purchase'?'已付预付款':'累计已付（含历史）'}}</small><strong>{{display(data.summary.paid_amount)}}</strong></div>
         <div v-if="kind==='purchase'||kind==='shipment'"><small>{{kind==='purchase'?'已抵扣':'预付款抵扣'}}</small><strong>{{display(data.summary.applied_amount)}}</strong></div>
         <div><small>{{kind==='purchase'?'预付款余额':'剩余应付'}}</small><strong>{{display(kind==='purchase'?data.summary.available_prepayment:data.summary.remaining_amount)}}</strong></div>
@@ -18,6 +18,12 @@
       <p v-if="kind==='shipment' && data.summary.confirmed_payable_tax" class="hint">
         对公税率 {{data.summary.confirmed_payable_tax.tax_rate}}% · 加税基数 {{display(data.summary.confirmed_payable_tax.taxable_amount)}} · 新增税额 {{display(data.summary.confirmed_payable_tax.added_tax_amount)}}
       </p>
+      <p v-if="kind==='shipment' && Number(data.summary.historical_difference_settled_amount)>0" class="hint">
+        历史差额结清 {{display(data.summary.historical_difference_settled_amount)}} · 实际付款登记 {{display(data.summary.cash_paid_amount)}}
+      </p>
+      <div v-if="kind==='shipment'" class="hint">发货货值 {{display(data.summary.shipped_goods_amount)}} · 确认入库短收扣减 {{display(data.summary.inbound_shortage_amount)}}
+        <details v-if="data.summary.inbound_shortage_details?.length"><summary>入库短收明细</summary><p v-for="row in data.summary.inbound_shortage_details" :key="row.shipment_line_id">{{row.sku}}：应收 {{row.expected_quantity}} / 实收 {{row.received_quantity}}，扣减 {{row.amount}}</p></details>
+      </div>
       <el-alert v-if="data.summary.due_amount!=null && Number(data.summary.paid_amount)+Number(kind==='purchase'?0:data.summary.applied_amount)>Number(data.summary.due_amount)" title="已付及抵扣高于当前应付，请核对历史登记或单据金额变化。" type="warning" :closable="false" />
       <div v-if="['batch','inbound'].includes(kind)&&data.itemized" class="fee-item-balances"><h4>{{kind==='inbound'?'入库清关分项余额':'批次费用分项余额'}}</h4><p v-for="item in data.fee_items" :key="item.fee_item_id">{{item.name}}（{{natureLabel(item.nature)}}）：应付 {{item.amount}} · 已付 {{item.paid_amount}} · 未付 {{item.remaining_amount}}</p></div>
       <p v-if="kind==='shipment' && data.summary.corporate_payment" class="hint">
@@ -37,7 +43,7 @@
         <summary>付款安排（可选）</summary>
         <PaymentPlansPanelV2 :kind="kind" :id="id" :disabled="busy||disabled" />
       </details>
-      <PaymentTermsPanelV2 v-if="kind!=='purchase'" :kind="kind" :id="id" :disabled="busy||disabled" :refresh-version="data.version" @updated="emit('updated')"/>
+      <PaymentTermsPanelV2 v-if="!['purchase','domestic_expense'].includes(kind)" :kind="kind" :id="id" :disabled="busy||disabled" :refresh-version="data.version" @updated="emit('updated')"/>
       <details class="payment-section"><summary>{{kind==='purchase'?'直接登记预付款':kind==='shipment'?'直接登记已发生付款 / 预付款抵扣':'直接登记已发生付款'}}</summary>
       <p class="hint">下方用于直接登记已发生的转账；通过上方付款申请确认入账的款项请勿重复登记。不执行实际转账，也不改变商品成本。对公／对私由收款账户带入。</p>
       <p class="hint">已提交且未入账的付款申请会占用可登记额度。若本次转账对应已有申请，请进入该申请的系统审批页上传凭证并核对付款，审批通过后自动入账；补录其他转账与已有申请冲突时，请先核对并处理原申请。</p>

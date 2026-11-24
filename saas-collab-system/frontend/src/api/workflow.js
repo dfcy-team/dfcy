@@ -19,6 +19,7 @@ export const fetchApprovals = (params = {}) =>
   requestWithMockFallback({ method: 'get', url: '/api/internal/workflow/approvals/', params }, mockApprovals, 'workflow.approvals');
 export const fetchPaymentFlows = () => requestApi({ method: 'get', url: '/api/internal/workflow/payment-flows/' });
 export const fetchPaymentFlowReviewers = () => requestApi({ method: 'get', url: '/api/internal/workflow/payment-flow-reviewers/' });
+export const fetchPaymentFlowFinanceHandlers = () => requestApi({ method: 'get', url: '/api/internal/workflow/payment-flow-finance-handlers/' });
 export const fetchPaymentFlowDepartments = () => requestApi({ method: 'get', url: '/api/internal/workflow/payment-flow-departments/' });
 export const createPaymentFlow = (data) => write({ method: 'post', url: '/api/internal/workflow/payment-flows/', data });
 export const updatePaymentFlowStatus = (id, action) => write({ method: 'post', url: `/api/internal/workflow/payment-flows/${id}/${action}/`, data: {} });

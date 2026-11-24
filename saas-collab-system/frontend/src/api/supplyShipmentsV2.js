@@ -31,3 +31,4 @@ export const downloadShipmentAttachment = (id, attachmentId, filename, supplier 
 
 export const fetchDomesticCarriers=(id,supplier=false,params={})=>requestApi({method:'get',url:`${base(supplier)}${collectionName(supplier)}/${enc(id)}/domestic-carrier-options/`,params});
 export const saveDomesticTransport=(id,data,supplier=false,key)=>write('put',`${base(supplier)}${collectionName(supplier)}/${enc(id)}/domestic-transport/`,data,key);
+export const withdrawShipment = (id, data, key) => write('post', `${base(false)}${collectionName(false)}/${enc(id)}/withdraw/`, data, key);

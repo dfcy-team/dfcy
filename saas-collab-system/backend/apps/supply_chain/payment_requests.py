@@ -6,6 +6,7 @@ from rest_framework.exceptions import ValidationError, NotFound, PermissionDenie
 from rest_framework.response import Response
 from rest_framework import serializers
 from . import costs, services
+from .payment_fx import effective_snapshot
 from .cost_models import PaymentPlanRecord, PaymentRecord
 from .payment_item_models import PaymentItem
 from .payment_request_models import SupplyPaymentRequest as PR
@@ -79,6 +80,7 @@ def request_finance_allowed(actor, row):
 
 
 def request_data(actor, row):
+    effective_rate, effective_cny = effective_snapshot(row.currency, row.amount, row.exchange_rate, row.cny_amount)
     vouchers = getattr(row, '_voucher_rows', None)
     if vouchers is None:
         vouchers = list(active_vouchers(row.vouchers.all()).defer('content').order_by('id'))
@@ -94,7 +96,7 @@ def request_data(actor, row):
     can_confirm = bool(row.approval_id and approval_status=='approved' and vouchers and not row.payment_id and row.status!='cancelled' and allowed_manage and request_finance_allowed(actor,row))
     result = {'id':row.pk,'version':row.version,'status':'reversed' if reversed_payment else 'paid' if row.payment_id else ('cancelled' if row.status=='cancelled' else approval_status if (row.approval_id or (row.batch_id and row.batch.approval_id)) else row.status),
         'amount':str(row.amount),'reason':row.reason,'item_snapshot':row.item_snapshot,'account_snapshot':{**row.account_snapshot,'account_number':costs._mask_account_number(row.account_snapshot.get('account_number',''))},'approval_id':row.approval_id,
-        'currency':row.currency,'corporate_tax':row.item_snapshot.get('corporate_tax') if row.kind=='shipment' else None,
+        'currency':row.currency,'exchange_rate':str(effective_rate) if effective_rate is not None else None,'cny_amount':str(effective_cny) if effective_cny is not None else None,'corporate_tax':row.item_snapshot.get('corporate_tax') if row.kind=='shipment' else None,
         'plan_id':row.plan_id or None,'plan_line_id':row.plan_line_id or None,'plan_snapshot':row.plan_snapshot,
         'payment_id':row.payment_id,'vouchers':vouchers,'attachments':attachments,'notification_status':row.notification_status,'notification_error':row.notification_error,
         'can_attach':bool(row.created_by_id==actor.pk and allowed_manage and
@@ -105,6 +107,20 @@ def request_data(actor, row):
         result['batch_id']=row.batch_id
         result['batch_href']=f'/supply-chain/costs?tab=reconciliation&payment_batch_id={row.batch_id}'
         for name in ('submit','cancel','upload','notify','confirm'): result['can_'+name]=False
+    from apps.integrations.feishu_native_approval import native_status, payment_form_options
+    result['feishu_form'] = payment_form_options(actor, row, 'supply_payment_request') if not row.batch_id else None
+    result['native_approval'] = native_status(row.approval) if row.approval_id else None
+    from apps.integrations.feishu_finance_handoff import finance_data
+    result['finance_handoff'] = finance_data(row.approval) if row.approval_id else None
+    if result['finance_handoff']:
+        result['can_upload'] = False
+        if result['finance_handoff']['status'] != 'received' or row.approval.workflow_snapshot.get('finance_handler_id') != actor.pk:
+            result['can_confirm'] = False
+    if result['native_approval']:
+        result['can_cancel'] = False
+        result['can_notify'] = False
+        if result['native_approval']['status'] != 'finished' or result['native_approval'].get('provider_status') != 'APPROVED':
+            result['can_confirm'] = False
     return result
 
 
@@ -154,6 +170,7 @@ def confirm_corporate_tax(actor, shipment, row, breakdown, summary, keyval):
 
 class CreateInput(serializers.Serializer):
     currency=serializers.RegexField(r'^[A-Z]{3}$',required=False)
+    exchange_rate=serializers.DecimalField(max_digits=20,decimal_places=8,required=False)
     amount=serializers.DecimalField(max_digits=24,decimal_places=4,min_value=Decimal('.0001'))
     payment_nature=serializers.ChoiceField(('corporate','personal'),required=False)
     amount_basis=serializers.ChoiceField(('gross','net'),required=False)
@@ -218,6 +235,8 @@ class RequestAPI(InternalAPI):
         if remaining is None or amt > remaining: raise ValidationError('申请金额超过当前应付余额。')
         reserved=PR.objects.filter(tenant_id=actor.tenant_id,kind=kind,source_id=pk,status='submitted',payment__isnull=True).exclude(approval__status__in=['rejected','withdrawn']).exclude(batch__approval__status__in=['rejected','withdrawn']).aggregate(s=Sum('amount'))['s'] or Decimal(0)
         if amt + reserved > remaining: raise ValidationError('已有未结申请占用余额。')
+        from .payment_fx import snapshot as fx_snapshot
+        exchange_rate, cny_amount = fx_snapshot(confirmed_currency, amt, p.get('exchange_rate'))
         plan = None; plan_line = None
         if p.get('plan_line_id') is not None or p.get('plan_version') is not None:
             if kind not in ('shipment', 'domestic_freight', 'batch') or not p.get('plan_line_id') or p.get('plan_version') is None:
@@ -232,7 +251,7 @@ class RequestAPI(InternalAPI):
             if amt > balance['available_amount']: raise ValidationError('付款计划明细可用金额不足。')
         with domain_write():
             snapshot = {**plan_line, 'line_id': str(p['plan_line_id'])} if plan_line else {}
-            row,created=PR.objects.get_or_create(tenant=actor.tenant,created_by=actor,idempotency_key=keyval,defaults={'currency':confirmed_currency,'kind':kind,'source_id':pk,'amount':amt,'payee_account':account,'account_snapshot':costs._payee_data(account),'fee_item':fee_item,'item_snapshot':item,'plan':plan,'plan_line_id':p.get('plan_line_id',''),'plan_snapshot':snapshot,'reason':p['reason'],'request_hash':digest})
+            row,created=PR.objects.get_or_create(tenant=actor.tenant,created_by=actor,idempotency_key=keyval,defaults={'currency':confirmed_currency,'exchange_rate':exchange_rate,'cny_amount':cny_amount,'kind':kind,'source_id':pk,'amount':amt,'payee_account':account,'account_snapshot':costs._payee_data(account),'fee_item':fee_item,'item_snapshot':item,'plan':plan,'plan_line_id':p.get('plan_line_id',''),'plan_snapshot':snapshot,'reason':p['reason'],'request_hash':digest})
         if not created and row.request_hash!=digest: raise ValidationError('幂等键已用于不同内容。')
         return Response({'data':request_data(actor,row)},status=201 if created else 200)
 
@@ -277,7 +296,7 @@ class RequestAction(InternalAPI):
             from apps.workflows.services import resolve_payment_flow
             nature = row.item_snapshot.get('nature') or row.account_snapshot.get('nature')
             flow, flows = resolve_payment_flow(actor=actor, sources=[(kind, pk, row.amount, nature, True)])
-            snapshot = {'rule_id': flow.pk, 'flow_key': flow.flow_key, 'version': flow.version, 'payment_kind': kind, 'nature': nature, 'department_key': flow.department_key, 'notify_feishu': flow.notify_feishu, 'minimum_amount': str(flow.minimum_amount), 'maximum_amount': str(flow.maximum_amount) if flow.maximum_amount is not None else None, 'reviewer_id': flow.reviewer_id,
+            snapshot = {'rule_id': flow.pk, 'flow_key': flow.flow_key, 'version': flow.version, 'payment_kind': kind, 'nature': nature, 'department_key': flow.department_key, 'notify_feishu': flow.notify_feishu, 'minimum_amount': str(flow.minimum_amount), 'maximum_amount': str(flow.maximum_amount) if flow.maximum_amount is not None else None, 'reviewer_id': flow.reviewer_id, 'finance_handler_id': flow.finance_handler_id,
                 'rules': [{'rule_id': r.pk, 'flow_key': r.flow_key, 'version': r.version, 'payment_kind': r.payment_kind, 'nature': r.nature, 'department_key': r.department_key, 'minimum_amount': str(r.minimum_amount), 'maximum_amount': str(r.maximum_amount) if r.maximum_amount is not None else None} for r in flows]}
             tax_note = f'；未税 {breakdown["net_amount"]}；税额 {breakdown["tax_amount"]}；正报金额 {breakdown["gross_amount"]}' if breakdown else ''
             approval=ApprovalRequest.objects.create(tenant=actor.tenant,approval_type='finance',title=f'付款申请 {number}',business_type='supply_payment_request',business_id=str(row.pk),requested_by=actor,designated_reviewer=flow.reviewer,workflow_snapshot=snapshot,reason=f'{number} {row.amount} {row.account_snapshot.get("nature","")} 尾号{suffix}；项目：{row.item_snapshot.get("name", "整单款项")}{tax_note}；申请理由：{row.reason} /supply-chain/costs?kind={kind}&id={pk}&payment_request_id={row.pk}',idempotency_key=f'payreq:{row.pk}')
@@ -285,14 +304,21 @@ class RequestAction(InternalAPI):
             with domain_write(): row.save(update_fields=['approval','status','version'])
             from apps.workflows.services import write_workflow_audit
             write_workflow_audit(approval,resource_type='approval',actor=actor,action='submit',to_status='pending',detail={})
-            try:
-                from apps.integrations.feishu_delivery import notify_approval
-                with transaction.atomic(): result=notify_approval(approval.pk)
-                row.notification_status=result.get('status','queued'); row.notification_error=''
-            except Exception as exc:
-                row.notification_status='error'; row.notification_error='飞书通知入队失败，请检查通知配置后重试。'
+            from apps.integrations.feishu_native_approval import queue_payment_approval
+            native = queue_payment_approval(approval, row, form_input=request.data.get('feishu'))
+            if native:
+                row.notification_status='native_queued'; row.notification_error=''
+            else:
+                try:
+                    from apps.integrations.feishu_delivery import notify_approval
+                    with transaction.atomic(): result=notify_approval(approval.pk)
+                    row.notification_status=result.get('status','queued'); row.notification_error=''
+                except Exception as exc:
+                    row.notification_status='error'; row.notification_error='飞书通知入队失败，请检查通知配置后重试。'
             with domain_write(): row.save(update_fields=['notification_status','notification_error'])
         elif action=='cancel':
+            if row.approval_id and row.approval.workflow_snapshot.get('approval_provider') == 'feishu':
+                raise ValidationError('此申请由飞书统一处理，请在飞书撤回；已通过申请需由财务复核。')
             reason=request.data.get('reason','').strip()
             if not reason: raise ValidationError({'reason':'取消原因必填。'})
             if row.payment_id: raise ValidationError('已付款申请不能取消。')
@@ -306,6 +332,8 @@ class RequestAction(InternalAPI):
         elif action=='notify':
             if not row.approval_id or row.payment_id or row.status=='cancelled': raise ValidationError('当前申请不可通知。')
             if not finance_allowed(actor,row.currency): raise PermissionDenied()
+            if row.approval.workflow_snapshot.get('approval_provider') == 'feishu':
+                raise ValidationError('飞书审批正在处理，请在飞书查看；提交异常由后台安全重试。')
             from apps.integrations.feishu_delivery import notify_approval
             try:
                 with transaction.atomic(): result=notify_approval(row.approval_id)

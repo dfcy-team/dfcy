@@ -56,6 +56,27 @@ describe('supplier shipment API', () => {
     ]);
   });
 
+  it('loads the summary shipment list before procurement options', async () => {
+    mocks.routeQuery = {};
+    let resolveList;
+    const listResponse = new Promise(resolve => { resolveList = resolve; });
+    mocks.requestApi.mockImplementation(request => request.url.endsWith('/supplier-shipments/')
+      ? listResponse : Promise.resolve({ success: true, data: [], count: 0 }));
+    const wrapper = mountPage(false);
+    await flushPromises();
+    let calls = mocks.requestApi.mock.calls.map(([r]) => r);
+    const listIndex = calls.findIndex(r => r.url.endsWith('/supplier-shipments/'));
+    expect(listIndex).toBeGreaterThanOrEqual(0);
+    expect(calls.some(r => r.url.endsWith('/purchase-orders/'))).toBe(false);
+    expect(calls[listIndex].params).toMatchObject({ summary: 1, limit: 20, offset: 0 });
+    resolveList({ success: true, data: [], count: 0 });
+    await flushPromises();
+    calls = mocks.requestApi.mock.calls.map(([r]) => r);
+    expect(calls.findIndex(r => r.url.endsWith('/purchase-orders/'))).toBeGreaterThan(listIndex);
+    expect(wrapper.find('input[placeholder*="发货单号"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
   it('uses external shipment routes and limits supplier order selection to confirmed orders', async () => {
     await api.fetchShipmentOrders(true, { limit: 10, offset: 0 });
     await api.fetchShipments(true, { limit: 10, offset: 0 });
@@ -143,6 +164,7 @@ describe('supplier shipment API', () => {
     });
     const wrapper=mountPage(false);await flushPromises();
     await wrapper.vm.openShipment({id:77});await flushPromises();
+    expect(mocks.requestApi.mock.calls.some(([r])=>r.url.endsWith('/supplier-shipments/77/'))).toBe(true);
     expect(wrapper.vm.sourceLines.map(line=>[line.id,line.purchase_order_number])).toEqual([[3,'PO-7'],[13,'PO-8']]);
     expect(wrapper.vm.form.lines.map(line=>line.purchase_line_id)).toEqual([3,13]);
     wrapper.vm.form.lines[0].purchase_line_id=13;wrapper.vm.changePurchaseLine(wrapper.vm.form.lines[0]);
@@ -365,7 +387,7 @@ describe('supplier shipment API', () => {
       'el-table-column':{data:()=>({row:shipment}),template:'<div><slot :row="row" :$index="0"/></div>'}},directives:{loading:()=>{}}}});await flushPromises();
     await wrapper.findAll('button').find(b=>b.text()==='查看进度').trigger('click');await flushPromises();
     expect(wrapper.find('[aria-label="发货单流程详情"]').text()).toContain('DB-81');
-    expect(wrapper.find('[aria-label="发货单流程详情"]').text()).toContain('已集货：3 件');
+    expect(wrapper.find('[aria-label="发货单流程详情"]').text()).toContain('已分配：3 件');
     expect(mocks.requestApi.mock.calls.every(([request])=>request.method==='get')).toBe(true);
     await wrapper.findAll('button').find(b=>b.text()==='查看 / 编辑发货单').trigger('click');await flushPromises();
     expect(wrapper.text()).toContain('整单货值 CNY 37.50');

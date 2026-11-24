@@ -202,8 +202,8 @@ class InternalShipmentOptions(InternalAPI):
 class ShipmentList(InternalAPI):
     supplier = False
 
-    def data(self, obj):
-        return shipments.snapshot(obj, internal=not self.supplier)
+    def data(self, obj, *, summary=False):
+        return shipments.snapshot(obj, internal=not self.supplier, summary=summary)
 
     def get(self, request):
         orders = (supplier_orders if self.supplier else internal_orders)(request.user, PurchaseOrder.objects.all())
@@ -225,9 +225,12 @@ class ShipmentList(InternalAPI):
                 | Q(sku__sku_code__icontains=search) | Q(sku__legacy_sku_code__icontains=search)
                 | Q(sku__product_name__icontains=search) | Q(sku__spu__spu_code__icontains=search) | Q(sku__spu__product_name__icontains=search))
             rows = rows.annotate(_search_product_match=Exists(product_match)).filter(
-                Q(notes__icontains=search) | Q(_search_product_match=True))
+                Q(number__icontains=search) | Q(notes__icontains=search) | Q(_search_product_match=True))
         from .read_batches import prepare_shipments
-        return _page(request, rows.select_related("order__supplier", "domestic_carrier"), self.data, prepare=prepare_shipments)
+        summary = request.query_params.get("summary") == "1"
+        serialize = (lambda obj: self.data(obj, summary=True)) if summary else self.data
+        prepare = (lambda page: prepare_shipments(page, summary=True)) if summary else prepare_shipments
+        return _page(request, rows.select_related("order__supplier", "domestic_carrier"), serialize, prepare=prepare)
 
     def post(self, request):
         return Response({"data": self.data(shipments.create_draft(request.user, shipment_input(request, create=True), key(request)))}, status=201)
@@ -381,3 +384,26 @@ class SupplierShipmentRemove(SupplierAPI, ShipmentRemove):
 
 class SupplierShipmentDownload(SupplierAPI, ShipmentDownload):
     supplier = True
+
+
+class ShipmentWithdrawInput(VersionInput):
+    reason = serializers.CharField(max_length=10000, allow_blank=False)
+
+
+class ShipmentWithdraw(ShipmentAction):
+    def post(self, request, pk):
+        value = validated(ShipmentWithdrawInput, request)
+        obj = shipments.withdraw(request.user, pk, value, key(request))
+        return Response({"data": self.data(obj)})
+
+
+class ShipmentDomesticExpenses(ShipmentDetail):
+    http_method_names = ['get', 'put', 'options']
+
+    def get(self, request, pk):
+        from . import domestic_expenses
+        return Response({'data': domestic_expenses.read(request.user, pk)})
+
+    def put(self, request, pk):
+        from . import domestic_expenses
+        return Response({'data': domestic_expenses.save(request.user, pk, request.data, key(request))})

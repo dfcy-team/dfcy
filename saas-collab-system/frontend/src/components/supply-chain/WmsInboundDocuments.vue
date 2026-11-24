@@ -1,8 +1,12 @@
 <script setup>
+import WmsDocumentLinker from './WmsDocumentLinker.vue';
+import { requestApi } from '../../api/request';
+import { createIdempotencyKey } from '../../api/supplyChainV2';
+import { ElMessageBox } from 'element-plus';
 import { reactive, ref } from 'vue';
 import { fetchWmsInboundDocument, fetchWmsInboundDocuments } from '../../api/supplyLogisticsV2';
 
-defineProps({ active: Boolean });
+defineProps({ active: Boolean, editable: Boolean });
 const emit = defineEmits(['open-inbound']);
 const filters = reactive({ search: '', warehouse: '', start_date: '', end_date: '' });
 const items = ref([]), total = ref(0), page = ref(1);
@@ -10,6 +14,35 @@ const loading = ref(false), error = ref('');
 const detail = ref(null), detailOpen = ref(false), detailLoading = ref(false), detailError = ref('');
 let listRequest = 0;
 let detailRequest = 0;
+const removing = ref(false);
+let removalAttempt = null;
+async function changed() {
+  await load(page.value);
+  if (detail.value?.id) await open(detail.value.id);
+}
+async function removeLink(doc) {
+  if (removing.value) return;
+  let reason;
+  try {
+    const result = await ElMessageBox.prompt('填写解除单据关联原因', '解除关联', {
+      inputValidator: value => !!value?.trim() || '请填写原因',
+    });
+    reason = result.value.trim();
+  } catch { return; }
+  const path = `/api/internal/supply-chain/v2/wms-inbound-documents/${detail.value.id}/links/${doc.manual_link_id}/deactivate/`;
+  const body = { expected_version: doc.manual_link_version, reason };
+  const signature = JSON.stringify([path, body]);
+  if (removalAttempt?.signature !== signature) removalAttempt = { signature, key: createIdempotencyKey() };
+  removing.value = true;
+  detailError.value = '';
+  try {
+    unwrap(await requestApi({ method: 'post', url: path, data: body,
+      headers: { 'Idempotency-Key': removalAttempt.key } }));
+    removalAttempt = null;
+    await changed();
+  } catch (e) { detailError.value = e.message; }
+  finally { removing.value = false; }
+}
 
 function unwrap(response) {
   if (!response?.success) throw new Error(response?.message || '请求失败');
@@ -77,7 +110,8 @@ defineExpose({ open, load });
       <el-table-column prop="received_quantity" label="实收件数" width="100"/>
       <el-table-column label="本系统入库单" min-width="180"><template #default="{row}">
         <el-button v-for="doc in row.inbounds" :key="doc.id" link type="primary" @click="openInbound(doc)">{{ doc.number }}</el-button>
-        <span v-if="!row.inbounds.length">—</span>
+        <span v-if="!row.inbounds.length && !editable">—</span>
+        <WmsDocumentLinker :document-id="row.id" :editable="editable" @updated="changed"/>
       </template></el-table-column>
     </el-table>
     <el-pagination background layout="total, prev, pager, next" :total="total" :page-size="20"
@@ -88,9 +122,16 @@ defineExpose({ open, load });
     <div v-loading="detailLoading" class="wms-detail">
       <template v-if="detail">
         <p>{{ detail.site_code }} · {{ detail.warehouse__name }}</p>
+        <WmsDocumentLinker :document-id="detail.id" :editable="editable" @updated="changed"/>
         <div v-if="detail.inbounds.length">
           关联入库单
-          <el-button v-for="doc in detail.inbounds" :key="doc.id" type="primary" link @click="openInbound(doc)">{{ doc.number }}</el-button>
+          <div v-for="doc in detail.inbounds" :key="doc.id">
+            <el-button type="primary" link @click="openInbound(doc)">{{ doc.number }}</el-button>
+            <span v-if="doc.manual_link_id">{{ doc.association_status === 'matched' ? '关联时数量一致' : '关联时待核对' }}</span>
+            <span v-if="doc.association_reason"> · {{ doc.association_reason }}</span>
+            <span v-if="doc.associated_at"> · {{ displayTime(doc.associated_at) }}</span>
+            <el-button v-if="editable && doc.manual_link_id" link type="danger" :disabled="removing" @click="removeLink(doc)">解除关联</el-button>
+          </div>
         </div>
         <el-table :data="detail.lines" border max-height="520">
           <el-table-column prop="internal_sku__product_name" label="商品" min-width="155"/>

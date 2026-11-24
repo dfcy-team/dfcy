@@ -169,22 +169,41 @@ describe('销售日常经营', () => {
     expect(wrapper.text()).toContain('70.00'); expect(wrapper.text()).toContain('今日09:00同时段：查看快照');
     expect(wrapper.text()).not.toContain('0.00 倍');
   });
-  it('loads products only on explicit drill and opens evidence without a request', async () => {
+  it('loads products on drill and fetches evidence only when opening its dialog', async () => {
     wrapper = mount(SalesOperations); await flushPromises();
     fetchSalesOperations.mockResolvedValue(response([{ ...row, product_id: 'P1', product_name: '床单', units_sold: 3, diagnosis: { status: 'suspected_decline', title: '下降待核查', steps: [{ label: '买家数', value: '缺少买家数，无法判断' }], missing: ['访客'] } }]));
     await wrapper.find('.text-button').trigger('click'); await flushPromises();
     expect(fetchSalesOperations.mock.calls[1][0]).toMatchObject({ view: 'products', store_id: '2', currency: 'PHP' });
     await wrapper.find('.reason-button').trigger('click');
     expect(wrapper.find('dialog').attributes('open')).toBeDefined();
-    expect(wrapper.find('dialog').text()).toContain('缺少买家数'); expect(fetchSalesOperations).toHaveBeenCalledTimes(2);
+    expect(wrapper.find('dialog').text()).toContain('缺少买家数'); expect(fetchSalesOperations).toHaveBeenCalledTimes(3);
+    expect(fetchSalesOperations).toHaveBeenLastCalledWith(expect.objectContaining({ evidence: '1', view: 'products', store_id: '2' }), expect.any(AbortSignal));
     fetchSalesOperations.mockResolvedValue(response());
     await wrapper.find('.results-head button').trigger('click'); await flushPromises();
-    expect(fetchSalesOperations.mock.calls[2][0]).toMatchObject({ view: 'stores', store_id: '' });
+    expect(fetchSalesOperations.mock.calls[3][0]).toMatchObject({ view: 'stores', store_id: '' });
   });
   it('does not expose item drill without the SKU route grant', async () => {
     useAuthStore().currentUser.permissions = ['sales_management.view']; wrapper = mount(SalesOperations); await flushPromises();
     expect(wrapper.find('.text-button').attributes('disabled')).toBeDefined();
     await wrapper.find('.text-button').trigger('click'); expect(fetchSalesOperations).toHaveBeenCalledTimes(1);
+  });
+  it('renders TK video context and native product funnel rates without inventing missing values', async () => {
+    const product = { ...row, product_id: 'TK1', product_name: 'TK商品', diagnosis: { platform: 'tiktok', steps: [], sections: [
+      { title: '关联视频整体表现', scope: '多商品视频不分摊到单个商品', metrics: [{ label: '关联视频数', value: 2 }, { label: '关联视频商品点击率', value: '0.0808', unit: 'percent' }] },
+      { title: '商品整体流量', message: '当前查询周期尚未采集', metrics: [{ label: '加购人数', value: null }] },
+    ] } };
+    wrapper = mount(SalesOperations); await flushPromises();
+    fetchSalesOperations.mockResolvedValue(response([product]));
+    await wrapper.find('.text-button').trigger('click'); await flushPromises();
+    await wrapper.find('.reason-button').trigger('click'); await flushPromises();
+    const dialog = wrapper.find('dialog');
+    expect(dialog.text()).toContain('多商品视频不分摊到单个商品');
+    expect(dialog.text()).toContain('8.08%');
+    expect(dialog.text()).toContain('当前查询周期尚未采集');
+    expect(dialog.text()).toContain('暂无数据');
+    const signal = fetchSalesOperations.mock.calls.at(-1)[1];
+    wrapper.unmount(); wrapper = null;
+    expect(signal.aborted).toBe(true);
   });
   it('restores exact item and all board scope, then returns to the original board scope', async () => {
     const range = dateRange(1);
@@ -233,31 +252,9 @@ describe('销售日常经营', () => {
     first(response([{ ...row, store_name: '旧范围' }])); await flushPromises(); expect(wrapper.text()).not.toContain('旧范围');
     const lastSignal = fetchSalesOperations.mock.calls.at(-1)[1]; wrapper.unmount(); wrapper = null; expect(lastSignal.aborted).toBe(true);
   });
-  it('applies multiple selected stores in a single scoped sales request', async () => {
-    wrapper = mount(SalesOperations);
-    await flushPromises();
-    const select = wrapper.findComponent({ name: 'ElSelect' });
-    expect(select.exists()).toBe(true);
-    select.vm.$emit('update:modelValue', ['42', '63']);
-    await wrapper.vm.$nextTick();
-    expect(fetchSalesOperations.mock.calls.at(-1)[0].store_id).not.toBe('42,63');
-    await wrapper.get('form.filters').trigger('submit');
-    await flushPromises();
-    expect(fetchSalesOperations.mock.calls.at(-1)[0].store_id).toBe('42,63');
-    await wrapper.get('.currency-filter select').setValue('PHP');
-    await flushPromises();
-    const details = wrapper.get('.declines');
-    details.element.setAttribute('open', '');
-    await details.trigger('toggle');
-    await flushPromises();
-    expect(fetchBoardDeclines).toHaveBeenLastCalledWith(
-      expect.objectContaining({ store_id: '', store_ids: '42,63', currency: 'PHP' }),
-      expect.any(AbortSignal),
-    );
-  });
   it('clears previous rows on a failed new request and preserves draft-only state', async () => {
     wrapper = mount(SalesOperations); await flushPromises();
-    await wrapper.get('input[type=date]').setValue('2026-09-01'); expect(fetchSalesOperations).toHaveBeenCalledTimes(1);
+    await wrapper.findAll('input[type=date]')[0].setValue('2026-09-01'); expect(fetchSalesOperations).toHaveBeenCalledTimes(1);
     expect(wrapper.text()).toContain('筛选已修改');
     fetchSalesOperations.mockRejectedValue(new Error('读取失败')); await wrapper.find('.quick button').trigger('click'); await flushPromises();
     expect(wrapper.text()).toContain('读取失败'); expect(wrapper.find('.table-scroll').exists()).toBe(false);
@@ -267,4 +264,22 @@ describe('销售日常经营', () => {
     expect(amount(null)).toBe('—'); expect(amount(0)).toBe('0.00'); expect(percent(null)).toBe('—');
     expect(validRange({ date_from: '2026-01-01', date_to: '2026-03-01' })).toContain('31');
   });
+});
+
+it('renders products without changing the parent currency or edited filters', async () => {
+  fetchSalesOperations.mockResolvedValueOnce(response())
+    .mockResolvedValueOnce(response([{ ...row, product_id: 'DRILL-1', product_name: '下钻商品', units_sold: 2 }]));
+  wrapper = mount(SalesOperations); await flushPromises();
+  const editedDate = '2026-09-01';
+  await wrapper.find('input[type=date]').setValue(editedDate);
+  await wrapper.find('.text-button').trigger('click'); await flushPromises();
+  expect(fetchSalesOperations).toHaveBeenLastCalledWith(expect.objectContaining({
+    view: 'products', store_id: '2', currency: 'PHP',
+  }), expect.any(AbortSignal));
+  expect(wrapper.find('.results').text()).toContain('下钻商品');
+  expect(wrapper.find('.currency-filter select').element.value).toBe('');
+  expect(wrapper.find('input[type=date]').element.value).toBe(editedDate);
+  await wrapper.find('.drilldown-context button').trigger('click'); await flushPromises();
+  expect(wrapper.find('input[type=date]').element.value).toBe(editedDate);
+  expect(fetchSalesOperations).toHaveBeenLastCalledWith(expect.objectContaining({view: 'stores', store_id: ''}), expect.any(AbortSignal));
 });

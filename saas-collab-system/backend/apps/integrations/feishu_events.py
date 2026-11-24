@@ -15,6 +15,7 @@ from django.views.decorators.http import require_POST
 from apps.tenants.models import Tenant
 from .custody import get_custody_backend
 from .models import FeishuConnection, FeishuOperation
+from .feishu_native_approval import enqueue_native_event
 
 EVENT_TYPES = {"im.message.receive_v1", "im.chat.access_event.bot_p2p_chat_entered_v1"}
 
@@ -59,11 +60,24 @@ def event_callback(request, tenant_id):
             signature = hashlib.sha256((stamp + nonce + encrypt_key).encode() + raw).hexdigest()
             if not hmac.compare_digest(signature, request.headers.get("X-Lark-Signature", "")):
                 raise ValueError("signature")
-        if payload.get("schema") != "2.0" or header.get("app_id") != connection.app_id:
-            raise ValueError("app")
-        event_id, event_type = header.get("event_id"), header.get("event_type")
+        native_v1 = payload.get("type") == "event_callback" and isinstance(payload.get("event"), dict) and payload["event"].get("type") == "approval_instance"
+        if native_v1:
+            event = payload["event"]
+            if not encrypt_key or event.get("app_id") != connection.app_id:
+                raise ValueError("native app")
+            event_id = payload.get("uuid")
+            event_type = "approval_instance"
+        else:
+            if payload.get("schema") != "2.0" or header.get("app_id") != connection.app_id:
+                raise ValueError("app")
+            event_id, event_type = header.get("event_id"), header.get("event_type")
         if not isinstance(event_id, str) or not 1 <= len(event_id) <= 120 or not isinstance(event_type, str):
             raise ValueError("event")
+        if native_v1:
+            outcome = enqueue_native_event(tenant_id, event_id, event)
+            if outcome == "ignored":
+                return JsonResponse({"code": 0, "ignored": True})
+            return JsonResponse({"code": 0, "duplicate": outcome == "duplicate"})
         with transaction.atomic():
             Tenant.objects.select_for_update().get(pk=tenant_id)
             existing = FeishuOperation.objects.filter(tenant_id=tenant_id, operation_type="event", reference_type="feishu_event", reference_id=event_id).first()

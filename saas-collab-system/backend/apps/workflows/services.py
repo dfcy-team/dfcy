@@ -31,7 +31,7 @@ def resolve_payment_flow(*, actor, sources):
             kinds = candidate.payment_kinds or [candidate.payment_kind]
             natures = candidate.natures or [candidate.nature]
             departments = candidate.department_keys if candidate.department_keys else [candidate.department_key]
-            if source_kind in kinds and nature in natures and ("" in departments or str(department_id or "") in departments):
+            if ('domestic_freight' if source_kind == 'domestic_expense' else source_kind) in kinds and nature in natures and ("" in departments or str(department_id or "") in departments):
                 matches.append(candidate)
         if len(matches) != 1:
             raise ValidationError("付款审批流程未配置或匹配到多个规则，请联系管理员维护流程。")
@@ -124,6 +124,8 @@ def _review_approval(*, approval, actor, action, note="", payment=None):
         from apps.supply_chain import services as supply_services
         supply_services._tenant_lock(actor)
     approval = ApprovalRequest.objects.select_for_update().get(pk=approval.pk, tenant=actor.tenant)
+    if approval.workflow_snapshot.get('approval_provider') == 'feishu':
+        raise ValidationError('此审批由飞书统一处理，请在飞书审批或撤回。')
     if approval.business_type == "supply_payment_request" and action in {"approve", "reject"}:
         from apps.supply_chain.payment_request_models import SupplyPaymentRequest
         from apps.supply_chain.costs import _payment_owner

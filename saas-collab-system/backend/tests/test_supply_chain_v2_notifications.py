@@ -138,6 +138,29 @@ def test_confirmation_captures_target_and_prepare_freezes_snapshot_files_and_lin
     assert all(part.sha256 == sha256(bytes(part.body) if part.body else part.text.encode()).hexdigest() for part in parts.values())
 
 
+def test_termination_invalidates_old_notice_and_blocks_retry(world, custody):
+    actor, _, _, order, outbox = _ready(world, custody, key="termination-notice")
+    outbox = notify.prepare(actor, outbox.pk, {"expected_version": outbox.version}, "termination-notice-prepare")
+    part = outbox.parts.get(kind="summary")
+    with domain_write():
+        part.status = "failed"
+        part.save(update_fields=["status"])
+    preview = services.preview_purchase_termination(actor, order.pk)
+    services.terminate_purchase_remainder(actor, order.pk, {
+        "preview_token": preview["preview_token"], "reason": "production stopped",
+        "lines": [{"id": preview["rows"][0]["id"], "produced_unshipped": 2}],
+    }, "terminate-with-pending-notice")
+    order.refresh_from_db()
+    outbox.refresh_from_db()
+    assert order.lines.get(is_active=True).quantity == 2
+    assert notify.guard(outbox, live=False) == "source_changed"
+    adapter = FakeWorkTool(message_id="must-not-send-stale")
+    assert notify.dispatch_one(outbox.pk, adapter=adapter) == "blocked"
+    assert adapter.sent == []
+    with pytest.raises(Exception, match="采购单数量已变化"):
+        notify.retry(actor, outbox.pk, part.pk, {"expected_version": part.version}, "retry-stale-notice")
+
+
 def test_preview_download_is_private_and_detects_tampered_bytes(world, custody):
     actor, _, _, _, outbox = _ready(world, custody, key="preview")
     outbox = notify.prepare(actor, outbox.pk, {"expected_version": outbox.version}, "preview-prepare")

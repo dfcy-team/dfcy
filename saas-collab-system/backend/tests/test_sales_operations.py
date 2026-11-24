@@ -391,3 +391,53 @@ def test_cny_sort_precedes_pagination_and_excludes_unknown_rate_from_total():
         assert pages[0]["cny_summary"]["excluded_currencies"] == ["JPY"]
     native = client.get(URL, {**query, "currency": "PHP"}).json()["data"]["rows"][0]
     assert native["sales_amount"] == "120"
+
+@pytest.mark.django_db
+def test_product_preview_prefers_main_image_and_keeps_variant_order():
+    from apps.listings.models import PlatformProductDetail
+
+    user, tenant, platform, store, run, client = _fixture("ops-product-preview")
+    _grant(user, "sales_management.skus.view")
+    for suffix, variant in [("first", "a"), ("second", "b")]:
+        _order(tenant, platform, store, run, suffix)
+        SalesOrderItem.objects.filter(sales_order__external_order_id=suffix, sales_order__tenant=tenant).update(
+            platform_product_id="shared-product", platform_variant_id=variant,
+        )
+    for product, variant, source, image in [
+        ("shared-product", "a", "variant", "variant"),
+        ("shared-product", "b", "product", "main"),
+        ("shared-product", "c", "variant", "variant"),
+        ("other-product", "0", "product", "unrelated"),
+    ]:
+        PlatformProductDetail.objects.create(
+            tenant=tenant, platform=platform, store=store, platform_product_id=product,
+            platform_variant_id=variant, platform_image_source=source,
+            platform_image_url=f"https://img.example/{image}.jpg",
+        )
+    query = {"view": "products", "store_id": store.id, "date_from": DAY, "date_to": DAY}
+    row = client.get(URL, query).json()["data"]["rows"][0]
+    assert row["platform_image_url"] == "https://img.example/main.jpg"
+    assert row["platform_image_urls"] == ["https://img.example/main.jpg", "https://img.example/variant.jpg"]
+
+    PlatformProductDetail.objects.filter(store=store, platform_variant_id="b").delete()
+    row = client.get(URL, query).json()["data"]["rows"][0]
+    assert row["platform_image_urls"] == ["https://img.example/variant.jpg"]
+
+@pytest.mark.django_db
+def test_store_multiselect_restricts_rows_and_summary():
+    user, tenant, platform, store, run, client = _fixture("ops-multi-store")
+    selected = [store]
+    for code in ("second", "excluded"):
+        extra = StoreMaster.objects.create(tenant=tenant, platform=platform, code=code, name=code,
+            country_code="PH", currency="PHP", timezone="Asia/Manila")
+        _order(tenant, platform, extra, run, code, amount="10")
+        if code == "second":
+            selected.append(extra)
+    _order(tenant, platform, store, run, "first", amount="10")
+    query = {"date_from": DAY, "date_to": DAY, "store_id": ",".join(str(s.id) for s in selected)}
+    response = client.get(URL, query)
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert {row["store_id"] for row in data["rows"]} == {s.id for s in selected}
+    assert data["currency_groups"][0]["sales_amount"] == "20"
+    assert client.get(URL, {**query, "view": "products"}).status_code == 400

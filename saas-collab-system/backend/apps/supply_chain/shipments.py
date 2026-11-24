@@ -109,7 +109,7 @@ def assert_draft(obj):
         raise ValidationError("仅未集货的草稿可修改商品数量和箱号附件；请刷新后查看最新状态。")
 
 
-def snapshot(obj, *, internal=False):
+def snapshot(obj, *, internal=False, summary=False):
     prepared = getattr(obj, "_read_shipment", None)
     member = (next(iter(prepared["members"]), None) if prepared is not None else
               obj.dispatch_memberships.filter(active_guard=True).select_related("batch").first())
@@ -132,6 +132,29 @@ def snapshot(obj, *, internal=False):
                            for field in ("departed_at", "arrived_port_at", "arrived_warehouse_at")},
         "lines": [], "attachments": [],
     }
+    if summary and prepared is None:
+        raise ValueError("Summary shipment snapshots require page-prepared data.")
+    if summary:
+        # List rows need shipment quantities, related purchase orders, and
+        # logistics progress. SKU snapshots, image URLs, prices, and file
+        # metadata remain exclusive to the full detail response.
+        result["lines"] = prepared["lines"]
+        result["orders"] = [{"id": pk, "number": number}
+                            for pk, number in sorted(prepared["orders"].items())]
+        result["order_ids"] = sorted(prepared["orders"])
+        result["attachments"] = prepared["attachments"]
+        result["dispatch_allocations"] = prepared["distribution"]
+        result["total_quantity"] = prepared["total_quantity"]
+        assigned = sum(row["quantity"] for row in result["dispatch_allocations"])
+        if result["dispatch_allocations"] and (
+                len(result["dispatch_allocations"]) > 1 or assigned < result["total_quantity"]):
+            result["logistics_stage"] = "split"
+            result["logistics_dates"] = {field: None for field in result["logistics_dates"]}
+        result["remaining_quantity"] = result["total_quantity"] - assigned
+        if internal:
+            result["price_editable"] = obj.status != "cancelled"
+            result["price_adjustment_requires_reason"] = member is not None
+        return result
     source_lines = prepared['lines'] if prepared is not None else list(obj.lines.filter(is_active=True).select_related('sku__spu__category_node', 'shipment__order', 'purchase_line__order'))
     details_by_line = prepared['details'] if prepared is not None else shipment_line_product_details(source_lines)
     for line in source_lines:
@@ -458,4 +481,49 @@ def remove_box(actor, pk, attachment_id, payload, key):
         obj.version += 1
         obj.save()
         _event(actor, obj, "box_removed", key, payload)
+    return obj
+
+
+@transaction.atomic
+def withdraw(actor, pk, payload, key):
+    """Return an unallocated shipment to a versioned draft for correction."""
+    _internal(actor)
+    _tenant_lock(actor)
+    obj = shipment_for(actor, pk)
+    if _prior_event(actor, obj, 'shipment_withdrawn', key, payload):
+        return obj
+    _version(obj, payload['expected_version'])
+    reason = str(payload.get('reason') or '').strip()
+    if not reason:
+        raise ValidationError('请填写撤回修改原因。')
+    if obj.status != 'submitted':
+        raise ValidationError('仅已提交发货单可以撤回修改。')
+    if obj.dispatch_memberships.filter(active_guard=True).exists():
+        raise ValidationError('请先在集货发运批次解除该发货单的分配，再撤回修改。')
+    if obj.dispatch_memberships.exclude(batch__stage='unmarked').exclude(batch__status='cancelled').exists():
+        raise ValidationError('该发货单关联批次已有物流进度，请通过差异更正处理。')
+    from .models import InboundLine
+    if InboundLine.objects.filter(shipment_line__shipment=obj).exclude(inbound__status='cancelled').exists():
+        raise ValidationError('该发货单已有关联入库记录，请通过入库差异处理。')
+    from .payment_request_models import SupplyPaymentRequest
+    from .cost_models import FeeRecord, SettlementRecord
+    if (obj.payment_records.exists() or obj.prepayment_applications.exists()
+            or obj.cost_versions.exists() or obj.payable_classifications.exists() or FeeRecord.objects.filter(shipment=obj).exists()
+            or SettlementRecord.objects.filter(shipment=obj).exists()
+            or SupplyPaymentRequest.objects.filter(
+                tenant_id=actor.tenant_id, kind__in=['shipment', 'domestic_freight'],
+                source_id=obj.pk).exclude(status='cancelled').exists()):
+        raise ValidationError('该发货单已关联费用、成本或付款，请先核对关联单据。')
+    if obj.domestic_expense_groups.filter(is_active=True).exists():
+        raise ValidationError('该发货单已维护国内运输费用，请先处理费用后再撤回。')
+    before = snapshot(obj, internal=True)
+    with domain_write():
+        obj.status = 'draft'
+        obj.collection_arrived = False
+        obj.collection_arrived_at = None
+        obj.collection_arrived_by = None
+        obj.version += 1
+        obj.save()
+        _event(actor, obj, 'shipment_withdrawn', key, payload,
+               audit={'shipment_snapshot': before})
     return obj

@@ -19,6 +19,7 @@ from apps.common.module_gate import is_module_enabled
 
 from .capability import require_live_mode
 from .custody import get_custody_backend
+from .credential_access import CredentialAccessError, require_token_validity, retrieve_marketplace_credentials
 from .live_providers import _lazada_sign
 from .net_guard import PlatformHttpClient
 from .oauth_errors import OAUTH_PROVIDER_UNAVAILABLE, OAuthFlowError
@@ -709,13 +710,19 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
         authorization = self.authorization
         if authorization is None or authorization.status != authorization.Status.ACTIVE:
             raise ValidationError("Shopee store authorization is not active.")
-        if authorization.expires_at and authorization.expires_at <= self.now():
-            raise ValidationError("SHOPEE_TOKEN_REFRESH_REQUIRED")
+        try:
+            require_token_validity(authorization, now=self.now())
+        except CredentialAccessError:
+            raise ValidationError("SHOPEE_TOKEN_REFRESH_REQUIRED") from None
         host = _required(get_runtime_platform_config("shopee").get("api_host"), "shopee.api_host").rstrip("/")
         partner_id = _required(self.platform_config.get("partner_id"), "shopee.partner_id")
         secret_reference = self.config.credential_id or self.platform_config.get("app_secret_reference")
-        partner_key = self.custody.retrieve_secret(_required(secret_reference, "shopee.app_secret_reference"))
-        access_token = self.custody.retrieve_access_token(authorization.token_id)
+        _required(secret_reference, "shopee.app_secret_reference")
+        try:
+            partner_key, access_token = retrieve_marketplace_credentials(
+                self.config, authorization, custody=self.custody, now=self.now())
+        except CredentialAccessError as exc:
+            raise ValidationError(str(exc)) from None
         timestamp = int(self.now().timestamp())
         base = f"{partner_id}{path}{timestamp}{access_token}{authorization.platform_store_id}"
         signed = {

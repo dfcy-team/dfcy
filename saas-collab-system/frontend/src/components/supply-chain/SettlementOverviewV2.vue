@@ -6,7 +6,7 @@
     <p class="hint">{{data?.amount_basis}} 预付款抵扣单独展示，不重复计入已付现金。采购未付与发货单未付属于不同业务阶段，不相加。</p>
     <div class="summary-grid" v-loading="loading">
       <section v-for="(label,key) in summaryLabels" :key="key" class="summary-card">
-          <header><h3>{{label}}</h3><div><el-button v-if="key==='supplier'" link type="primary" @click="openGroup('deposit')">采购预付款</el-button><el-button link type="primary" @click="openMonthly(key)">月份对账</el-button><el-button link type="primary" @click="openGroup(key)">查看全部单据 →</el-button></div></header>
+          <header><h3>{{label}}</h3><div><el-button v-if="key==='supplier'" link type="primary" @click="differencesOpen=true">入库差异</el-button><el-button v-if="key==='supplier'" link type="primary" @click="openGroup('deposit')">采购预付款</el-button><el-button link type="primary" @click="openMonthly(key)">月份对账</el-button><el-button link type="primary" @click="openGroup(key)">查看全部单据 →</el-button></div></header>
         <template v-if="data?.groups?.[key]">
           <div class="metrics overview-totals">
             <template v-if="key==='supplier'"><span>总采购金额<b>{{money(data.groups[key].purchase_total_amount)}}</b></span><span>总发货金额<b>{{money(data.groups[key].shipment_total_amount)}}</b></span></template>
@@ -66,7 +66,7 @@
     </section>
     <p v-else class="hint">点击汇总金额或“查看全部单据”读取明细；点击单位排行可查看该单位跨单据对账。</p>
     <BatchPaymentsV2 v-if="batchParty || batchRequestId" :party-kind="batchParty?.kind" :party-id="batchParty?.id" :party-name="batchParty?.name" :request-id="batchRequestId" @updated="refreshAfterUpdate"/>
-    <MonthlyPayablesV2 v-model="monthlyOpen" :queue="monthlyQueue" :country-id="country" :party-id="monthlyPartyId" :party-name="monthlyPartyName" :party-type="monthlyPartyType" @open="row=>emit('open',row)"/>
+    <ReceiptDifferencesV2 v-model="differencesOpen" :country-id="country" @open="row=>emit('open',row)" @updated="refreshAfterUpdate"/><MonthlyPayablesV2 v-model="monthlyOpen" :queue="monthlyQueue" :country-id="country" :party-id="monthlyPartyId" :party-name="monthlyPartyName" :party-type="monthlyPartyType" @open="row=>emit('open',row)"/>
     <p v-for="note in data?.notices||[]" :key="note" class="hint">{{note}}</p>
   </section>
 </template>
@@ -77,11 +77,13 @@ import {useRouter,useRoute} from 'vue-router';
 import BatchPaymentsV2 from './BatchPaymentsV2.vue';
 import PaymentRemindersV2 from './PaymentRemindersV2.vue';
 import SupplierDepositLedgerV2 from './SupplierDepositLedgerV2.vue';
+import ReceiptDifferencesV2 from './ReceiptDifferencesV2.vue';
 import MonthlyPayablesV2 from './MonthlyPayablesV2.vue';
 import {fetchDashboard,fetchDashboardQueue} from '../../api/supplyDashboardV2';
 import {useAuthStore} from '../../stores/auth';
 import {cockpitActorKey} from '../../utils/cockpitDraft';
 const props=defineProps({overview:Object,countryId:[String,Number]});
+const differencesOpen=ref(false);
 const emit=defineEmits(['open']);
 const reminders=ref(null);
 const monthlyOpen=ref(false),monthlyQueue=ref('supplier'),monthlyPartyId=ref(null),monthlyPartyName=ref(''),monthlyPartyType=ref('');

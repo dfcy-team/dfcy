@@ -5,7 +5,7 @@ import re
 
 from django.db import transaction
 from django.db.models.deletion import ProtectedError, RestrictedError
-from django.db.models import Exists, OuterRef, Prefetch, Q
+from django.db.models import Exists, F, OuterRef, Prefetch, Q
 from django.http import FileResponse
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
@@ -17,7 +17,8 @@ from apps.products.models import ProductSKU
 from .archives import allowed_suppliers, authorize_archive_supplier, freight_data, freight_scope, price_data, save_freight, save_price, save_supplier, supplier_data
 from .documents import import_template, purchase_workbook, sku_labels
 from .imports import MAX_FILE_BYTES, commit_import, create_import, import_data
-from .models import BusinessEvent, PurchaseImport, PurchaseOrder, PurchaseLine, Record, SupplierProductPrice
+from .models import (BusinessEvent, DispatchAllocation, InboundLine, PurchaseImport, PurchaseOrder,
+                     PurchaseLine, Record, ShipmentLine, SupplierProductPrice, SupplierShipment)
 from .permissions import MANAGE, VIEW, accessible_orders, internal_orders
 from .serializers import FreightInput, MetadataInput, PriceInput, PurchaseInput, PurchaseEditInput, SupplierInput, VersionInput
 from .services import preview_purchase_termination, terminate_purchase_remainder
@@ -46,9 +47,43 @@ def purchase_queryset(request, *, apply_workflow=True):
             Q(sku_code_snapshot__icontains=term) | Q(product_name_snapshot__icontains=term)
             | Q(sku__sku_code__icontains=term) | Q(sku__legacy_sku_code__icontains=term)
             | Q(sku__product_name__icontains=term) | Q(sku__spu__spu_code__icontains=term) | Q(sku__spu__product_name__icontains=term))
-        query = query.annotate(_search_product_match=Exists(product_match)).filter(
+        shipment_parent_match = SupplierShipment.objects.filter(
+            tenant_id=request.user.tenant_id, number__icontains=term, order_id=OuterRef("pk"),
+        )
+        shipment_line_match = ShipmentLine.objects.filter(
+            tenant_id=request.user.tenant_id, shipment__tenant_id=request.user.tenant_id,
+            shipment__number__icontains=term, purchase_line__order_id=OuterRef("pk"),
+            purchase_line__tenant_id=request.user.tenant_id,
+        )
+        batch_match = DispatchAllocation.objects.filter(
+            tenant_id=request.user.tenant_id,
+            membership__tenant_id=request.user.tenant_id,
+            membership__batch__tenant_id=request.user.tenant_id,
+            membership__batch__number__icontains=term,
+            membership__shipment_id=F("shipment_line__shipment_id"),
+            shipment_line__tenant_id=request.user.tenant_id,
+            shipment_line__purchase_line__order_id=OuterRef("pk"),
+            shipment_line__purchase_line__tenant_id=request.user.tenant_id,
+        )
+        inbound_match = InboundLine.objects.filter(
+            tenant_id=request.user.tenant_id,
+            inbound__tenant_id=request.user.tenant_id,
+            inbound__number__icontains=term,
+            shipment_line__tenant_id=request.user.tenant_id,
+            shipment_line__purchase_line__order_id=OuterRef("pk"),
+            shipment_line__purchase_line__tenant_id=request.user.tenant_id,
+        )
+        query = query.annotate(
+            _search_product_match=Exists(product_match),
+            _search_shipment_parent_match=Exists(shipment_parent_match),
+            _search_shipment_line_match=Exists(shipment_line_match),
+            _search_batch_match=Exists(batch_match),
+            _search_inbound_match=Exists(inbound_match),
+        ).filter(
             Q(number__icontains=term) | Q(reference_number__icontains=term) | Q(supplier__name__icontains=term)
-            | Q(_search_product_match=True))
+            | Q(_search_product_match=True)
+            | Q(_search_shipment_parent_match=True) | Q(_search_shipment_line_match=True)
+            | Q(_search_batch_match=True) | Q(_search_inbound_match=True))
     for field in ("status", "source_kind"):
         if request.query_params.get(field):
             query = query.filter(**{field: request.query_params[field]})

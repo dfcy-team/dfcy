@@ -346,9 +346,25 @@ def complete_marketplace_oauth_callback(*, platform, query_params, tiktok_manual
     return authorization
 
 
-@transaction.atomic
 def refresh_marketplace_authorization(record, *, actor, expected_token_id=None):
+    if expected_token_id is not None:
+        from .refresh_commit_recovery import refresh_with_commit_recovery
+        return refresh_with_commit_recovery(record, actor=actor, expected_token_id=expected_token_id)
+    return _refresh_marketplace_authorization(record, actor=actor)
+
+
+@transaction.atomic
+def _refresh_marketplace_authorization(record, *, actor, expected_token_id=None):
+    source_token_id = record.token_id
     record = MarketplaceStoreAuthorization.objects.select_for_update().get(pk=record.pk, tenant_id=actor.tenant_id)
+    if record.token_id != source_token_id:
+        raise ValidationError("授权令牌已变化，请刷新页面后重试。")
+    from .automatic_refresh import _attempt_key
+    from .models import AutomaticRefreshAttempt
+    from .refresh_commit_recovery import manual_refresh_blocked
+    pending = AutomaticRefreshAttempt.objects.filter(pk=_attempt_key(record)).first()
+    if manual_refresh_blocked(record, pending):
+        raise ValidationError("该续期正在自动恢复提交，请勿重复刷新；可等待重试结果或重新授权。")
     if record.platform == "lazada" and "local:no-refresh" in (record.scopes or []):
         raise ValidationError("该 Lazada 授权按原令牌导入，禁止手动或自动刷新。")
     if expected_token_id is not None:

@@ -39,6 +39,28 @@ def attach_links(actor, lines, docs):
         doc['inbounds'] = []
     for site, warehouse, number, pk, local_number in document_links(actor, lines.filter(groups)):
         keyed[site, warehouse, number]['inbounds'].append({'id': pk, 'number': local_number})
+    from .models import WmsDocumentLink
+    manual_groups = Q(pk__in=[])
+    for site, warehouse, number in keyed:
+        manual_groups |= Q(site_code=site, warehouse_id=warehouse, external_inbound_id=number)
+    links = WmsDocumentLink.objects.filter(manual_groups,tenant_id=actor.tenant_id, is_active=True,
+        inbound__batch__in=logistics.batches_for(actor, VIEW)).select_related('inbound__batch')
+    for link in links:
+        key = (link.site_code, link.warehouse_id, link.external_inbound_id)
+        if (key not in keyed or link.inbound.warehouse_id != link.warehouse_id
+                or link.inbound.batch.country_code_snapshot.upper() != link.site_code.upper()):
+            continue
+        values = keyed[key]['inbounds']
+        existing = next((value for value in values if value['id'] == link.inbound_id), None)
+        value = {'id': link.inbound_id, 'number': link.inbound.number,
+                 'manual_link_id': link.pk, 'manual_link_version': link.version,
+                 'association_status': link.preview_snapshot.get('status', 'needs_review'),
+                 'association_reason': link.reason, 'associated_at': link.created_at}
+        if existing:
+            existing.update(value)
+        else:
+            values.append(value)
+
 
 
 def list_documents(actor, params):
@@ -83,6 +105,7 @@ def document_detail(actor, pk):
     row = visible.filter(pk=pk).values('site_code', 'warehouse_id', 'warehouse__name', 'external_inbound_id').first()
     if row is None:
         raise NotFound('三方仓入库单不存在或不在授权范围。')
+    row['id'] = pk
     site, warehouse, number = document_key(row)
     lines = visible.filter(site_code=site, warehouse_id=warehouse, external_inbound_id=number)
     row['lines'] = list(lines.order_by('pk').values(

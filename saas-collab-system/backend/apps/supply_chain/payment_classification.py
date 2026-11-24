@@ -16,9 +16,12 @@ def _parent(actor, kind, source_id, entry_type, entry_id, permission):
         expected = {'purchase': ('purchase_order_id', source.pk, 'goods'),
                     'shipment': ('shipment_id', source.pk, 'goods'),
                     'domestic_freight': ('shipment_id', source.pk, 'domestic_freight'),
+                    'domestic_expense': ('domestic_expense_group_id', source.pk, 'domestic_freight'),
                     'batch': ('batch_id', source.pk, 'goods'),
                     'inbound': ('inbound_id', source.pk, 'goods')}.get(kind)
         if not expected or getattr(row, expected[0]) != expected[1] or row.purpose != expected[2]:
+            raise NotFound('付款记录不属于当前单据。')
+        if kind == 'domestic_freight' and row.domestic_expense_group_id:
             raise NotFound('付款记录不属于当前单据。')
         return source, row, row.amount
     if entry_type == 'opening':

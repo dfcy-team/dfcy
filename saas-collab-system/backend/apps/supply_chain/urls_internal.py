@@ -167,6 +167,8 @@ urlpatterns = [
     path("supplier-shipments/<int:pk>/domestic-carrier-options/", sa.DomesticCarrierOptions.as_view(), name="sc2-domestic-carrier-options"),
     path("supplier-shipments/<int:pk>/domestic-transport/", sa.DomesticTransport.as_view(), name="sc2-domestic-transport"),
     path("supplier-shipments/<int:pk>/submit/", sa.ShipmentAction.as_view(), name="sc2-shipment-submit"),
+    path("supplier-shipments/<int:pk>/domestic-expenses/", sa.ShipmentDomesticExpenses.as_view(), name="sc2-shipment-domestic-expenses"),
+    path("supplier-shipments/<int:pk>/withdraw/", sa.ShipmentWithdraw.as_view(), name="sc2-shipment-withdraw"),
     path("supplier-shipments/<int:pk>/cancel/", sa.ShipmentCancel.as_view(), name="sc2-shipment-cancel"),
     path("supplier-shipments/<int:pk>/prices/", sa.ShipmentPrices.as_view(), name="sc2-shipment-prices"),
     path("supplier-shipments/<int:pk>/arrival/", sa.ShipmentArrival.as_view(), name="sc2-shipment-arrival"),
@@ -193,6 +195,11 @@ urlpatterns = [
     path("inbound-orders/<int:pk>/extra-skus/", la.InboundExtraSkuOptions.as_view(), name="sc2-inbound-extra-skus"),
     path("inbound-orders/<int:pk>/cancel/", la.CancelInbound.as_view(), name="sc2-inbound-cancel"),
     path("inbound-orders/<int:pk>/confirm/", la.ConfirmInbound.as_view(), name="sc2-inbound-confirm"),
+    path("wms-inbound-documents/<int:pk>/link-candidates/", la.WmsDocumentCandidates.as_view()),
+    path("wms-inbound-documents/<int:pk>/link-preview/", la.WmsDocumentPreview.as_view()),
+    path("wms-inbound-documents/<int:pk>/links/", la.WmsDocumentLinks.as_view()),
+    path("wms-inbound-documents/<int:pk>/links/<int:link_id>/deactivate/", la.WmsDocumentUnlink.as_view()),
+    path("inbound-orders/<int:pk>/wms-document-links/", la.InboundWmsDocuments.as_view()),
     path("wms-inbound-documents/", la.WmsInboundDocuments.as_view(), name="sc2-wms-inbound-documents"),
     path("wms-inbound-documents/<int:pk>/", la.WmsInboundDocument.as_view(), name="sc2-wms-inbound-document"),
     path("inbound-orders/<int:pk>/wms-reconciliation/", la.WmsReconciliation.as_view(), name="sc2-wms-reconciliation"),
@@ -200,4 +207,14 @@ urlpatterns = [
     path("inbound-orders/<int:pk>/wms-candidates/", la.WmsCandidates.as_view(), name="sc2-wms-candidates"),
     path("inbound-orders/<int:pk>/wms-allocations/", la.WmsAllocations.as_view(), name="sc2-wms-allocations"),
     path("inbound-orders/<int:pk>/wms-allocations/<int:allocation_id>/deactivate/", la.WmsAllocationDeactivate.as_view(), name="sc2-wms-allocation-deactivate"),
+]
+
+from . import receipt_differences as rd
+urlpatterns += [
+    path('receipt-differences/', rd.ReceiptDifferences.as_view()),
+    path('receipt-differences/preview/', rd.ReceiptDifferencePreview.as_view()),
+    path('receipt-differences/settle/', rd.ReceiptDifferenceSettle.as_view()),
+    path('receipt-differences/assign/', rd.ReceiptDifferenceAssign.as_view()),
+    path('receipt-differences/history-bind/', rd.ReceiptDifferenceHistoryBind.as_view()),
+    path('receipt-differences/<int:pk>/reverse/', rd.ReceiptDifferenceReverse.as_view()),
 ]

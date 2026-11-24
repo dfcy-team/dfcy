@@ -27,6 +27,7 @@ from apps.supply_chain.models import (ReplenishmentCalculationJob,
 from apps.supply_chain.permissions import MANAGE as SC_MANAGE, VIEW as SC_VIEW
 from apps.supply_chain.services import request_hash, _tenant_lock
 from apps.commerce.supply_pipeline import SUMMARY_PERMISSION
+from .snapshot_payload import pack_payload
 from apps.supply_chain.views import ReadAPI
 from apps.masterdata.models import CountrySiteMaster
 
@@ -702,7 +703,7 @@ def run_replenishment_calculation(job_id):
                 has_submitted_demand=Decimal(str(line.get("submitted_demand") or "0")) > 0,
                 # Internal view calls bypass response rendering; evidence may contain
                 # datetime/date/Decimal values that JSONField cannot encode itself.
-                payload=json.loads(json.dumps(line, cls=DjangoJSONEncoder))))
+                payload=pack_payload(json.loads(json.dumps(line, cls=DjangoJSONEncoder)))))
         with transaction.atomic():
             _restore_actor(job)
             if (_scope_signature(actor, business_day=job.business_date if _daily_calculation(job) else None) != job.permission_signature or

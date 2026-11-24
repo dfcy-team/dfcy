@@ -80,7 +80,7 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
         return {"supply_payment_batch":"合并付款申请"}.get(obj.business_type, "其他业务")
 
     def _payment_kind_label(self, kind):
-        return {"purchase":"采购定金", "shipment":"供应商货款", "domestic_freight":"国内运费",
+        return {"purchase":"采购定金", "shipment":"供应商货款", "domestic_freight":"国内运费", "domestic_expense":"国内运输费用",
                 "batch":"国际/批次货运费", "inbound":"入库费用"}.get(kind, "付款")
 
     def _payment_request(self, obj):
@@ -194,8 +194,8 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
             except APIException:
                 data['can_upload'] = False
         return {**identity, 'transport_lines': [line for line in data.get('lines', []) if line['kind'] in ('batch', 'inbound', 'domestic_freight')],
-                **{key: data.get(key, [] if key == 'attachments' else None) for key in ('version', 'amount', 'currency', 'corporate_tax', 'vouchers', 'attachments', 'can_upload', 'account_snapshot', 'status')},
-                'can_post': bool(data['can_upload'] and finance_allowed(request.user,row.currency))}
+                **{key: data.get(key, [] if key == 'attachments' else None) for key in ('version', 'amount', 'currency', 'corporate_tax', 'vouchers', 'attachments', 'can_upload', 'account_snapshot', 'status', 'finance_handoff', 'native_approval')},
+                'can_post': bool(data.get('can_confirm')) if data.get('finance_handoff') else bool(data['can_upload'] and finance_allowed(request.user,row.currency))}
 
     def get_audit_events(self, obj):
         page_events = self.context.get("audit_events_by_resource")

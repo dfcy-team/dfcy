@@ -270,7 +270,11 @@ class PaymentRecord(AppendOnlyRecord):
     shipment = models.ForeignKey('supply_chain.SupplierShipment', on_delete=models.PROTECT, null=True, blank=True, related_name='payment_records')
     batch = models.ForeignKey('supply_chain.DispatchBatch', on_delete=models.PROTECT, null=True, blank=True, related_name='payment_records')
     inbound = models.ForeignKey('supply_chain.InboundOrder', on_delete=models.PROTECT, null=True, blank=True, related_name='payment_records')
+    domestic_expense_group = models.ForeignKey('supply_chain.DomesticExpenseGroup', on_delete=models.PROTECT,
+        null=True, blank=True, related_name='payments')
     amount = models.DecimalField(max_digits=24, decimal_places=4)
+    exchange_rate = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
+    cny_amount = models.DecimalField(max_digits=24, decimal_places=4, null=True, blank=True)
     purpose = models.CharField(max_length=24, choices=[('goods', '货款'), ('domestic_freight', '国内运费')], default='goods')
     date = models.DateField()
     reference_number = models.CharField(max_length=200, blank=True)

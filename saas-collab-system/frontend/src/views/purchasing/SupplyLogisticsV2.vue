@@ -32,7 +32,7 @@
       <el-tab-pane v-if="canViewWms" label="三方仓入库单" name="wms-inbound"/>
     </el-tabs>
     <WmsInboundDocuments v-if="canViewWms" ref="wmsInboundDocuments"
-      :active="tab === 'wms-inbound'" @open-inbound="openInbound"/>
+      :active="tab === 'wms-inbound'" :editable="canManage" @open-inbound="openInbound"/>
 
     <el-dialog v-model="stageDialog" title="更新运输阶段" width="min(480px, 94vw)" :close-on-click-modal="!busy" :close-on-press-escape="!busy" :show-close="!busy">
       <p>{{ stageTarget?.number }}：{{ stageLabel(stageTarget?.stage) }} → {{ stageLabel(stageValue) }}</p>

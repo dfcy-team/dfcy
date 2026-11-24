@@ -188,6 +188,13 @@ def _money_targets(kind, scoped):
             discounts = ShipmentDiscountAdjustment.objects.filter(shipment_id=OuterRef('pk')).order_by().values('shipment_id').annotate(total=Sum('amount')).values('total')
             query = query.annotate(discount_amount=Coalesce(Subquery(discounts, output_field=MONEY), ZERO)).annotate(
                 due=Case(When(missing=0, then=F('known_amount') + Case(When(purchase_contract__status='issued', then=F('purchase_contract__settlement_tax_amount')), default=ZERO, output_field=MONEY) - F('discount_amount')), default=Value(None), output_field=MONEY))
+            from .receipt_payable_adjustments import annotate_receipt_shortage
+            query = annotate_receipt_shortage(query).annotate(
+                due=Case(
+                    When(due__isnull=True, then=Value(None)),
+                    default=Greatest(F('due') - F('inbound_shortage_amount') + F('receipt_decision_delta'), ZERO),
+                    output_field=MONEY,
+                ))
             records = SettlementRecord.objects.filter(shipment_id=OuterRef('pk'))
             payment_owner, purpose = 'shipment_id', 'goods'
         else:
@@ -200,7 +207,7 @@ def _money_targets(kind, scoped):
             from .historical_empty_fee_exclusions import DOMESTIC_EMPTY_FEE_SHIPMENT_KEYS
             fee_exists = FeeRecord.objects.filter(tenant_id=OuterRef('tenant_id'), shipment_id=OuterRef('pk'))
             payment_exists = PaymentRecord.objects.filter(tenant_id=OuterRef('tenant_id'),
-                shipment_id=OuterRef('pk'), purpose='domestic_freight')
+                shipment_id=OuterRef('pk'), purpose='domestic_freight', domestic_expense_group__isnull=True)
             request_exists = SupplyPaymentRequest.objects.filter(tenant_id=OuterRef('tenant_id'),
                 kind='domestic_freight', source_id=OuterRef('pk'))
             query = query.annotate(_has_source_fee=Exists(fee_exists),
@@ -251,6 +258,8 @@ def _money_targets(kind, scoped):
         party_path, country_path = 'freight_company', 'country'
     effective_payments = PaymentRecord.objects.filter(**{payment_owner: OuterRef('pk')}, purpose=purpose,
         reverses__isnull=True, reversal__isnull=True)
+    if kind == 'domestic':
+        effective_payments = effective_payments.filter(domestic_expense_group__isnull=True)
     payments = effective_payments.order_by().values(owner).annotate(total=Sum('amount')).values('total')
     paid = Coalesce(Subquery(payments, output_field=MONEY), ZERO)
     nature_totals = {}
@@ -260,6 +269,8 @@ def _money_targets(kind, scoped):
     payment_history = PaymentRecord.objects.filter(
         tenant_id=OuterRef('tenant_id'), **{payment_owner: OuterRef('pk')}, purpose=purpose,
     )
+    if kind == 'domestic':
+        payment_history = payment_history.filter(domestic_expense_group__isnull=True)
     converted = effective_payments.filter(supplier_deposit_transfer__isnull=False).order_by().values(owner).annotate(total=Sum('amount')).values('total') if kind == 'deposit' else None
     query = query.annotate(has_payment_history=Exists(payment_history),
         converted_amount=Coalesce(Subquery(converted, output_field=MONEY), ZERO) if converted is not None else ZERO,
@@ -497,6 +508,8 @@ class DashboardQueue(InternalAPI):
                     purpose='domestic_freight' if kind == 'domestic' else 'goods',
                     reverses__isnull=True, reversal__isnull=True,
                     item_snapshot__name__icontains=v['payment_item'])
+                if kind == 'domestic':
+                    matching = matching.filter(domestic_expense_group__isnull=True)
                 records = records.filter(Exists(matching))
             if v.get('party_id'):
                 records = records.filter(_party_id=v['party_id'])
