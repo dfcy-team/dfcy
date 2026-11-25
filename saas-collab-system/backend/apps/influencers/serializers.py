@@ -718,6 +718,27 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
     deleted_by_name = serializers.SerializerMethodField()
     video_match_count = serializers.SerializerMethodField()
     video_matches = serializers.SerializerMethodField()
+    completion_evidence = serializers.SerializerMethodField()
+
+    def get_completion_evidence(self, obj):
+        if obj.status != "completed":
+            return None
+        events = getattr(obj, "_completion_events", None)
+        event = (next(iter(events), None) if events is not None else
+                 obj.status_events.filter(tenant_id=obj.tenant_id, to_status="completed")
+                 .select_related("actor").order_by("-created_at", "-pk").first())
+        if not event:
+            return None
+        if not event.source and (event.reason == "manual_edit" or (event.reason or "").startswith("manual_completion:")):
+            return {"kind": "manual", "at": event.created_at, "actor": event.actor.get_username()}
+        parts = (event.reason or "").split(":")
+        if (not event.source and len(parts) == 3 and parts[0] == "api_video_verified"
+                and parts[1].isdigit() and parts[2] and any(
+                    v.external_content_id == parts[2] and v.platform.lower() == "tiktok"
+                    and v.store_id == obj.store_id and v.influencer_id == obj.influencer_id
+                    for v in self._published_videos(obj))):
+            return {"kind": "system", "at": event.created_at, "video_id": parts[2]}
+        return None
 
     @staticmethod
     def _display_name(value):
@@ -817,7 +838,7 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
             "product_name_snapshot", "external_product_id", "sample_order_no",
             "link_type", "quick_tags", "sample_sent_at", "shipped_at", "video_deadline_at", "status", "source", "external_id", "version",
             "notes", "finalized_at", "sku_quantity", "calculated_cost",
-            "is_deleted", "deleted_at", "deleted_by", "deleted_by_name", "video_match_count", "video_matches",
+            "is_deleted", "deleted_at", "deleted_by", "deleted_by_name", "video_match_count", "video_matches", "completion_evidence",
             "items", "created_at", "updated_at",
         )
         read_only_fields = (
