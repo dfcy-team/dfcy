@@ -202,7 +202,7 @@ def product_quotes(envelopes):
     return quotes, metadata
 
 
-def collect(user, scope, *, allow_legacy_zero=True):
+def collect(user, scope, *, allow_legacy_zero=True, native=False):
     from apps.masterdata.models import StoreMaster
     from apps.finance.models import PlatformFinanceTransaction
     from apps.finance.warehouse_fee_models import WarehouseFee, WarehouseBillUpload
@@ -230,19 +230,73 @@ def collect(user, scope, *, allow_legacy_zero=True):
 
     finance = PlatformFinanceTransaction.objects.filter(tenant=user.tenant, store_id__in=stores,
         business_date__gte=start, business_date__lte=end).order_by('pk')
-    financial_rows = list(finance)
-    groups = defaultdict(list)
-    for r in financial_rows:
-        store = stores[r.store_id]
-        raw.append({'id': r.pk, 'date': str(r.business_date), 'platform': r.platform, 'store_id': r.store_id,
-                    'store': store.code, 'country': store.country_code, 'order': r.external_order_id,
-                    'name': r.raw_fee_name, 'raw': text(r.raw_amount), 'amount': text(r.signed_amount),
-                    'currency': r.currency, 'match': r.match_status})
-        groups[(r.store_id, r.external_order_id, str(r.business_date), r.currency)].append(r)
+    financial_count = 0
+    if native:
+        from django.db import connections
+        from django.db.models import Func
+        from itertools import groupby
+        connection = connections[finance.db]
+        def read_sql(queryset):
+            sql, params = queryset.query.get_compiler(using=queryset.db).as_sql()
+            if connection.vendor == 'mysql':
+                table = connection.ops.quote_name(queryset.model._meta.db_table)
+                index = 'idx_fin_tx_store_date'
+                sql = sql.replace('FROM '+table, 'FROM '+table+' FORCE INDEX ('+connection.ops.quote_name(index)+')', 1)
+            return sql, params
+        envelope_ids = set()
+        for store_id in sorted(stores):
+            ids = finance.filter(store_id=store_id, platform='shopee', raw_envelope_id__isnull=False).order_by().values_list('raw_envelope_id', flat=True).distinct()
+            if connection.vendor == 'mysql':
+                with connection.cursor() as cursor:
+                    cursor.execute(*read_sql(ids))
+                    envelope_ids.update(row[0] for row in cursor.fetchall())
+            else:
+                envelope_ids.update(ids)
+        group_order = ['store_id', 'external_order_id', 'business_date', 'currency', 'pk']
+        if connection.vendor == 'mysql':
+            binary = lambda field: Func(field, function='BINARY', template='%(function)s %(expressions)s')
+            group_order = ['store_id', binary('external_order_id'), 'business_date', binary('currency'), 'pk']
+        ordered = finance.only('id', 'store_id', 'business_date', 'platform', 'external_order_id',
+            'raw_fee_name', 'raw_amount', 'signed_amount', 'currency', 'match_status', 'raw_envelope_id', 'fee_category'
+            ).order_by(*group_order)
+        finance_fields = ('id', 'store_id', 'business_date', 'platform', 'external_order_id', 'raw_fee_name',
+                  'raw_amount', 'signed_amount', 'currency', 'match_status', 'raw_envelope_id', 'fee_category')
+        from collections import namedtuple
+        FinanceRow = namedtuple('FinanceRow', ('pk', *finance_fields[1:]))
+        def read_finance():
+            for store_id in sorted(stores):
+                query = ordered.filter(store_id=store_id).values_list(*finance_fields)
+                if connection.vendor != 'mysql':
+                    for values in query.iterator(chunk_size=500):
+                        yield FinanceRow(*values)
+                    continue
+                with connection.cursor() as cursor:
+                    cursor.execute(*read_sql(query))
+                    while True:
+                        batch = cursor.fetchmany(500)
+                        if not batch:break
+                        for values in batch:
+                            yield FinanceRow(*values)
+        iterator = read_finance()
+        grouped = ((key, list(rows)) for key, rows in groupby(iterator,
+            lambda row: (row.store_id, row.external_order_id, str(row.business_date), row.currency)))
+        financial_rows = []
+    else:
+        financial_rows = list(finance)
+        financial_count = len(financial_rows)
+        groups = defaultdict(list)
+        for r in financial_rows:
+            store = stores[r.store_id]
+            raw.append({'id': r.pk, 'date': str(r.business_date), 'platform': r.platform, 'store_id': r.store_id,
+                        'store': store.code, 'country': store.country_code, 'order': r.external_order_id,
+                        'name': r.raw_fee_name, 'raw': text(r.raw_amount), 'amount': text(r.signed_amount),
+                        'currency': r.currency, 'match': r.match_status})
+            groups[(r.store_id, r.external_order_id, str(r.business_date), r.currency)].append(r)
+        grouped = groups.items()
+        envelope_ids = {r.raw_envelope_id for r in financial_rows if r.platform == 'shopee'}
 
     # Read exact provider escrow versions referenced by posted financial facts.
-    envelopes = SyncRawEnvelope.objects.filter(tenant=user.tenant,
-        pk__in={r.raw_envelope_id for r in financial_rows if r.platform == 'shopee'}).order_by()
+    envelopes = SyncRawEnvelope.objects.filter(tenant=user.tenant, pk__in=envelope_ids).order_by()
     escrow = {}
     for envelope in envelopes.iterator(chunk_size=20):
         for index, trace in enumerate(envelope.payload.get('responses') or []):
@@ -257,9 +311,16 @@ def collect(user, scope, *, allow_legacy_zero=True):
                 raise ValidationError('同一来源订单结算响应冲突，未汇总。')
             escrow[key] = {'income': cleaned, 'envelope_id': envelope.pk, 'response_index': index}
     shopee_income = []
+    component_pool, text_pool = {}, {}
     settled = {}
-    for (store_id, order, day, currency), rows in groups.items():
+    raw_stores = set()
+    for (store_id, order, day, currency), rows in grouped:
         store = stores[store_id]
+        if native:
+            financial_count += len(rows)
+            if store_id not in raw_stores:
+                raw.append({'platform': rows[0].platform, 'store_id': store_id, 'store': store.code})
+                raw_stores.add(store_id)
         if store.platform.platform_type == 'lazada':
             if order and any(r.match_status != 'conflict' for r in rows):
                 settled[(store_id, order)] = min(settled.get((store_id, order), day), day)
@@ -286,6 +347,9 @@ def collect(user, scope, *, allow_legacy_zero=True):
             settled[(store_id, order)] = min(settled.get((store_id, order), day), day)
         source = escrow.get((store_id, order, net_row.raw_envelope_id)) or posted_income(rows, net_row.raw_envelope_id)
         income = source['income'] if source else {}
+        if native and source:
+            income = {key: text_pool.setdefault(value, value) for key, value in income.items()}
+            source = {**source, 'income': income}
         components = []
         if store.code.startswith('SPKJ'):
             fields = [('voucher_from_seller', -1), ('seller_coin_cash_back', -1),
@@ -305,7 +369,11 @@ def collect(user, scope, *, allow_legacy_zero=True):
             merchandise = Decimal(income['order_selling_price']) if income.get('order_selling_price') is not None else None
         refund = Decimal(income['seller_return_refund']) if income.get('seller_return_refund') is not None else None
         for name, sign in fields:
-            components.append({'field': name, 'label': name, 'amount': text(Decimal(income[name])*sign) if income.get(name) is not None else None})
+            value = text(Decimal(income[name])*sign) if income.get(name) is not None else None
+            component = {'field': name, 'label': name, 'amount': value}
+            if native and value in (None, '0.000000', '-0.000000'):
+                component = component_pool.setdefault((name, value), component)
+            components.append(component)
         fees = None if any(c['amount'] is None for c in components) else sum((Decimal(c['amount']) for c in components), ZERO)
         sales = None if merchandise is None or refund is None else merchandise-refund
         reconciled = sales is not None and fees is not None and refund is not None and sales+fees+refund == net_row.raw_amount
@@ -315,6 +383,12 @@ def collect(user, scope, *, allow_legacy_zero=True):
                 sp6th_components=components if kind == 'order_fee' else None, description='SaaS保存的官方订单结算响应；构成必须与净结算额对平。')
         if source:shopee_income.append({'store_id': store_id, 'order': order, 'date': day, 'currency': currency, **source})
 
+    financial_flows = [{'native_fact_index': index} for index in range(len(facts))] if native else []
+    if native:
+        escrow.clear()
+        component_pool.clear()
+        text_pool.clear()
+
     # Cost is charged once, at the first positive settlement; refunds do not imply physical returns.
     first = {}
     for f in facts:
@@ -323,14 +397,63 @@ def collect(user, scope, *, allow_legacy_zero=True):
             first[k] = min(first.get(k, f['date']), f['date'])
     prior = PlatformFinanceTransaction.objects.filter(tenant=user.tenant, store_id__in=stores,
         business_date__lt=start, raw_amount__gt=0).filter(Q(raw_fee_name__iexact='Item Price Credit') | Q(raw_fee_name='order_selling_price') | Q(raw_fee_name='escrow_amount'))
-    prior_keys = set(prior.values_list('store_id', 'external_order_id'))
-    orders = list(SalesOrder.objects.filter(tenant=user.tenant, store_id__in=stores))
+    if native:
+        # Historical settlement matters only for orders receiving a cost in this scope.
+        prior = prior.filter(external_order_id__in={key[1] for key in first}).order_by()
+        prior_keys = set(prior.values_list('store_id', 'external_order_id').distinct())
+    else:
+        prior_keys = set(prior.values_list('store_id', 'external_order_id'))
+    registrations = None
+    shipment_lookups = None
+    related_ids = set()
+    if native:
+        from apps.sales_management.warehouse_order_models import OrderWarehouseLookup
+        from apps.sales_management.aftersales_models import ReturnAllocation
+        registrations = list(OrderRegistration.objects.filter(tenant=user.tenant, store_id__in=stores,
+            deleted_at__isnull=True, status__in=['registered', 'historical_recorded', 'completed', 'applied']
+            ).select_related('order').only('id', 'store_id', 'kind', 'payload', 'version', 'order_id',
+                'order__id', 'order__external_order_id').order_by('version', 'pk'))
+        for registration in registrations:
+            payload = registration.payload
+            day = str(payload.get('paid_at') if registration.kind == 'gcash' else payload.get('rate_date'))[:10]
+            if registration.kind in ('gcash', 'promotion') and str(start) <= day <= str(end) and registration.order_id:
+                related_ids.add(registration.order_id)
+        before = date.fromordinal(max(date.min.toordinal(), start.toordinal()-2))
+        after = date.fromordinal(min(date.max.toordinal(), end.toordinal()+2))
+        related_ids.update(ReturnAllocation.objects.filter(case__tenant=user.tenant, case__store_id__in=stores,
+            line__receipt__tenant=user.tenant, line__receipt__received_at__date__range=(before, after)
+            ).order_by().values_list('case__order_id', flat=True).distinct())
+        financial_orders = {f['external_order_id'] for f in facts if f.get('external_order_id')}
+        selected = Q(order__external_order_id__in=financial_orders) | Q(order_id__in=related_ids)
+        shipped = Q(status='matched', warehouse_id__isnull=False)
+        first_month, last_month = start.year*12+start.month-1, end.year*12+end.month-1
+        if last_month-first_month <= 24:
+            dates = Q(pk__in=[])
+            for month in range(max(12, first_month-1), min(9999*12+11, last_month+1)+1):
+                dates |= Q(snapshot__packages__icontains=f'{month//12:04d}-{month%12+1:02d}')
+            shipped &= dates
+        lookup_query = OrderWarehouseLookup.objects.filter(order__tenant=user.tenant, order__store_id__in=stores
+            ).filter(selected | shipped).order_by().only('id', 'order_id', 'status', 'warehouse_id', 'snapshot')
+        shipment_lookups = {row.order_id: row for row in lookup_query.iterator(chunk_size=500)}
+        related_ids.update(shipment_lookups)
+    order_query = SalesOrder.objects.filter(tenant=user.tenant, store_id__in=stores)
+    if native:
+        from django.db.models import F
+        order_query = order_query.filter(Q(pk__in=related_ids) | Q(external_order_id__in=financial_orders)).order_by().only('id', 'store_id', 'platform_id', 'external_order_id',
+            'raw_status', 'normalized_status', 'delivered_at_utc').annotate(
+                _read_logistics=F('source_details__platform_logistics'),
+                _read_pickup=F('source_details__platform_pickup_at_utc'))
+    orders = list(order_query)
+    if native:
+        for order in orders:
+            order.source_details = {'platform_logistics': order._read_logistics,
+                                    'platform_pickup_at_utc': order._read_pickup}
     orders_by_key = {(r.store_id, r.external_order_id): r for r in orders}
     order_dates = shipping_dates(orders, ShipmentRecord.objects.filter(tenant=user.tenant,
         store_id__in=stores, sales_order__isnull=False).values(
             'sales_order_id', 'store_id', 'platform_id', 'shipped_at_utc'))
     from .summary_cost_classification import collect_classifications, classify
-    classifications = collect_classifications(user, stores, orders, facts)
+    classifications = collect_classifications(user, stores, orders, facts, native=native)
     sku_sales = {'source': 'SaaS SalesOrderItem', 'orders': {}, 'exchanges': {}}
     products = {}; catalogue = []
     provider_shops = defaultdict(set)
@@ -338,14 +461,45 @@ def collect(user, scope, *, allow_legacy_zero=True):
             tenant=user.tenant, store_id__in=stores, platform='shopee', status='active').values('store_id', 'platform_store_id'):
         identity = str(authorization['platform_store_id'] or '')
         if identity.isdigit():provider_shops[authorization['store_id']].add(identity)
-    for r in PlatformProductDetail.objects.filter(tenant=user.tenant, store_id__in=stores).order_by('pk'):
+    product_query = PlatformProductDetail.objects.filter(tenant=user.tenant, store_id__in=stores).order_by('pk')
+    if native:
+        product_query = product_query.only('store_id', 'platform_product_id', 'platform_variant_id', 'platform_sku', 'internal_sku_id', 'title').iterator(chunk_size=500)
+    for r in product_query:
         catalogue.append({k: getattr(r, k) for k in ['store_id', 'platform_product_id', 'platform_variant_id', 'platform_sku', 'internal_sku_id', 'title']})
         products[(r.store_id, r.platform_product_id)] = {'store_id': r.store_id, 'platform_product_id': r.platform_product_id, 'title': r.title, 'url': ''}
     quotes, saved_products = product_quotes(SyncRawEnvelope.objects.filter(
         tenant=user.tenant, store_id__in=stores, endpoint__icontains='product').order_by().iterator(chunk_size=10))
     for key, product in saved_products.items():
         if product['title']:products[key] = product
-    for item in SalesOrderItem.objects.filter(sales_order__tenant=user.tenant, sales_order__store_id__in=stores).select_related('sales_order').order_by('pk'):
+    if native:
+        # Retain the same historical title fallback without loading unrelated item payloads.
+        from itertools import islice
+        for sid in sorted(stores):
+            historical_orders = iter(SalesOrder.objects.filter(tenant=user.tenant, store_id=sid
+                ).order_by().values_list('pk', flat=True).iterator(chunk_size=500))
+            fallback = {}
+            while True:
+                batch = list(islice(historical_orders, 500))
+                if not batch:break
+                titles = SalesOrderItem.objects.filter(sales_order_id__in=batch).order_by().values_list(
+                    'pk', 'platform_product_id', 'item_name_snapshot')
+                for item_id, pid, title in titles.iterator(chunk_size=500):
+                    if (sid, pid) not in products and (pid not in fallback or item_id < fallback[pid][0]):
+                        fallback[pid] = (item_id, title)
+            for pid, (_, title) in fallback.items():
+                products[(sid, pid)] = {'store_id': sid, 'platform_product_id': pid, 'title': title, 'url': ''}
+    item_query = SalesOrderItem.objects.filter(sales_order__tenant=user.tenant, sales_order__store_id__in=stores).select_related('sales_order').order_by('pk')
+    if native:
+        item_query = item_query.only('id', 'sales_order_id', 'internal_sku_id', 'platform_product_id',
+            'platform_variant_id', 'seller_sku', 'quantity', 'source_details', 'original_unit_price',
+            'sale_unit_price', 'line_total_amount', 'currency', 'item_name_snapshot',
+            'sales_order__id', 'sales_order__store_id', 'sales_order__external_order_id')
+        from itertools import chain
+        order_ids = [order.pk for order in orders]
+        item_rows = item_query
+        item_query = chain.from_iterable(item_rows.filter(sales_order_id__in=order_ids[offset:offset+500]).iterator(chunk_size=500)
+            for offset in range(0, len(order_ids), 500))
+    for item in item_query:
         order = item.sales_order;key = str(order.store_id)+'|'+order.external_order_id
         line = {'item_id': item.pk, 'internal_sku_id': item.internal_sku_id, 'platform_product_id': item.platform_product_id,
                 'platform_variant_id': item.platform_variant_id, 'seller_sku': item.seller_sku, 'quantity': item.quantity,
@@ -359,11 +513,13 @@ def collect(user, scope, *, allow_legacy_zero=True):
                         current_price_fresh=(timezone.now()-quote['captured_at']).total_seconds() <= 86400)
         sku_sales['orders'].setdefault(key, []).append(line)
         products.setdefault((order.store_id, item.platform_product_id), {'store_id': order.store_id, 'platform_product_id': item.platform_product_id, 'title': item.item_name_snapshot, 'url': ''})
-    registrations = list(OrderRegistration.objects.filter(tenant=user.tenant, store_id__in=stores,
-        deleted_at__isnull=True, status__in=['registered', 'historical_recorded', 'completed', 'applied']).order_by('version', 'pk'))
+    if registrations is None:
+        registrations = list(OrderRegistration.objects.filter(tenant=user.tenant, store_id__in=stores,
+            deleted_at__isnull=True, status__in=['registered', 'historical_recorded', 'completed', 'applied']).order_by('version', 'pk'))
     from apps.sales_management.warehouse_order_models import OrderWarehouseLookup
     from .summary_shipped_items import shipped_items
-    shipment_lookups = {r.order_id: r for r in OrderWarehouseLookup.objects.filter(order__tenant=user.tenant, order__store_id__in=stores)}
+    if shipment_lookups is None:
+        shipment_lookups = {r.order_id: r for r in OrderWarehouseLookup.objects.filter(order__tenant=user.tenant, order__store_id__in=stores)}
     skus = {s.pk: s for s in ProductSKU.objects.filter(tenant=user.tenant)}
     aliases = defaultdict(set)
     for sku in skus.values():
@@ -508,10 +664,9 @@ def collect(user, scope, *, allow_legacy_zero=True):
             continue
         periods = sorted({f['date'][:7] for f in facts if f.get('store_id') == store.pk})
         for period in periods:
-            for kind in ['gcash', 'promotion', 'adjustment']:
-                if not any(f.get('store_id') == store.pk and f['kind'] == kind and f['date'].startswith(period) for f in facts):
-                    add(store, kind, ZERO if allow_legacy_zero and kind != 'adjustment' and store.code == 'SP6TH' else None, period, source_id='database:coverage:'+str(store.pk)+':'+period+':'+kind,
-                        source='SaaS来源覆盖检查', description='未获取独立调整来源，保留待核' if kind == 'adjustment' else '当前结算范围无有效登记；保持已确认的缺失科目口径，不推断业务实际费用为0')
+            if not any(f.get('store_id') == store.pk and f['kind'] == 'adjustment' and f['date'].startswith(period) for f in facts):
+                add(store, 'adjustment', None, period, source_id='database:coverage:'+str(store.pk)+':'+period+':adjustment',
+                    source='SaaS来源覆盖检查', description='未获取独立调整来源，保留待核')
     basis = {}
     for r in WarehouseBillUpload.objects.filter(tenant=user.tenant).order_by('created_at'):
         p = r.summary or {}
@@ -519,12 +674,12 @@ def collect(user, scope, *, allow_legacy_zero=True):
             key = '|'.join([p['country'], p['bill_month'], p.get('currency') or 'CNY'])
             basis[key] = {'total': str(p['order_detail_sum']), 'file': r.file_name, 'sha256': r.file_hash}
     from .summary_raw_flows import source_flows
-    raw_flows = source_flows(stores, financial_rows, fees, registrations,
+    raw_flows = financial_flows + source_flows(stores, financial_rows, fees, registrations,
         FinanceSummaryInput.objects.filter(tenant=user.tenant, kind='adjustment', store_id__in=stores),
         facts, start, end) + cost_flows + [dict(r) for r in returns]
     convert_costs(facts, stores, rates)
     shares = warehouse_shares(facts, basis, rates)
-    members = _sku_members(facts, rates)
+    members = [] if native else _sku_members(facts, rates)
     # Product routes use only stored platform shop/product IDs.
     for (sid, pid), product in products.items():
         store = stores[sid];host = {'PH': 'com.ph', 'TH': 'co.th', 'MY': 'com.my'}.get(store.country_code)
@@ -537,7 +692,7 @@ def collect(user, scope, *, allow_legacy_zero=True):
     return {'schema': 'saas-finance-database.v1', 'read_at': stamp, 'scope': scope, 'raw': raw, 'facts': facts,
             'shares': shares, 'rates': rates, 'order_dates': order_dates, 'cost_flows': cost_flows, 'raw_flows': raw_flows, 'sku_members': members, 'sku_sales': sku_sales,
             'products': {'rows': catalogue, 'products': list(products.values())}, 'shopee_income': shopee_income,
-            'recharge': recharge, 'cycles': cycles, 'source_counts': {'platform_finance': len(raw), 'facts': len(facts),
+            'recharge': recharge, 'cycles': cycles, 'source_counts': {'platform_finance': financial_count, 'facts': len(facts),
             'order_items': sum(map(len, sku_sales['orders'].values())), 'cost_versions': len(cost_versions), 'warehouse_registered': len(fees)}}
 
 

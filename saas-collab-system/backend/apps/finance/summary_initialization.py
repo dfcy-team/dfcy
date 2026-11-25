@@ -45,14 +45,21 @@ def runtime_status():
 def initialization_status(user):
     from apps.masterdata.models import StoreMaster
     require_access(user)
+    from .summary_scopes import full_reader,store_ids
+    full=full_reader(user)
+    visible=StoreMaster.objects.filter(tenant=user.tenant)
+    if not full:visible=visible.filter(pk__in=store_ids(user))
     runtime = runtime_status()
     job = FinanceSummaryCalculation.objects.filter(tenant=user.tenant,
-        request__bootstrap=True).order_by('-pk').values('id', 'status', 'error_code', 'result_dataset_id', 'created_at', 'finished_at', 'request').first()
+        request__bootstrap=True).order_by('-pk').values('id', 'status', 'error_code', 'result_dataset_id', 'created_at', 'finished_at', 'request__scope').first() if full else None
     if job:
-        job['scope'] = job.pop('request').get('scope', {})
+        previous = job.pop('request__scope') or {}
+        allowed = set(visible.values_list('pk', flat=True))
+        job['scope'] = {key: previous[key] for key in ('from', 'to') if key in previous}
+        job['scope']['stores'] = [pk for pk in previous.get('stores', []) if pk in allowed]
     return {'initialized': False, 'status': 'uninitialized' if runtime['ready'] else 'runtime_missing',
-        'runtime': runtime, 'can_edit': has_full_scope(user, 'finance.import'), 'initialization_job': job,
-        'scope_stores': list(StoreMaster.objects.filter(tenant=user.tenant).order_by('code').values('id', 'code'))}
+        'runtime': runtime, 'can_edit': full and has_full_scope(user, 'finance.import'), 'initialization_job': job,
+        'scope_stores': list(visible.order_by('code').values('id', 'code'))}
 
 
 def request_initialization(user, scope):
@@ -120,4 +127,6 @@ def publish_candidate(user, pk):
             object_type='finance_summary', object_id=str(candidate.pk),
             masked_detail={'source_hash': candidate.source_hash, 'scope': scope,
                 'conservation_passed': True, 'attribution_complete': candidate.metadata['reconciliation']['attribution_complete']})
+        from .summary_documents import queue_settings_warmup
+        transaction.on_commit(lambda: queue_settings_warmup(candidate.pk))
         return candidate

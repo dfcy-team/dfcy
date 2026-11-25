@@ -30,7 +30,7 @@ function allocateAdvertising(ads,sales,type){
    hierarchy_allocation:{method:'period_order_sales_share',period_type:type,period,source_ids:rows.map(f=>f.source_id),parent_amount:known.length?fixed(amount):null},
    allocation_reason:'同店同币种同期广告金额 × 订单同期退款前结算销售额 ÷ 同期全部有效结算订单销售额'};
   if(!basis?.size||!known.length)return[{...base,external_order_id:'',allocation_reason:'当期有效结算销售额／广告金额缺失，或结算分母不完整，保留待分摊，不跨期转嫁'}];
-  const shares=split(amount,[...basis]);return [...basis].map(([order,weight])=>({...base,source_id:base.source_id+':'+order,external_order_id:order,amount:fixed(shares.get(order)),original_amount:fixed(shares.get(order)),hierarchy_allocation:{...base.hierarchy_allocation,order_sales:fixed(weight),store_sales:fixed([...basis.values()].reduce((a,b)=>a+b,0n))}}));
+  const shares=split(amount,[...basis]),denominator=fixed([...basis.values()].reduce((a,b)=>a+b,0n));return [...basis].map(([order,weight])=>({...base,source_id:base.source_id+':'+order,external_order_id:order,amount:fixed(shares.get(order)),original_amount:fixed(shares.get(order)),hierarchy_allocation:{...base.hierarchy_allocation,order_sales:fixed(weight),store_sales:denominator}}));
  });
 }
 function allocatePublicFees(fees,sales,type){

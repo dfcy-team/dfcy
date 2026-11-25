@@ -1,0 +1,123 @@
+{
+  "status": "PR_HANDOFF_NOT_DEPLOYED",
+  "base_branch": "release/v518-cloud-reconciled-20261121",
+  "base_commit": "d0914d45eb652071d5aa01730a7acd7d45fac692",
+  "owner": "torreydy-doo",
+  "validation": {
+    "backend": {
+      "status": "PASS",
+      "summary": "197 passed",
+      "log_sha256": "a2960f8ecdfa7853556b63e4e3bf74c1c8e39e960242bf67e9cdf52c6bbca270"
+    },
+    "frontend": {
+      "status": "PASS",
+      "summary": "293 passed",
+      "log_sha256": "0e6481e62e89135e9302b0f9dbe7ab0bf01ad69315978a2f296cecd0c97ca1df"
+    },
+    "build": {
+      "status": "PASS",
+      "summary": "built in",
+      "log_sha256": "ce4b6c504ed01d1614044e23fe4b71753c72c6f3191e52a1bf05bd6fe4a1af3d"
+    },
+    "migration_consistency": {
+      "status": "PASS",
+      "summary": "No changes detected in app 'finance'",
+      "log_sha256": "896da9af30dfeb99211c6f791a564adeff633126ac0a5e180f94cde3b890fc7d"
+    }
+  },
+  "permission_manifest": {
+    "status": "PASS",
+    "new_routes": 4,
+    "new_endpoint_method_rows": 12
+  },
+  "cloud": {
+    "production_switched": false,
+    "formal_registration": false,
+    "r23": {
+      "status": "PASS",
+      "scope": "2026-10 all authorized stores",
+      "rows": 1299917,
+      "groups": 17,
+      "cold_seconds": 275.678,
+      "warm_seconds": 0.211,
+      "source_read_ms": 193958.91,
+      "peak_mib": 1688
+    },
+    "r26": {
+      "status": "PASS",
+      "scope": "same cached October source, later engine/detail candidate",
+      "engine_seconds": 75.979,
+      "warm_seconds": 0.275,
+      "detail_seconds": 4.204,
+      "detail_records_total": 1958,
+      "detail_records_page": 50,
+      "peak_mib": 1671.8
+    },
+    "r28": {
+      "status": "FAILED",
+      "results": [],
+      "error_type": "ValidationError",
+      "released_vm_before_reads": [
+        true
+      ],
+      "cross_month_week_executed": false
+    },
+    "probe_limits": {
+      "cpu": 0.5,
+      "memory_mib": 1792
+    },
+    "blockers": [
+      "Diagnose and pass current-month default query",
+      "Cloud cross-month-week and scope-transition verification",
+      "Current cloud baseline and release coordination",
+      "Shared runtime image switch impact confirmation",
+      "Production settings/save regression and user acceptance"
+    ]
+  },
+  "source_git_blob_sha256": {
+    "saas-collab-system/backend/apps/finance/migrations/0019_financesummaryautomationcheck.py": "eef165b0e778ecbdfd89d1d074c7956b11b91041e31c6de9ad2e6ef0c113afd0",
+    "saas-collab-system/backend/apps/finance/models.py": "1bcf393945bced3e55b4ae451c346484ffbaf43c575a354ad68f21546674f450",
+    "saas-collab-system/backend/apps/finance/source_flow_views.py": "0238c2203ca2d8ce2e45953d19868345743cb52e1b41651854807d5afeec79f2",
+    "saas-collab-system/backend/apps/finance/summary_accounting_rules.json": "c5d9e721bc987b1fe6d1b2beac18b1d68a40f60fb8a8f235b93c2bcaec2bd84c",
+    "saas-collab-system/backend/apps/finance/summary_allocation.cjs": "9cc337369aef4d40fb5c9ee947917511cf8c7d3da6a5dcc35d55037acbe62118",
+    "saas-collab-system/backend/apps/finance/summary_bridge.js": "ce34a6249af8c09a561e88a331a2f353069817822ca626709e542ad560a027d1",
+    "saas-collab-system/backend/apps/finance/summary_browser_shell.py": "535f86a5ecf5e474a06e8281cb34686eba153910a33d1761e1c0edad548ea174",
+    "saas-collab-system/backend/apps/finance/summary_composition.js": "b6c3987636d53fb9c9d78ecf35eda576b1e8f1452edc2f020d6ba9ee6140cc5e",
+    "saas-collab-system/backend/apps/finance/summary_cost_classification.py": "f86d7a1cc85b0858c4f8dcf514a9c52f95279b8d49baa1a5ba4b3e30c2bed076",
+    "saas-collab-system/backend/apps/finance/summary_database.py": "313634f65244441e22e71f6a007fe7e6c3c36875f06d3459f4b664e10a9a7df5",
+    "saas-collab-system/backend/apps/finance/summary_database_document.py": "780d559bf298a125f63fceb0dfdddd1b3daeba482f87a2182f7001b4468bf7e3",
+    "saas-collab-system/backend/apps/finance/summary_documents.py": "e84bbcab6e956c6b1686e0d3e58ff0e94f9d56e7c3ebddce9d3936154c168cdb",
+    "saas-collab-system/backend/apps/finance/summary_engine.cjs": "fcfe8ee60f8b5ff6dfa8700fd418de1d45ed449bce7da0d9e535d145c74aba90",
+    "saas-collab-system/backend/apps/finance/summary_flow_view.cjs": "e94f1c7771a458f3e3ea73123e755b820b093180c2dd0492c432a663f9cc2168",
+    "saas-collab-system/backend/apps/finance/summary_health.py": "62dd521dafb143d7c9ae6507630f266908cd4ec200609e3edbee43eed0765ead",
+    "saas-collab-system/backend/apps/finance/summary_initialization.py": "5c8e121578daaf1d88c6e96f85af16e3ea9593f9f28d04aed0a8d85f6e1cabe3",
+    "saas-collab-system/backend/apps/finance/summary_jobs.py": "d2aa6df3f7fccf9e47841040f956a26bf0af7f177eb88a5d37a9178b899c46bd",
+    "saas-collab-system/backend/apps/finance/summary_maintenance.py": "6ff011d562f8ad0e1ff94fa84bf55783ce5ee107344678239acb5edde796a5b6",
+    "saas-collab-system/backend/apps/finance/summary_models.py": "09c5c1299abfd4a338128a8279cc2a21bb56f316dc129152e03d1e0a305c4d7e",
+    "saas-collab-system/backend/apps/finance/summary_native.cjs": "08b254ab70d7fee6f50860a03aebb2c8bb329e8b576c6be2441c2757a64468c4",
+    "saas-collab-system/backend/apps/finance/summary_native.py": "1ed5f49917384c377044e228b3ca5359f542fbe8deb7aad51f8cc24ae7e0b6b1",
+    "saas-collab-system/backend/apps/finance/summary_order_ledger.cjs": "b03db0a285b459eb5ba21a662527e784fa206512b0effb9e3db06e2b83d26619",
+    "saas-collab-system/backend/apps/finance/summary_participation.js": "6962867f68a99f45b87d341aee6532ee35d58a29278c11a610faca0a1322d0a6",
+    "saas-collab-system/backend/apps/finance/summary_periods.cjs": "d58974c64b92764037c23812aa53f305c455adc40185698a1f0e8c0287f7423e",
+    "saas-collab-system/backend/apps/finance/summary_read_query.py": "04ba28c4befc1d279c8bc9fa9fe84baa91f34e5bce212b26a7dbb36f09f9183b",
+    "saas-collab-system/backend/apps/finance/summary_rebuild.py": "7d01a3cf04ee774903b571a3e93b6e2266155e9177bc70b3e8a4574453c47b20",
+    "saas-collab-system/backend/apps/finance/summary_scopes.py": "574fe202fdf5207115c7ea5744e7bd6f176d34de57c8c6f45ad4902a0e5a84d1",
+    "saas-collab-system/backend/apps/finance/summary_service.py": "7c212d28028f97433637a8e8fa8d3a3dfee336cc3bab655107143a6f426b73bb",
+    "saas-collab-system/backend/apps/finance/summary_source_worker.py": "e56b30266ff879198a25541ff8289d64943e1f408ab9a1e8ad6541277708a756",
+    "saas-collab-system/backend/apps/finance/summary_tools.js": "796ef3a9d78178e3244688b168783597921c49e519e27485d1eb2c383b759d71",
+    "saas-collab-system/backend/apps/finance/summary_views.py": "ab8606163c5e0d01805a32fd8035ab9fa482c430c2484ce2b8f9c5a02d42c4eb",
+    "saas-collab-system/backend/apps/finance/summary_worker.cjs": "2e3cfe781ff364d17e81e691d73fc94fd07e95699bc92fa9dce1bdad11257511",
+    "saas-collab-system/backend/apps/finance/tasks.py": "e62c4256df8bf3f760ef45f40770480be5277cf74f84f20268bdc94b3492daa6",
+    "saas-collab-system/backend/apps/finance/templates/settings-layout-v1.js": "1b33d1cc5d4aa383d0efec07f6bb3d728dfbbbef9aff5a5c970b7a5f4a19bafa",
+    "saas-collab-system/backend/apps/finance/templates/settings-shell-v1.html": "5301417566b34c019d6eedb21238f86f9e0d009ebffaf0388ed7ae88d3bc221f",
+    "saas-collab-system/backend/apps/finance/templates/settings-shell-v1.json": "a8e131efc6d5a1e85b6ddbd6cfeb71090567432286f3c1dbaccc81b0bb84ebcc",
+    "saas-collab-system/backend/apps/finance/urls.py": "1fd151d1264da4aeb2e640f655b48b2beffc66f9bc4c78f875793c79cbec2597",
+    "saas-collab-system/backend/apps/permissions/permission_manifest.json": "144d1d1f93889dd7cac0ba7e30a90a1e8ef76a1a73b25e4ff80fadc253fc7aba",
+    "saas-collab-system/frontend/src/api/financeReconciliation.js": "e6cc7455908304fd058acb4be4f325fa9287e2f7339acf29d8a2c6e9de236f5d",
+    "saas-collab-system/frontend/src/api/request.js": "ac9acec92d1bd2cdbcfa3c7474d9674d405949cd052136defc4231e9dd906b5d",
+    "saas-collab-system/frontend/src/views/finance/FinancePeriodPicker.vue": "10dcad5152ff082b2d607a146d5c39633e783e84483664453fe96f78a6cd217b",
+    "saas-collab-system/frontend/src/views/finance/FinanceSummary.vue": "17ff598e2fd194773d40e4f4f84161c4cb9aeed60d07645ddfe648a3336d16aa",
+    "saas-collab-system/frontend/src/views/finance/FinanceSummaryNative.vue": "fd63a2e419762969e7d233c9f26c792eab9111cbd8460655c373a174d9857d96",
+    "saas-collab-system/frontend/src/views/finance/financePeriods.js": "296d206ffb23ded3c5f513ef9199d8085a460e425606a75690cdadb1d94e892b"
+  }
+}

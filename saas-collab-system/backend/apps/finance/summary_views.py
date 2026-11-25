@@ -2,7 +2,9 @@ import gzip
 import hashlib
 import json
 import re
-from functools import lru_cache
+from collections import OrderedDict
+from threading import Lock
+from concurrent.futures import Future
 from pathlib import Path
 
 from rest_framework import serializers
@@ -11,19 +13,34 @@ from rest_framework.exceptions import ValidationError
 
 from apps.common.responses import success_response, error_response
 from apps.permissions.api_permissions import IsFinanceViewer
+from .summary_scopes import request_access
 from .summary_service import dataset_for, metadata, save_state, engine, document_path, unpack_values
 
 
 @api_view(['GET'])
 @permission_classes([IsFinanceViewer])
+@request_access
 def summary_bootstrap(request):
     from .summary_models import FinanceSummaryDataset
+    if request.query_params.get('direct') == '1':
+        from apps.masterdata.models import StoreMaster
+        from .summary_scopes import store_ids, signature, full_reader
+        from .summary_service import require_access
+        require_access(request.user)
+        ids = store_ids(request.user)
+        return success_response({'direct_query': True, 'dataset': None, 'revision': 0,
+            'tenant_id': request.user.tenant_id, 'access_signature': signature(request.user, ids),
+            'can_edit': False, 'can_view_settings': full_reader(request.user) and FinanceSummaryDataset.objects.filter(tenant=request.user.tenant, active=True).exists(),
+            'scope_stores': list(StoreMaster.objects.filter(tenant=request.user.tenant, pk__in=ids)
+                .order_by('code').values('id', 'code', 'country_code', 'currency', 'platform__platform_type'))})
     if not FinanceSummaryDataset.objects.filter(tenant=request.user.tenant, active=True).exists():
         from .summary_initialization import initialization_status
         return success_response(initialization_status(request.user))
     dataset = dataset_for(request.user)
-    data = metadata(dataset, request.user, include_values=request.query_params.get('native') != '1')
-    data['document_version'] = hashlib.sha256(repr(presentation_stamp()).encode()).hexdigest()[:16]
+    data = metadata(dataset, request.user, include_values=request.query_params.get('native') != '1',
+                    lightweight=request.query_params.get('status') == '1' and bool(dataset.metadata.get('database_scope')))
+    if not data.get('lightweight'):
+        data['document_version'] = hashlib.sha256(repr(presentation_stamp()).encode()).hexdigest()[:16]
     response = success_response(data)
     response['Cache-Control'] = 'no-store'
     return response
@@ -71,6 +88,8 @@ def summary_rebuild(request, pk):
 
 def calculation_response(dataset, user, payload, *, kind='query'):
     from .summary_jobs import request_calculation, job_data
+    from .summary_scopes import scoped_payload
+    if kind=='query': payload=scoped_payload(user,payload)
     data = job_data(request_calculation(dataset, user, payload, kind=kind), user)
     response = success_response(data['result'] if data.get('result') is not None else data,
                                 status=202 if data['pending'] else 200)
@@ -80,6 +99,7 @@ def calculation_response(dataset, user, payload, *, kind='query'):
 
 @api_view(['GET'])
 @permission_classes([IsFinanceViewer])
+@request_access
 def summary_job(request, pk):
     from django.shortcuts import get_object_or_404
     from .summary_models import FinanceSummaryCalculation
@@ -95,6 +115,8 @@ def summary_job(request, pk):
 def browser_document(html):
     # Use a parent-mediated API bridge in an opaque-origin sandbox. The frame
     # receives neither authorization tokens nor browser storage access.
+    from .summary_browser_shell import with_browser_shell
+    html = with_browser_shell(html)
     from .summary_database_document import compact_browser_inputs
     html = compact_browser_inputs(html)
     from .summary_composition import adapt_document
@@ -102,10 +124,19 @@ def browser_document(html):
     bridge = Path(__file__).with_name('summary_bridge.js').read_text(encoding='utf-8')
     runtime = Path(__file__).with_name('summary_runtime.js').read_text(encoding='utf-8')
     tools = Path(__file__).with_name('summary_tools.js').read_text(encoding='utf-8')
+    participation = Path(__file__).with_name('summary_participation.js').read_text(encoding='utf-8')
+    accounting_rules = json.loads(Path(__file__).with_name('summary_accounting_rules.json').read_text(encoding='utf-8'))
     def adapt(match):
         attrs, source = match.groups()
         if 'application/json' in attrs:
             return match.group(0)
+        if 'id="html2-shopee-recharge"' in attrs:
+            source = source.replace("const screen={shop:'SP6TH',month:'2026-09',page:1};",
+                "const screen={shop:data.shops[0]?.code||'',month:data.transactions[0]?.date?.slice(0,7)||SNAPSHOT.database?.facts?.[0]?.date?.slice(0,7)||'',page:1};")
+            source = source.replace('function draw(){const shop=', 'function draw(){if(!shops.has(screen.shop))return;const shop=')
+        for rule in accounting_rules:
+            if 'id="' + rule['module'] + '"' in attrs:
+                source = re.sub(rule['find'], lambda _: rule['replace'], source, count=1) if rule.get('regex') else source.replace(rule['find'], rule['replace'])
         if 'id="html2-tab-filters"' in attrs:
             source = source.replace('globalThis.HTML2_TAB_FILTERS={', 'globalThis.HTML2_TAB_FILTERS={memory:()=>JSON.parse(JSON.stringify(saved)),restoreMemory:value=>Object.assign(saved,value||{}),')
         # Modules install their render wrappers first; draw once after setup.
@@ -123,7 +154,7 @@ def browser_document(html):
             source = source.replace('缺少可核对的子项时保留未细分费用', 'SKU与商品链接子项按本行已分摊金额及对应原订单／店铺原始子项净额构成拆分，保留冲销方向；缺少可核对的子项时保留待细分费用')
         return '<script'+attrs+'>'+re.sub(r'\blocalStorage\b', 'globalThis.SAAS_STORAGE', source)+'</script>'
     html = re.sub(r'<script([^>]*)>([\s\S]*?)</script>', adapt, html)
-    html = html.replace('<head>', '<head><script>'+runtime+'</script><script>'+tools+'</script><script>'+bridge+'</script>', 1)
+    html = html.replace('<head>', '<head><script>'+runtime+'</script><script>'+tools+'</script><script>'+bridge+'</script><script>'+participation+'</script>', 1)
     html = html.replace('仅保存在当前浏览器，不写入SaaS', '保存到本地SaaS，保留操作记录')
     html = html.replace('仅保存在当前浏览器，不写SaaS', '保存到本地SaaS，保留操作记录')
     html = html.replace('只保存在当前浏览器，不写入SaaS', '保存到本地SaaS，保留操作记录')
@@ -166,26 +197,99 @@ dialog{top:var(--dialog-top,0px);bottom:auto;height:var(--dialog-height,calc(var
 
 def presentation_stamp():
     return tuple((path.stat().st_mtime_ns, path.stat().st_size) for path in
-                 [Path(__file__), Path(__file__).with_name('summary_database_document.py'), Path(__file__).with_name('summary_bridge.js'), Path(__file__).with_name('summary_runtime.js'), Path(__file__).with_name('summary_tools.js'), Path(__file__).with_name('summary_composition.py'), Path(__file__).with_name('summary_composition.js')])
+                 [Path(__file__), Path(__file__).with_name('summary_browser_shell.py'), Path(__file__).with_name('templates') / 'settings-shell-v1.html', Path(__file__).with_name('templates') / 'settings-shell-v1.json', Path(__file__).with_name('templates') / 'settings-layout-v1.js', Path(__file__).with_name('summary_participation.js'), Path(__file__).with_name('summary_accounting_rules.json'), Path(__file__).with_name('summary_database_document.py'), Path(__file__).with_name('summary_bridge.js'), Path(__file__).with_name('summary_runtime.js'), Path(__file__).with_name('summary_tools.js'), Path(__file__).with_name('summary_composition.py'), Path(__file__).with_name('summary_composition.js')])
 
 
-@lru_cache(maxsize=2)
-def prepared_document(path, source_hash, source_stamp, presentation_version):
+_document_cache = OrderedDict()
+_document_cache_bytes = 0
+_document_cache_limit = 32 * 1024 * 1024
+_document_cache_lock = Lock()
+_document_builds = {}
+
+
+def prepared_document(path, source_hash, source_stamp, presentation_version, tools_only=False, tools_store=None):
+    global _document_cache_bytes
+    key = (path, source_hash, source_stamp, presentation_version, tools_only, tools_store)
+    with _document_cache_lock:
+        if key in _document_cache:
+            _document_cache.move_to_end(key)
+            return _document_cache[key]
+        pending = _document_builds.get(key)
+        owner = pending is None
+        if owner:
+            pending = _document_builds[key] = Future()
+    if not owner:
+        return pending.result()
+    try:
+        from .summary_documents import load_fragment, save_fragment, document_generation_lock
+        body = load_fragment(key)
+        if body is None:
+            with document_generation_lock(path):
+                body = load_fragment(key)
+                if body is None:
+                    body = build_prepared_document(*key)
+                    save_fragment(key,body)
+        if len(body) <= _document_cache_limit:
+            with _document_cache_lock:
+                while _document_cache and _document_cache_bytes + len(body) > _document_cache_limit:
+                    _document_cache_bytes -= len(_document_cache.popitem(last=False)[1])
+                _document_cache[key] = body
+                _document_cache_bytes += len(body)
+        pending.set_result(body)
+        return body
+    except BaseException as error:
+        pending.set_exception(error)
+        raise
+    finally:
+        with _document_cache_lock:
+            _document_builds.pop(key, None)
+
+
+
+def build_prepared_document(path, source_hash, source_stamp, presentation_version, tools_only=False, tools_store=None):
     with gzip.open(path, 'rt', encoding='utf-8', newline='') as file:
         original = file.read()
     if hashlib.sha256(original.encode('utf-8')).hexdigest() != source_hash:
         raise ValidationError('财务批次来源校验失败，请恢复原始批次。')
-    return gzip.compress(browser_document(original).encode('utf-8'), compresslevel=1)
+    snapshot = None
+    if tools_only:
+        from .summary_database_document import prepare_tools_document
+        prepared = prepare_tools_document(original, tools_store)
+        if prepared is not None:
+            original, snapshot = prepared
+        else:
+            from .summary_database_document import compact_tools_inputs
+            original = compact_tools_inputs(original)
+    document = browser_document(original)
+    if tools_only:
+        from .summary_database_document import pack_tools_document
+        document = pack_tools_document(document, snapshot)
+    return gzip.compress(document.encode('utf-8'), compresslevel=1)
 
 
 @api_view(['GET'])
 @permission_classes([IsFinanceViewer])
+@request_access
 def summary_document(request, pk):
     from django.http import HttpResponse
     dataset = dataset_for(request.user, pk)
+    from .summary_scopes import full_reader
+    if not full_reader(request.user):
+        from rest_framework.exceptions import PermissionDenied
+        raise PermissionDenied('此入口包含完整批次数据，请使用授权范围内的汇总查询。')
     path = document_path(dataset)
     stamp = path.stat()
-    body = prepared_document(str(path), dataset.source_hash, (stamp.st_mtime_ns, stamp.st_size), presentation_stamp())
+    tools_only = request.query_params.get('tools') == '1'
+    tools_store = None
+    if tools_only and dataset.metadata.get('database_scope'):
+        ids = dataset.metadata.get('store_ids', [])
+        try:
+            tools_store = int(request.query_params.get('store') or ids[0])
+        except (ValueError, TypeError, IndexError):
+            raise ValidationError('请选择已纳入批次的店铺。') from None
+        if tools_store not in ids:
+            raise ValidationError('店铺不在当前批次范围内。')
+    body = prepared_document(str(path), dataset.source_hash, (stamp.st_mtime_ns, stamp.st_size), presentation_stamp(), tools_only, tools_store)
     response = HttpResponse(body, content_type='text/html; charset=utf-8')
     response['Content-Encoding'] = 'gzip'
     response['Cache-Control'] = 'no-store'
@@ -214,8 +318,13 @@ def summary_save(request, pk):
 
 @api_view(['GET'])
 @permission_classes([IsFinanceViewer])
+@request_access
 def summary_report(request, pk):
     dataset = dataset_for(request.user, pk)
+    from .summary_scopes import full_reader
+    if not full_reader(request.user):
+        from rest_framework.exceptions import PermissionDenied
+        raise PermissionDenied('此入口包含完整批次数据，请使用授权范围内的汇总查询。')
     view = request.query_params.get('view', 'store')
     mode = request.query_params.get('mode', 'operations')
     if view not in ['country', 'store', 'order', 'sku', 'product_link', 'detail'] or mode not in ['operations', 'finance']:
@@ -277,6 +386,7 @@ def table_input(request):
 
 @api_view(['GET'])
 @permission_classes([IsFinanceViewer])
+@request_access
 def summary_table(request, pk):
     dataset = dataset_for(request.user, pk)
     return calculation_response(dataset, request.user, {'action': 'table', **table_input(request)})
@@ -284,12 +394,62 @@ def summary_table(request, pk):
 
 @api_view(['GET'])
 @permission_classes([IsFinanceViewer])
+@request_access
 def summary_table_detail(request, pk):
     dataset = dataset_for(request.user, pk)
     payload = table_input(request)
     if not payload.get('row_key') or not payload.get('kind'):
         raise ValidationError('请选择金额或费率。')
     return calculation_response(dataset, request.user, {'action': 'table_detail', **payload})
+
+
+@api_view(['GET'])
+@permission_classes([IsFinanceViewer])
+@request_access
+def summary_direct_table(request):
+    from .summary_read_query import request_query
+    from .summary_jobs import job_data
+    context = request.query_params.get('query_context')
+    if context is not None:
+        context = serializers.IntegerField(min_value=1).run_validation(context)
+    row = request_query(request.user, {'action': 'table', **table_input(request)}, context=context,
+                        refresh=request.query_params.get('refresh') == '1')
+    data = job_data(row, request.user)
+    response = success_response(data['result'] if data.get('result') is not None else data,
+                                status=202 if data['pending'] else 200)
+    response['Cache-Control'] = 'no-store'
+    return response
+
+
+@api_view(['GET'])
+@permission_classes([IsFinanceViewer])
+@request_access
+def summary_direct_detail(request):
+    from django.shortcuts import get_object_or_404
+    from .summary_models import FinanceSummaryCalculation
+    from .summary_jobs import job_data, current_dataset, request_calculation, logical_payload
+    from .summary_service import require_access
+    require_access(request.user)
+    context = serializers.IntegerField(min_value=1).run_validation(request.query_params.get('query_context'))
+    parent = get_object_or_404(FinanceSummaryCalculation, pk=context, tenant=request.user.tenant,
+                             kind='query', status='ready')
+    job_data(parent, request.user)
+    dataset = current_dataset(parent)
+    if not dataset or '_database_query' not in parent.request:
+        raise ValidationError('查询来源或权限已变化，请重新查询汇总。')
+    detail = TableInput(data=request.query_params)
+    detail.is_valid(raise_exception=True)
+    if not detail.validated_data.get('row_key') or not detail.validated_data.get('kind'):
+        raise ValidationError('请选择金额或费率。')
+    payload = {**logical_payload(parent.request), 'action': 'table_detail'}
+    for key in ('row_key', 'kind', 'source_key', 'cost_page', 'flow_page'):
+        if key in detail.validated_data:
+            payload[key] = detail.validated_data[key]
+    data = job_data(request_calculation(dataset, request.user, payload), request.user)
+    response = success_response(data['result'] if data.get('result') is not None else data,
+                                status=202 if data['pending'] else 200)
+    response['Cache-Control'] = 'no-store'
+    return response
 
 
 class FeeInput(serializers.Serializer):
@@ -311,7 +471,8 @@ def summary_fee(request, pk):
         raise ValidationError('费用字段无效。')
     if data.validated_data['revision'] != dataset.accounting_state.revision:
         return error_response('FINANCE_REVISION_CONFLICT', '其他操作已更新此批次，请刷新后重新修改。', status=409)
-    prepared = engine(dataset, {'action': 'prepare_fee', 'state': unpack_values(dataset.accounting_state.values), 'record': record})
+    action = 'prepare_participation' if record.get('operation') in {'exclude_source', 'restore_source'} else 'prepare_fee'
+    prepared = engine(dataset, {'action': action, 'state': unpack_values(dataset.accounting_state.values), 'record': record})
     saved = save_state(dataset, request.user, revision=data.validated_data['revision'], reason=record.get('reason', ''), **prepared)
     if saved is None:
         return error_response('FINANCE_REVISION_CONFLICT', '其他操作已更新此批次，请刷新后重新修改。', status=409)
@@ -320,6 +481,7 @@ def summary_fee(request, pk):
 
 @api_view(['GET'])
 @permission_classes([IsFinanceViewer])
+@request_access
 def summary_history(request, pk):
     dataset = dataset_for(request.user, pk)
     payload = TableInput(data=request.query_params)

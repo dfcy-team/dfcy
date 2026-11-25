@@ -162,4 +162,7 @@ def rebuild(dataset, user, revision, *, publication_guard=None, scope_override=N
             object_type='finance_summary', object_id=str(fresh.pk),
             masked_detail={'previous_dataset': dataset.pk, 'source_hash': digest,
                            'source_counts': source['source_counts'], 'checks': reconciliation['checks']})
+    if not bootstrap:
+        from .summary_documents import queue_settings_warmup
+        transaction.on_commit(lambda: queue_settings_warmup(fresh.pk))
     return fresh

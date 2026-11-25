@@ -1,0 +1,7 @@
+{
+  "version": "finance-settings-shell.v1",
+  "sha256": "5301417566b34c019d6eedb21238f86f9e0d009ebffaf0388ed7ae88d3bc221f",
+  "contains_business_data": false,
+  "extraction": "UI markup and inline styles only; scripts, source links, historical rows, presets and business summaries removed",
+  "layout_sha256": "1b33d1cc5d4aa383d0efec07f6bb3d728dfbbbef9aff5a5c970b7a5f4a19bafa"
+}
