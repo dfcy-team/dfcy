@@ -46,5 +46,3 @@ def test_expired_unrecoverable_authorization_finishes_queued_batches(shop,monkey
         assert not StoreLock.objects.filter(task=t).exists()
         assert t.retry_count==0 and t.next_attempt_at is None
     custody.assert_not_called()
-
-
