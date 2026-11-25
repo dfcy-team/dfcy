@@ -364,6 +364,9 @@ def _refresh_marketplace_authorization(record, *, actor, expected_token_id=None)
     from .refresh_commit_recovery import manual_refresh_blocked
     pending = AutomaticRefreshAttempt.objects.filter(pk=_attempt_key(record)).first()
     if manual_refresh_blocked(record, pending):
+        from .automatic_refresh import credential_refresh_state
+        if credential_refresh_state(record)["requires_manual_recovery"]:
+            raise ValidationError("该续期自动恢复已停止，结果尚未确认；请核对托管回执或重新授权，不要重复刷新。")
         raise ValidationError("该续期正在自动恢复提交，请勿重复刷新；可等待重试结果或重新授权。")
     if record.platform == "lazada" and "local:no-refresh" in (record.scopes or []):
         raise ValidationError("该 Lazada 授权按原令牌导入，禁止手动或自动刷新。")

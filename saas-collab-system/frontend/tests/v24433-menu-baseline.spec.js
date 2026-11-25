@@ -29,7 +29,7 @@ describe('current deployment menu baseline', () => {
 
     const inventory = menuItems.find((item) => item.label === '库存管理');
     expect(inventory).toMatchObject({ internal: true, permissions: ['sales_management.view', 'alerts.view', 'replenishment.view'] });
-    expect(inventory.children.map((item) => item.label)).toEqual(['库存工作台', '仓库库存明细查询', '分类库存查询', '出入库明细', '库存预警', '补货建议']);
+    expect(inventory.children.map((item) => item.label)).toEqual(['库存工作台', '仓库库存明细', '分类库存查询', '出入库明细', '库存预警', '补货建议']);
 
     const development = menuItems.find((item) => item.label === '产品开发');
     expect(development.children.map((item) => item.label)).toEqual([

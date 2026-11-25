@@ -295,6 +295,30 @@ class BestGlinkClient:
                 "normalQuantity": row.get("salableQty"), "_snapshot_at_utc": snapshot_at})
         if seen != set(batch):
             raise ValidationError("百世库存响应未完整覆盖本批SKU，缺失项不能自动补零。")
+        from decimal import Decimal, InvalidOperation
+        from logging import getLogger
+        accepted = []
+        excluded = 0
+        for record in records:
+            values = []
+            for key in ("totalQuantity", "normalQuantity"):
+                raw_quantity = record.get(key)
+                if isinstance(raw_quantity, bool) or not isinstance(raw_quantity, (str, int, float, Decimal)):
+                    raise ValidationError("GLINK inventory quantities must be finite integers.")
+                try:
+                    quantity = Decimal(str(raw_quantity))
+                except (InvalidOperation, ValueError):
+                    raise ValidationError("GLINK inventory quantities must be finite integers.") from None
+                if not quantity.is_finite() or quantity != quantity.to_integral_value():
+                    raise ValidationError("GLINK inventory quantities must be finite integers.")
+                values.append(quantity)
+            if any(value < 0 for value in values):
+                excluded += 1
+            else:
+                accepted.append(record)
+        if excluded:
+            getLogger(__name__).warning("BEST_INVENTORY_NEGATIVE_EXCLUDED count=%s", excluded)
+        records = accepted
         return {"records": records, "next_cursor": str(offset + 200) if offset + 200 < len(codes) else "",
                 "raw_responses": [{"endpoint": "GLINK_QUERY_INVENTORY_NOTIFY_NEW", "payload": result}]}
 

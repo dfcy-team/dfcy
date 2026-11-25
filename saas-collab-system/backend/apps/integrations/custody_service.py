@@ -238,7 +238,7 @@ class EncryptedFileCredentialStore(FileCredentialStore):
             raise FileCustodyError("Credential custody record is invalid.")
         return values
 
-    def _read(self, path):
+    def _read_envelope(self, path):
         try:
             record_stat = path.lstat()
         except OSError:
@@ -254,8 +254,23 @@ class EncryptedFileCredentialStore(FileCredentialStore):
         # them for local synthetic/test compatibility.
         if encrypted is None:
             raise FileCustodyError("Credential custody record is invalid.")
-        record["credentials"] = self._decrypt_values(encrypted)
         return record
+
+    def _read(self, path):
+        record = self._read_envelope(path)
+        record["credentials"] = self._decrypt_values(record[self._ENCRYPTED_FIELD])
+        return record
+
+    def _operation_records(self, operation_hash):
+        # Filter by non-secret metadata; authenticate every matching payload.
+        matches = []
+        for path in self._paths():
+            if self._read_envelope(path).get("operation_id_hash") == operation_hash:
+                record = self._read(path)
+                if record.get("operation_id_hash") != operation_hash:
+                    raise FileCustodyError("Custody operation changed during lookup.")
+                matches.append(record)
+        return matches
 
     def _write(self, credential_id, record):
         safe_record = copy.deepcopy(dict(record))

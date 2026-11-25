@@ -13,7 +13,7 @@ class WarehouseOrderLookupAdapter(PlatformAdapter):
     adapter_name = 'warehouse-order-lookup'
     execution_mode = 'live_readonly'
     FAILURE_STATES = {'partial', 'failed', 'blocked', 'conflict', 'stopped'}
-    STATES = FAILURE_STATES | {'matched', 'not_found', 'deferred', 'superseded', 'already_running'}
+    STATES = FAILURE_STATES | {'matched', 'not_found', 'deferred', 'superseded', 'already_running', 'cancelled'}
 
     def __init__(self, config):
         self.config = config

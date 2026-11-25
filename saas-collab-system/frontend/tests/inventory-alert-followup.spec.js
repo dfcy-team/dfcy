@@ -78,7 +78,9 @@ describe('inventory alert follow-up page', () => {
     expect(wrapper.text()).toContain('缺少库存快照');
     expect(wrapper.text()).toContain('评估状态');
     expect(wrapper.text()).toContain('待核对数据');
-    wrapper.vm.validity = 'all'; await wrapper.vm.loadAlerts(); await flushPromises();
+    const followup = wrapper.findComponent({ name: 'InventoryAlertFollowup537' });
+    expect(followup.exists()).toBe(true);
+    followup.vm.validity = 'all'; await followup.vm.loadAlerts(); await flushPromises();
     expect(api.fetchInventoryAlerts).toHaveBeenLastCalledWith(expect.objectContaining({ validity: 'all', source_mode: 'real_observation' }));
   });
 });

@@ -1,5 +1,5 @@
 <template>
-  <AppPage  :title="embedded ? '仓库库存明细查询' : '分类库存查询'" subtitle="按国家查看各类商品最近一次同步的库存和店铺销量。">
+  <AppPage  :title="embedded ? '仓库库存明细' : '分类库存查询'" subtitle="按国家查看各类商品最近一次同步的库存和店铺销量。">
     <el-form inline @submit.prevent="apply">
       <el-form-item label="国家">
         <el-select v-model="country" filterable style="width:180px" @change="changeCountry">

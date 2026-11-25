@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from apps.commerce.models import SalesOrderBundleSnapshot, SalesOrderItem
 from apps.integrations.models import HistorySyncSegment, SyncJob, SyncRun
-from apps.masterdata.models import CountrySiteMaster, InventoryABCEntry, InventoryABCRun
+from apps.masterdata.models import CountrySiteMaster, InventoryABCEntry, InventoryABCRun, InventoryObservationSettings
 from apps.products.models import ProductBundleVersion, ProductBundleVersionComponent, ProductSKU, ProductSPU
 from apps.sales_management.abc_access import decorate_rows, filter_skus, published_run
 from apps.sales_management.abc_service import ABC_POLICY_VERSION, calculate_country, _previous_entries
@@ -34,9 +34,9 @@ def abc_scope(db, monkeypatch):
     return actor, country, store, spu, first, second
 
 
-def _add_coverage(actor, store):
+def _add_coverage(actor, store, upper=None):
     tenant = actor.tenant
-    sales_segment = history_coverage(tenant, store, actor, lower=NOW - timedelta(days=120))
+    sales_segment = history_coverage(tenant, store, actor, lower=NOW - timedelta(days=120), upper=upper)
     sales_job = sales_segment.sync_job
     refund_job = SyncJob.objects.create(
         tenant=tenant, integration_config=sales_job.integration_config,
@@ -90,10 +90,10 @@ def test_bundle_only_component_has_population_and_maturity(abc_scope, invalid, c
     assert not run.entries.filter(entity_type="sku", entity_id=second.pk).exists()
 
 
-def test_composite_run_persists_exact_sibling_and_bundle_evidence(abc_scope):
+def test_composite_run_persists_exact_sibling_and_bundle_evidence(abc_scope, monkeypatch):
     actor, country, store, spu, first, second = abc_scope
     tenant = actor.tenant
-    _add_coverage(actor, store)
+    _add_coverage(actor, store, upper=NOW + timedelta(days=5))
     sale(tenant, store, first, "mature-first", 40, 1)
     sale(tenant, store, second, "mature-second", 40, 1)
     order = sale(tenant, store, first, "siblings", 2, 8)
@@ -148,9 +148,44 @@ def test_composite_run_persists_exact_sibling_and_bundle_evidence(abc_scope):
     same_cutoff = calculate_country(actor, country)
     repeated = same_cutoff.entries.get(entity_type="spu", entity_id=spu.pk)
     assert (repeated.grade, repeated.candidate_grade, repeated.candidate_streak) == ("B", "A", 1)
-    different_thresholds = {**run.config, "a_percent": "81.00"}
-    state = _previous_entries(tenant.pk, country.pk, run.cutoff_date, different_thresholds)[("spu", spu.pk)]
-    assert (state["grade"], state["candidate_grade"], state["candidate_streak"]) == ("B", "", 0)
+    settings, _ = InventoryObservationSettings.objects.get_or_create(tenant=tenant)
+
+    # A changed threshold invalidates the old grade state; the new run adopts
+    # its freshly computed grade immediately instead of carrying old streaks.
+    InventoryABCEntry.objects.filter(run=same_cutoff, entity_type="spu", entity_id=spu.pk).update(
+        grade="B", candidate_grade="A", candidate_streak=2,
+    )
+    settings.abc_a_percent = Decimal("81")
+    settings.save(update_fields=["abc_a_percent"])
+    monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=1))
+    threshold_run = calculate_country(actor, country)
+    threshold_entry = threshold_run.entries.get(entity_type="spu", entity_id=spu.pk)
+    assert threshold_run.config["a_percent"] == "81.00"
+    assert (threshold_entry.grade, threshold_entry.candidate_grade, threshold_entry.candidate_streak) == ("A", "", 0)
+
+    # The same invalidation applies to the 90-to-60-day window change.
+    InventoryABCEntry.objects.filter(run=threshold_run, entity_type="spu", entity_id=spu.pk).update(
+        grade="B", candidate_grade="A", candidate_streak=2,
+    )
+    settings.abc_window_days = 60
+    settings.save(update_fields=["abc_window_days"])
+    monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
+    window_run = calculate_country(actor, country)
+    window_entry = window_run.entries.get(entity_type="spu", entity_id=spu.pk)
+    assert window_run.config["window_days"] == 60
+    assert (window_entry.grade, window_entry.candidate_grade, window_entry.candidate_streak) == ("A", "", 0)
+
+    # With an unchanged basis, the normal consecutive-day debounce remains active.
+    InventoryABCEntry.objects.filter(run=window_run, entity_type="spu", entity_id=spu.pk).update(
+        grade="B", candidate_grade="", candidate_streak=0,
+    )
+    monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=3))
+    debounced_run = calculate_country(actor, country)
+    debounced = debounced_run.entries.get(entity_type="spu", entity_id=spu.pk)
+    assert (debounced.grade, debounced.candidate_grade, debounced.candidate_streak) == ("B", "A", 1)
+    # Same-day retries preserve the already persisted transition state.
+    retry = calculate_country(actor, country).entries.get(entity_type="spu", entity_id=spu.pk)
+    assert (retry.grade, retry.candidate_grade, retry.candidate_streak) == ("B", "A", 1)
 
 
 def test_legacy_ready_snapshot_is_pending_then_partial_is_reference_only(abc_scope):

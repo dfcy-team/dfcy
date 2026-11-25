@@ -1893,7 +1893,9 @@ def context(actor, kind, pk):
     if domestic_kind:
         target.update(settlement_mode=freight_mode, payable_party_type=payable_kind,
             payable_party_name=getattr(payable_obj, 'name', '') if payable_obj else '')
-    return {'target': target, 'fee': fee, 'fee_history': fee_history, 'fee_item_options': fee_item_options, 'freight_quote_reference': quote_reference,
+    from .related_fee_summary import related_fees
+    return {'target': target, 'fee': fee, 'related_fees': related_fees(actor, kind, obj),
+        'fee_history': fee_history, 'fee_item_options': fee_item_options, 'freight_quote_reference': quote_reference,
         'measurements': current_measurements, 'latest_cost': latest, 'cost_history': history,
         'input_fingerprint': fingerprint, 'settlement': settlement,
         'settlement_supported': kind in ('shipment', 'batch'), 'payment_supported': (bool(payable_kind) if domestic_kind else kind in ('shipment', 'batch', 'inbound')),

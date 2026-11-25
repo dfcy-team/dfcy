@@ -15,7 +15,7 @@
   <main v-else class="inventory-workbench">
     <header class="workbench-heading">
       <div>
-        <h1>{{ warehouseDetails ? '仓库库存明细查询' : '库存工作台' }}</h1>
+        <h1>{{ warehouseDetails ? '仓库库存明细' : '库存工作台' }}</h1>
         <p>按业务视角核查极风仓储系统库存；所有数量均来自有权查看的最新快照。</p>
       </div>
       <BusinessDashboardLink module="库存管理" /><el-button :loading="loading" @click="load">刷新数据</el-button>

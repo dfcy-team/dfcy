@@ -27,7 +27,7 @@ class CategoryQuery(serializers.Serializer):
     warehouse_id = serializers.IntegerField(min_value=1, required=False)
     spu_id = serializers.IntegerField(min_value=1, required=False)
     sku_id = serializers.IntegerField(min_value=1, required=False)
-    level = serializers.ChoiceField(choices=['category', 'spu', 'sku', 'stores', 'warehouses'], default='category')
+    level = serializers.ChoiceField(choices=['category', 'spu', 'sku', 'stores', 'warehouses', 'unmapped'], default='category')
     days = serializers.ChoiceField(choices=[7, 15, 30], default=30)
     search = serializers.CharField(max_length=160, required=False, allow_blank=True, default='')
     offset = serializers.IntegerField(min_value=0, default=0)
@@ -102,6 +102,52 @@ def totals(ids, stock, sales):
     return {'available': sum(inventory) if inventory else None, 'sales': sum(units) if units else None}
 
 
+def unmapped_inventory(actor, country, permissions, q, countries):
+    # Rank all source identities before selecting unmapped records: never revive
+    # an older unmapped snapshot after the latest one became mapped.
+    source = latest_country_inventory(domain._country_inventory_source(actor, country, timezone.now()))
+    source = filter_inventory_queryset(actor, domain.INVENTORY, source, permission_cache=permissions)
+    source = source.filter(warehouse__status='active')
+    from django.db.models import Q
+    branches = domain._inventory_branches(actor, permissions, include_best=False)
+    recognized = Q(pk__in=[])
+    for branch in branches:
+        if domain.JIFENG in branch.providers:
+            recognized |= (branch.source_filter() & branch.product_filter(inventory=True)) or Q(pk__isnull=False)
+    source = source.filter(recognized)
+    warehouses = list(source.order_by('warehouse__name', 'warehouse_id').values_list(
+        'warehouse_id', 'warehouse__name').distinct())
+    if q.get('warehouse_id') is not None:
+        if q['warehouse_id'] not in {pk for pk, _ in warehouses}:
+            raise NotFound('仓库不存在。')
+        source = source.filter(warehouse_id=q['warehouse_id'])
+    # Reuse the decision layer's complete branch semantics; a separate site-only
+    # role must not bypass a SKU-restricted role to expose raw source identities.
+    allowed = Q(pk__in=[])
+    for branch in branches:
+        if domain.JIFENG in branch.providers and not branch.product_restricted:
+            allowed |= branch.source_filter() or Q(pk__isnull=False)
+    source = source.filter(allowed, internal_sku__isnull=True)
+    if q['search']:
+        source = source.filter(source_sku__icontains=q['search'])
+    count = source.count()
+    rows = list(source.order_by('source_sku', 'warehouse_id', 'pk').values(
+        'id', 'source_sku', 'warehouse_id', 'warehouse__name', 'on_hand_qty',
+        'available_qty', 'provided_quantity_fields', 'source_run__status',
+        'source_run__failed_count')[q['offset']:q['offset'] + 20])
+    for row in rows:
+        status = row.pop('source_run__status')
+        failed_count = row.pop('source_run__failed_count')
+        successful = status == 'success' and not failed_count
+        fields = row.pop('provided_quantity_fields') or []
+        for field in ('on_hand_qty', 'available_qty'):
+            if not successful or field not in fields or row[field] is None or row[field] < 0:
+                row[field] = None
+    return Response({'data': {'countries': countries, 'summary': {},
+        'results': rows, 'count': count,
+        'warehouses': [{'id': pk, 'name': name} for pk, name in warehouses]}})
+
+
 class CategoryInventory(CountryDecisionAPI):
     def get(self, request):
         query = CategoryQuery(data=request.query_params)
@@ -113,6 +159,8 @@ class CategoryInventory(CountryDecisionAPI):
         if 'country_id' not in q:
             return Response({'data': {'countries': countries, 'results': [], 'count': 0}})
         country = domain.country_for(actor, q['country_id'], permissions)
+        if q['level'] == 'unmapped':
+            return unmapped_inventory(actor, country, permissions, q, countries)
         prefix = f'category-stock:v2:{actor.tenant_id}:{actor.pk}:{country.pk}:{domain.permission_signature(actor, permissions)}'
         snapshots = cache.get_or_set(prefix, lambda: stock_facts(actor, country, permissions), 60)
         warehouses = sorted(

@@ -29,6 +29,7 @@ class OrderWarehouseLookup(models.Model):
 
     class Meta:
         db_table = 'sales_order_warehouse_lookup'
+        indexes = [models.Index(fields=['requested_at', 'id'], name='idx_wh_lookup_requested')]
 
 
 class WarehouseOutboundLine(models.Model):

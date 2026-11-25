@@ -36,8 +36,8 @@ def upsert_inventory_snapshot(*, tenant, payload, source_run, _sku_resolution=No
         raise ValidationError({"source_run": "Sync job, configuration and owner must belong to the tenant."})
     if job.resource_type != "inventory_snapshot":
         raise ValidationError({"source_run": "SyncRun must use the inventory_snapshot resource type."})
-    if job.integration_config.platform != PlatformChoices.JIFENG_WMS:
-        raise ValidationError({"source_run": "Inventory snapshots require a Jifeng WMS sync run."})
+    if job.integration_config.platform not in (PlatformChoices.JIFENG_WMS, PlatformChoices.BEST_ECAPI):
+        raise ValidationError({"source_run": "Inventory snapshots require a supported WMS sync run."})
 
     warehouse_reference = payload.get("warehouse_id") or payload.get("warehouse_code")
     # Serialize ingestion for a warehouse so parallel runs cannot create
@@ -114,8 +114,8 @@ def bulk_upsert_inventory_snapshots(*, tenant, payloads, source_run):
     config = job.integration_config
     if job.tenant_id != tenant.id or config.tenant_id != tenant.id or config.created_by.tenant_id != tenant.id:
         raise ValidationError({"source_run": "Sync job, configuration and owner must belong to the tenant."})
-    if job.resource_type != "inventory_snapshot" or config.platform != PlatformChoices.JIFENG_WMS:
-        raise ValidationError({"source_run": "SyncRun must use the Jifeng WMS inventory_snapshot resource type."})
+    if job.resource_type != "inventory_snapshot" or config.platform not in (PlatformChoices.JIFENG_WMS, PlatformChoices.BEST_ECAPI):
+        raise ValidationError({"source_run": "SyncRun must use a supported WMS inventory_snapshot resource type."})
 
     warehouse_references = {
         str(payload.get("warehouse_id") or payload.get("warehouse_code") or "")

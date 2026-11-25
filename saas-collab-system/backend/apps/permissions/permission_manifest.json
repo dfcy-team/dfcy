@@ -4713,11 +4713,11 @@
     },
     {
       "code": "menu.sales_management.warehouse_details.view",
-      "name": "仓库库存明细查询",
+      "name": "仓库库存明细",
       "module": "sales_management",
       "action": "warehouse_details.view",
       "permission_type": "menu",
-      "description": "显示仓库库存明细查询入口",
+      "description": "显示仓库库存明细入口",
       "risk": "normal",
       "lifecycle": "active",
       "menu_path": "/inventory/warehouse-details",
@@ -58889,5 +58889,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "1fbad81457bcaa863bb900429afe40e39b18b08a2153b7303f43ff5407c2f99c"
+  "catalog_hash": "79d052de47d83fd0ed46e5b3817475efdb68a50e986ae9a1844c6e8ca3e9a214"
 }
