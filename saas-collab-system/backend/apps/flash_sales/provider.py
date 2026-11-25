@@ -18,6 +18,7 @@ from apps.integrations.net_guard import PlatformHttpClient
 from apps.integrations.oauth_errors import OAuthFlowError, OAUTH_RATE_LIMITED
 from apps.integrations.production_settings import get_runtime_platform_config
 from apps.integrations.security import sanitize_text
+from apps.integrations.automatic_refresh import credential_refresh_state
 from .domain import digest, normalize_items
 from .models import AppPacer, StoreTask, TenantControl
 from .services import authorized_store
@@ -141,7 +142,7 @@ class ShopeeAdapter:
                 batch__tenant_id=self.store.tenant_id, batch__source="manual",
                 batch__operation="run", batch__plan__isnull=True, batch__finished_at__isnull=True,
             ).exists()
-            if owner != "saas" and not manual_run:
+            if owner not in {"saas", "sync_tasks"} and not manual_run:
                 raise ValidationError("尚未完成单边接管或当前操作不在手动补建范围；本次未提交平台写入。")
         auth = authorized_store(self.store)
         config = auth.integration_config
@@ -151,6 +152,8 @@ class ShopeeAdapter:
             require_token_validity(auth, minimum_validity_seconds=30)
             custody = checked_custody_backend()
         except CredentialAccessError as exc:
+            if exc.code == "TOKEN_REFRESH_REQUIRED" and credential_refresh_state(auth)["requires_manual_recovery"]:
+                raise ValidationError("商城授权续期已需人工恢复；请核对托管回执或重新授权，本次未提交平台请求。") from None
             raise CredentialWait(exc) from None
         runtime = get_runtime_platform_config("shopee")
         host = str(runtime.get("api_host") or "").rstrip("/")
@@ -164,6 +167,8 @@ class ShopeeAdapter:
             secret, token = retrieve_marketplace_credentials(
                 config, auth, custody=custody, minimum_validity_seconds=30)
         except CredentialAccessError as exc:
+            if exc.code == "TOKEN_REFRESH_REQUIRED" and credential_refresh_state(auth)["requires_manual_recovery"]:
+                raise ValidationError("商城授权续期已需人工恢复；请核对托管回执或重新授权，本次未提交平台请求。") from None
             raise CredentialWait(exc) from None
         path = "/api/v2/shop_flash_sale/" + endpoint
         stamp = int(time.time())
