@@ -263,9 +263,18 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
         for store_id in sorted(stores):
             ids = finance.filter(store_id=store_id, platform='shopee', raw_envelope_id__isnull=False).order_by().values_list('raw_envelope_id', flat=True).distinct()
             if connection.vendor == 'mysql':
-                with connection.cursor() as cursor:
-                    cursor.execute(*read_sql(ids))
-                    envelope_ids.update(row[0] for row in cursor.fetchall())
+                from django.db.models import Max
+                upper = finance.filter(store_id=store_id, platform='shopee').aggregate(upper=Max('raw_envelope_id'))['upper']
+                last = 0
+                while upper is not None and last < upper:
+                    page = ids.filter(raw_envelope_id__gt=last, raw_envelope_id__lte=upper).order_by('raw_envelope_id')[:500]
+                    with connection.cursor() as cursor:
+                        cursor.execute(*read_sql(page))
+                        batch = cursor.fetchall()
+                    if not batch:
+                        break
+                    envelope_ids.update(row[0] for row in batch)
+                    last = batch[-1][0]
             else:
                 envelope_ids.update(ids)
         group_order = ['store_id', 'external_order_id', 'business_date', 'currency', 'pk']
@@ -286,13 +295,27 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                     for values in query.iterator(chunk_size=500):
                         yield FinanceRow(*values)
                     continue
-                with connection.cursor() as cursor:
-                    cursor.execute(*read_sql(query))
-                    while True:
-                        batch = cursor.fetchmany(500)
-                        if not batch:break
-                        for values in batch:
-                            yield FinanceRow(*values)
+                upper = query.order_by('-pk').values_list('pk', flat=True).first()
+                last = None
+                table = connection.ops.quote_name(query.model._meta.db_table)
+                while upper is not None:
+                    page = query.filter(pk__lte=upper)
+                    if last is not None:
+                        page = page.extra(where=[
+                            '(BINARY %s, %s, BINARY %s, %s) > (%%s, %%s, %%s, %%s)' %
+                            tuple(table + '.' + connection.ops.quote_name(name) for name in
+                                ('external_order_id', 'business_date', 'currency', 'id'))
+                        ], params=last)
+                    page = page[:500]
+                    with connection.cursor() as cursor:
+                        cursor.execute(*read_sql(page))
+                        batch = cursor.fetchall()
+                    if not batch:
+                        break
+                    for values in batch:
+                        yield FinanceRow(*values)
+                    row = batch[-1]
+                    last = (row[3], row[2], row[7], row[0])
         iterator = read_finance()
         grouped = ((key, list(rows)) for key, rows in groupby(iterator,
             lambda row: (row.store_id, row.external_order_id, str(row.business_date), row.currency)))

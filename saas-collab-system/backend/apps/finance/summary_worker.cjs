@@ -1,7 +1,7 @@
 // Isolated execution is retained for validation and writes.
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const {createEngine}=require('./summary_engine.cjs'),input=JSON.parse(fs.readFileSync(0,'utf8'));
-let session;try{session=createEngine(process.argv[2],input);}catch(e){process.stdout.write(JSON.stringify({ok:false,error:e.message}));process.exit(2);}
+let session;try{session=createEngine(process.argv[2],input,{retainSource:false});}catch(e){process.stdout.write(JSON.stringify({ok:false,error:e.message}));process.exit(2);}
 const {c,p,plain,storage,writes,proposed,feeKey}=session;
 const {orderLedger,itemMembers,groupMembers,groupLinks,orderAttribution,attributionTotals,itemAttribution,ignoredWarehouse}=require('./summary_order_ledger.cjs');
 session.counted=vm.runInContext('countedFact',c);

@@ -15,6 +15,7 @@ from django.conf import settings
 from rest_framework.exceptions import ValidationError
 
 from .summary_service import document_path, unpack_values
+from .summary_memory import node_heap_mb, MemoryBudgetExceeded
 
 _lock = threading.Lock()
 _process = None
@@ -27,6 +28,10 @@ logger = logging.getLogger(__name__)
 
 class CalculationBusy(ValidationError):
     default_detail = '计算资源正忙，任务将在后台自动重试。'
+
+
+class CalculationMemoryLimit(ValidationError):
+    default_detail = '财务计算内存预算不足，请缩小查询范围；原结果保持不变。'
 
 
 class CalculationTimeout(ValidationError):
@@ -95,7 +100,8 @@ def query(dataset, payload):
                 node = getattr(settings, 'FINANCE_SUMMARY_NODE', None) or shutil.which('node')
                 if not node:
                     raise OSError()
-                heap_mb = 1024 if dataset.metadata.get('direct_query') else 2048
+                configured_heap_mb = 1024 if dataset.metadata.get('direct_query') else 2048
+                heap_mb = node_heap_mb(configured_heap_mb)
                 _process = subprocess.Popen([node, f'--max-old-space-size={heap_mb}', str(code / 'summary_native.cjs')],
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                     text=True, encoding='utf-8', creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
@@ -108,6 +114,9 @@ def query(dataset, payload):
             result = _replies.get(timeout=120)
             if result is None:
                 raise OSError()
+        except MemoryBudgetExceeded:
+            stop()
+            raise CalculationMemoryLimit() from None
         except queue.Empty:
             stop()
             raise CalculationTimeout() from None

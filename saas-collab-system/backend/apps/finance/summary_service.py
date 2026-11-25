@@ -91,11 +91,16 @@ def engine(dataset, payload):
         raise ValidationError('财务计算运行时不可用，未保存任何修改。')
     worker = Path(__file__).with_name('summary_worker.cjs')
     try:
-        proc = subprocess.run([node, '--max-old-space-size=2048', str(worker), str(document_path(dataset))],
+        from .summary_memory import node_heap_mb, MemoryBudgetExceeded
+        heap_mb = node_heap_mb()
+        proc = subprocess.run([node, f'--max-old-space-size={heap_mb}', str(worker), str(document_path(dataset))],
                               input=json.dumps({**payload, 'sourceHash': dataset.source_hash}, ensure_ascii=False), text=True, encoding='utf-8',
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
                               creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         result = json.loads(proc.stdout)
+    except MemoryBudgetExceeded:
+        from .summary_native import CalculationMemoryLimit
+        raise CalculationMemoryLimit() from None
     except (OSError, subprocess.TimeoutExpired, ValueError):
         raise ValidationError('财务计算未成功完成，未保存修改。请稍后重试。')
     if proc.returncode or not result.get('ok'):
