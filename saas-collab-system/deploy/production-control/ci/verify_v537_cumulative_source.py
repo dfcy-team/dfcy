@@ -83,7 +83,7 @@ for path, expected in files.items():
     require(digest(blob("HEAD", path)) == expected, f"source file SHA mismatch: {path}")
 
 baseline = identity["baseline"]
-require(baseline["sha256"] == "dfe63732fbefc81fc72b1a4d62252639c0f81bcaa57f5637e1fb1759bb5ddfbb", "independently approved V533 baseline mismatch")
+require(baseline["sha256"] == "2c03aee1e5c82f517f4a1f60d7fc9b4aa6cec850efd14f54cabf2e0215a755e9", "independently approved V533 baseline mismatch")
 require(re.fullmatch(r"[0-9a-f]{64}", baseline["sha256"]) is not None, "invalid approved baseline digest")
 require(bool(os.environ.get("EXPECTED_BASELINE_SHA")) and baseline["sha256"] == os.environ["EXPECTED_BASELINE_SHA"], "baseline SHA environment binding mismatch")
 require(baseline["source_sha"] == source["parent_sha"] and baseline["version"] == "2.44.533", "approved baseline source/version mismatch")
@@ -121,13 +121,13 @@ for path in parent_migrations:
 # Actual wrapper stdout receipt is embedded in identity; verify its byte hash before parsing.
 rehearsal_capture = identity["rehearsal"]
 receipt_raw = decode_capture(rehearsal_capture, "rehearsal receipt")
-require(digest(receipt_raw) == "5399f39a7ba249ddf592af989170faac54ce319e13bd8c4bee932538e9dd4472", "independently approved actual R6 checkpoint receipt mismatch")
+require(digest(receipt_raw) == "8eb29e8b077603f1a35e31caa35eeb61573749462ecd38efafd77317e63d6831", "independently approved actual R7 checkpoint receipt mismatch")
 receipt = json.loads(receipt_raw.decode("utf-8"))
 require(receipt["status"] == "PASS", "remote wrapper did not pass")
 require(receipt["source_sha"] == source["sha"], "wrapper source SHA mismatch")
 require(receipt["backup_sha256"] == rehearsal_capture["backup_sha256"], "wrapper backup SHA mismatch")
 require(receipt["source_archive_sha256"] == rehearsal_capture["source_archive_sha256"], "wrapper archive SHA mismatch")
-require(receipt["backup_sha256"] == "ecb7fe52f38e6d237f3a2aca1b56bdb43307f854e6ff6e48ac5cb71097694867", "approved rehearsal backup mismatch")
+require(receipt["backup_sha256"] == "e00446d1e8012fa7081d05c2b5eec023eb4468c273a4f6461a9cf43eb6ab4ecc", "approved rehearsal backup mismatch")
 require(receipt["source_archive_sha256"] == "629c24508369c71c673ff7d65c41f9fe6625ab767e407cf2251316ba9ba5012e", "approved source archive mismatch")
 require(receipt["cleanup_verified"] is True, "wrapper cleanup was not verified")
 require(receipt["protected_state_unchanged"] is True, "protected release files changed")
@@ -155,12 +155,12 @@ require(probe["index_cases"] == {"matching_existing_accepted": True, "conflictin
 # Pin the actual local validation record, preserving rather than embellishing its limits.
 local_capture = identity["local_validation"]
 local_raw = decode_capture(local_capture, "local validation")
-require(digest(local_raw) == "013ec8d1e8141f9e0f9ed17236c88620136e2153976f16e1c76181f246e284dc", "approved local validation byte mismatch")
+require(digest(local_raw) == "8143e6ab7dba20739ca19276e13e005276013c72f15e1b26812b089a2b7d76e0", "approved local validation byte mismatch")
 local = json.loads(local_raw)
 require(local["status"] == "PASS" and local["source_sha"] == source["sha"] and local["source_tree_sha"] == source["tree_sha"], "local validation source mismatch")
 require(local["migration_sha256"] == migration["canonical_sha256"], "local migration fingerprint mismatch")
 
-# Retain original test execution provenance; checkpoint receipt is separately rebound to the posttimer baseline.
+# Retain original test execution provenance; checkpoint receipt is separately rebound to the post-attribution baseline.
 previous_raw = decode_capture(local["previous_validation"], "previous regression execution")
 require(digest(previous_raw) == "50c6130fb229397f9ae65bafbb8fd11b25083699296cd2e7bbd9a602d2633ab1", "previous execution evidence changed")
 previous = json.loads(previous_raw)
