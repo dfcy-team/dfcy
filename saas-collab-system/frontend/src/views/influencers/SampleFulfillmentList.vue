@@ -108,9 +108,9 @@
             <small>{{ costMatchLabel(row) }}</small>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="110">
+        <el-table-column label="状态" width="158">
           <template #default="{ row }">
-            <el-tag>{{ statusLabel(FULFILLMENT_STATUS_LABELS, row.status) }}</el-tag>
+            <el-tag :type="completionTagType(row)">{{ completionLabel(row) }}</el-tag>
             <small v-if="publishedEvidenceNotice(row)">视频证据待关联</small>
           </template>
         </el-table-column>
@@ -280,7 +280,11 @@
           <el-button :disabled="!canManage || detailSample.is_deleted" @click="openEdit(detailSample)">编辑</el-button>
           <el-button v-if="!detailSample.is_deleted" type="danger" plain :disabled="!canManage" @click="removeSample(detailSample)">删除</el-button>
           <el-button v-else type="primary" :disabled="!canManage" @click="restoreSample(detailSample)">恢复</el-button>
-          <el-tag>{{ statusLabel(FULFILLMENT_STATUS_LABELS, detailSample.status) }}</el-tag>
+          <el-tag :type="completionTagType(detailSample)">{{ completionLabel(detailSample) }}</el-tag>
+          <small v-if="detailSample.status === 'completed' && detailSample.completion_evidence">
+            {{ formatTaskDateTime(detailSample.completion_evidence.at) }} ·
+            {{ detailSample.completion_evidence.kind === 'system' ? '视频 ID：' + detailSample.completion_evidence.video_id : '操作人：' + detailSample.completion_evidence.actor }}
+          </small>
         </div>
         <section class="detail-section"><h3>送样事实</h3><div class="detail-facts">
           <div><span>类型流水号</span><b>{{ displayValue(detailSample.type_no) }}</b></div>
@@ -306,6 +310,14 @@
 </template>
 
 <script setup>
+function completionLabel(row) {
+  if (row.status !== 'completed') return statusLabel(FULFILLMENT_STATUS_LABELS, row.status);
+  return { system: '已完成 · 系统核验', manual: '已完成 · 人工标记' }[row.completion_evidence?.kind] || '已完成';
+}
+function completionTagType(row) {
+  if (row.status !== 'completed') return undefined;
+  return { system: 'success', manual: 'primary' }[row.completion_evidence?.kind] || 'info';
+}
 import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { formatTaskDateTime } from './taskDateTime';
 import { recordSourceLabel, publishedEvidenceNotice, matchedVideoCount } from './recordEvidence';

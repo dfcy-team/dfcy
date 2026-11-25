@@ -32,6 +32,7 @@ from .attribution import (
     parse_performance_date,
 )
 from .models import (
+    FulfillmentStatusEvent,
     AffiliateOrderSnapshot,
     Influencer,
     InfluencerContact,
@@ -1473,6 +1474,9 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
             "outreach_task", "influencer", "influencer__profile", "store", "owner", "deleted_by"
         ).prefetch_related(
             "items",
+            Prefetch("status_events", queryset=FulfillmentStatusEvent.objects.filter(
+                tenant=request.user.tenant, to_status="completed",
+            ).select_related("actor").order_by("-created_at", "-pk"), to_attr="_completion_events"),
             Prefetch(
                 "video_results",
                 queryset=VideoResult.objects.filter(
@@ -1811,7 +1815,8 @@ class SampleFulfillmentStatusView(ScopedInfluencerView):
                 fulfillment=fulfillment,
                 status=requested_status,
                 expected_version=_expected_version(request),
-                reason=request.data.get("reason", ""),
+                reason=(("manual_completion:" + str(request.data.get("reason") or ""))[:240]
+                        if requested_status == "completed" else request.data.get("reason", "")),
                 confirm_terminal=confirm_terminal,
             )
         except ValidationError as exc:
