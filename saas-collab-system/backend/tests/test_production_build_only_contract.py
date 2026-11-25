@@ -72,6 +72,7 @@ def test_archive_migrations_cannot_reuse_registered_release():
     archived_migration_sha = "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838"
     root = Path(__file__).resolve().parents[1]
     unregistered_migrations = {
+        "apps/sales_management/migrations/0013_warehouse_lookup_requested_index.py",
         "apps/influencers/migrations/0052_tiktok_product_performance_vm.py",
         "apps/integrations/migrations/0071_feishu_native_approval.py",
         "apps/integrations/migrations/0072_finance_handoff.py",
