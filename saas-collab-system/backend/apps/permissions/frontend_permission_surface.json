@@ -1359,11 +1359,19 @@
       "permission_code": "masterdata.view"
     },
     {
-      "file": "src/views/inventory/InventoryAlertList.vue",
+      "file": "src/views/inventory/InventoryAlertFollowup537.vue",
       "permission_code": "alerts.manage"
     },
     {
-      "file": "src/views/inventory/InventoryAlertList.vue",
+      "file": "src/views/inventory/InventoryAlertFollowup537.vue",
+      "permission_code": "replenishment.view"
+    },
+    {
+      "file": "src/views/inventory/InventoryWarningRisk537.vue",
+      "permission_code": "alerts.evaluate"
+    },
+    {
+      "file": "src/views/inventory/InventoryWarningRisk537.vue",
       "permission_code": "replenishment.view"
     },
     {
@@ -1879,5 +1887,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "85fcd0ecd1d22438b282ec4b9805e5031f6211cfbe3df9f999aff443ba966350"
+  "surface_hash": "c6fc66f5178a3b8253d458f07925aa21dd00b05982256cfe3283d22d81f9ba8f"
 }

@@ -287,6 +287,8 @@ def _previous_entries(tenant_id, country_id, cutoff_date, config):
         "currency_conversion",
     )
     same_basis = all(previous_run.config.get(key) == config.get(key) for key in comparable)
+    if not same_basis:
+        return {}
     return {
         (entry.entity_type, entry.entity_id): {
             "grade": entry.grade,
