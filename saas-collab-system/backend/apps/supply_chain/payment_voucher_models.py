@@ -20,7 +20,9 @@ class PaymentVoucher(Record):
     byte_size = models.PositiveIntegerField()
     sha256 = models.CharField(max_length=64, validators=[RegexValidator(r"^[0-9a-f]{64}$")])
     idempotency_key = models.CharField(max_length=128)
-    content = models.BinaryField()
+    content = models.BinaryField(blank=True)
+    content_storage_alias = models.CharField(max_length=80, null=True, blank=True)
+    content_object_key = models.CharField(max_length=500, null=True, blank=True)
 
     class Meta:
         ordering = ["created_at", "id"]
@@ -43,8 +45,24 @@ class PaymentVoucher(Record):
             raise ValidationError("凭证和付款记录必须属于同一租户。")
         if self.media_type not in {"application/pdf", "image/jpeg", "image/png"}:
             raise ValidationError("仅支持 PDF、JPG、PNG 凭证。")
-        if self.byte_size > 10 * 1024 * 1024 or len(self.content or b"") != self.byte_size:
-            raise ValidationError("凭证大小无效或超过 10MB。")
+        from .payment_voucher_storage import VoucherStorageError, object_key, validate_content
+        try:
+            if self.content_storage_alias or self.content_object_key:
+                parent_kind = "payment" if self.payment_id else "settlement_revision"
+                expected = object_key(self.tenant_id, parent_kind,
+                    self.payment_id or self.settlement_revision_id, self.idempotency_key, self.sha256)
+                if (not self.content_storage_alias or len(self.content_storage_alias) > 80
+                        or self.content_object_key != expected or self.content
+                        or not 0 < self.byte_size <= 10 * 1024 * 1024):
+                    raise VoucherStorageError("凭证存储引用无效。")
+            else:
+                validate_content(bytes(self.content or b""), self.byte_size, self.sha256)
+        except VoucherStorageError as exc:
+            raise ValidationError(str(exc)) from exc
+
+    def read_content(self):
+        from .payment_voucher_storage import read_content
+        return read_content(self)
 
     def save(self, *args, **kwargs):
         if self.pk:

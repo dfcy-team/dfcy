@@ -498,9 +498,9 @@ class ReplenishmentJobRows(ReplenishmentJobDetail):
                         params=[job.tenant_id, job.tenant_id]).annotate(
                             report_spu_id=RawSQL(f'{sku_table}.spu_id', []))
                 matched = grouped_rows(qs)
-                matched_ids = products.filter(pk__in=qs.order_by().values('sku_id')).order_by().values('spu_id').distinct()
+                matched_ids = list(products.filter(pk__in=qs.order_by().values('sku_id'), spu__tenant_id=job.tenant_id).order_by().values_list('spu_id', flat=True).distinct())
                 full = grouped_rows(self.suggestion_queryset(self.row_queryset(request, job))).filter(
-                    sku_id__in=products.filter(spu_id__in=Subquery(matched_ids)).values('pk'))
+                    sku_id__in=products.filter(spu_id__in=matched_ids).values('pk'))
                 field = DecimalField(max_digits=30, decimal_places=8)
                 def numeric(path):
                     # JSON object keys '7'/'15'/'30' are not array indexes.
@@ -536,7 +536,7 @@ class ReplenishmentJobRows(ReplenishmentJobDetail):
                     column = 'product_name' if sort == 'spu_name' else sort
                     metrics = metrics.annotate(group_sort=Min(RawSQL(f'{spu_table}.{column}', [])))
                     sort = 'group_sort'
-                count = metrics.count()
+                count = len(matched_ids)
                 ordering = F(sort).asc(nulls_last=True) if direction == 'asc' else F(sort).desc(nulls_last=True)
                 page_groups = list(metrics.order_by(ordering, 'report_spu_id')[offset:offset + limit])
                 page_ids = [item['report_spu_id'] for item in page_groups]

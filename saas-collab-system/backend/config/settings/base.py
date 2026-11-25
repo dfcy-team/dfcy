@@ -693,3 +693,7 @@ if BOARD_PREWARM_ENABLED:
         "schedule": 60.0,
         "options": {"queue": "realtime_board", "expires": 55},
     }
+
+# V538 code-only compatibility: external content writes remain opt-in per environment.
+TIKTOK_VIDEO_EVIDENCE_STORAGE_ALIAS = os.getenv("TIKTOK_VIDEO_EVIDENCE_STORAGE_ALIAS", "").strip()
+PAYMENT_VOUCHER_STORAGE_ALIAS = os.getenv("PAYMENT_VOUCHER_STORAGE_ALIAS", "").strip()

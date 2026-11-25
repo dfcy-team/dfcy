@@ -74,6 +74,8 @@ def test_archive_migrations_cannot_reuse_registered_release():
     unregistered_migrations = {
         "apps/sales_management/migrations/0013_warehouse_lookup_requested_index.py",
         "apps/influencers/migrations/0052_tiktok_product_performance_vm.py",
+        "apps/influencers/migrations/0053_tiktok_video_evidence_oss.py",
+        "apps/supply_chain/migrations/0086_payment_voucher_content_oss.py",
         "apps/integrations/migrations/0071_feishu_native_approval.py",
         "apps/integrations/migrations/0072_finance_handoff.py",
         "apps/integrations/migrations/0073_automatic_refresh_commit_recovery.py",

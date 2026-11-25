@@ -488,7 +488,8 @@ def remove_box(actor, pk, attachment_id, payload, key):
 def withdraw(actor, pk, payload, key):
     """Return an unallocated shipment to a versioned draft for correction."""
     _internal(actor)
-    _tenant_lock(actor)
+    from .withdraw_lock import lock_for_withdrawal
+    lock_for_withdrawal(actor)
     obj = shipment_for(actor, pk)
     if _prior_event(actor, obj, 'shipment_withdrawn', key, payload):
         return obj

@@ -1,9 +1,13 @@
 """Reviewed source migration and explicit database-only reaggregation."""
+from functools import wraps
 import gzip
+import zlib
 import hashlib
 import json
 import re
 import time
+import os
+import tempfile
 
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
@@ -15,13 +19,51 @@ from .summary_database import collect
 from .summary_database_document import render
 
 
+def publish_source(file, body, digest):
+    def valid():
+        try:
+            check = hashlib.sha256()
+            with gzip.open(file, 'rb') as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b''):
+                    check.update(block)
+            return check.hexdigest() == digest
+        except (OSError, EOFError, zlib.error):
+            return False
+    if file.exists() and valid():
+        return
+    descriptor, temporary = tempfile.mkstemp(prefix=file.name + '.', suffix='.tmp', dir=file.parent)
+    try:
+        with os.fdopen(descriptor, 'wb') as raw:
+            with gzip.GzipFile(fileobj=raw, mode='wb') as stream:
+                stream.write(body)
+            raw.flush()
+            os.fsync(raw.fileno())
+        if not (file.exists() and valid()):
+            os.replace(temporary, file)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def serialized_materialization(fn):
+    @wraps(fn)
+    def guarded(*args, **kwargs):
+        from .summary_native import materialization_guard
+        with materialization_guard():
+            return fn(*args, **kwargs)
+    return guarded
+
+
+@serialized_materialization
 def trusted_template(dataset):
-    body = gzip.decompress(document_path(dataset).read_bytes())
+    with gzip.open(document_path(dataset), 'rb') as stream:
+        body = stream.read()
     if hashlib.sha256(body).hexdigest() != dataset.source_hash:
         raise ValidationError('计算模板校验失败，未读取或迁移旧批次数据。')
     return body.decode('utf8')
 
 
+@serialized_materialization
 def initialize_sources(dataset, user, scope):
     """Migrate historical evidence/reports; monthly FX is calculated from SaaS daily evidence."""
     require_access(user, write=True)
@@ -63,6 +105,7 @@ def initialize_sources(dataset, user, scope):
     return created
 
 
+@serialized_materialization
 def rebuild(dataset, user, revision, *, publication_guard=None, scope_override=None, automatic_scope=None, bootstrap=False):
     require_access(user, write=True)
     started, cpu_started = time.perf_counter(), time.process_time()
@@ -104,7 +147,9 @@ def rebuild(dataset, user, revision, *, publication_guard=None, scope_override=N
     digest = hashlib.sha256(html).hexdigest()
     file = private_root()/(digest+'.html.gz')
     file.parent.mkdir(parents=True, exist_ok=True)
-    file.write_bytes(gzip.compress(html))
+    publish_source(file, html, digest)
+    source = {'source_counts': source['source_counts']}
+    del html, template
     candidate = FinanceSummaryDataset(document_file=file.name, source_hash=digest)
     values = unpack_values(original_values)
     info = engine(candidate, {'action': 'inspect', 'state': values})
