@@ -38,7 +38,8 @@ def next_refresh(row, order, state, checks, packages):
     if state == 'blocked' or any(check.get('status') == 'blocked' for check in checks):
         # The dispatcher checks local readiness only before resuming a blocked query.
         return min(now + timedelta(hours=1), row.polling_until), row.retry_count
-    delays = (10, 30, 120)
+    # Partial shipments already have usable data; give missing details time to arrive.
+    delays = (30, 120, 360) if state == "partial" else (10, 30, 120)
     if row.retry_count >= len(delays):
         return None, row.retry_count
     return min(now + timedelta(minutes=delays[row.retry_count]), row.polling_until), row.retry_count + 1

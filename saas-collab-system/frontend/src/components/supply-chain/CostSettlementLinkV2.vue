@@ -4,12 +4,19 @@
     <p class="hint">本单展示关联信息，费用、分摊、成本和结算统一在费用与结算页面维护。</p>
     <p v-if="error" role="alert">{{ error }}</p>
     <div v-else-if="context" class="summary">
-      <span>本单费用：{{ context.fee ? `${context.fee.amount}（${context.fee.state==='confirmed'?'已确认':'估算'}）` : '未维护' }}</span>
+      <span>{{kind==='inbound'?'本入库单费用':'本单费用'}}：{{ context.fee ? `${context.fee.amount}（${context.fee.state==='confirmed'?'已确认':'估算'}）` : '未单独录入' }}</span>
       <span v-if="context.settlement_supported">累计已付：{{ context.target?.paid_amount ?? context.settlement?.recorded_amount ?? '未登记' }}</span>
       <span v-if="context.settlement_supported">定金抵扣：{{context.target?.applied_amount ?? '0.0000'}} · 剩余应付：{{ context.target?.remaining_amount ?? context.settlement?.unsettled_amount ?? '尚未确定' }}</span>
       <span>成本：{{ statusLabel(context.latest_cost?.status) }}</span>
     </div>
     <p v-else class="hint">{{ loading ? '正在读取关联信息…' : '请先保存业务单据。' }}</p>
+    <div v-if="!error && context?.related_fees?.length" class="related-fees">
+      <p class="hint">关联来源费用为来源单据总额，不等于本入库单已分摊金额，请勿重复录入。历史记录未注明币种时会明确提示。</p>
+      <p v-for="(fee,index) in context.related_fees" :key="`${fee.kind}-${fee.id}-${index}`">
+        {{fee.label}} · <router-link :to="{path:'/supply-chain/costs',query:{kind:fee.kind,id:String(fee.id)}}">{{fee.number}}</router-link>
+        ：{{fee.amount}} {{fee.currency || '（历史记录未注明币种）'}} · {{fee.state==='confirmed'?'已确认':fee.state==='recorded'?'已录入':fee.state==='estimated'?'估算':fee.state}}
+      </p>
+    </div>
     <PayableClassificationPanelV2 v-if="canView && context && ['shipment','batch'].includes(kind)" :key="`split-${kind}-${id}`" :kind="kind" :id="id" />
     <PayableClassificationPanelV2 v-if="canView && kind==='shipment' && context?.target?.domestic_freight_payable_party_type" :key="`domestic-split-${id}`" kind="domestic_freight" :id="id" />
     <PaymentPlansPanelV2 v-if="canView && context && ['shipment','batch'].includes(kind)" :key="`plan-${kind}-${id}`" :kind="kind" :id="id" />

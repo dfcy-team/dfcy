@@ -15,6 +15,7 @@ def test_token_wait_preserves_retry_budget_and_resumes(shop,monkeypatch,settings
     auth=SimpleNamespace(expires_at=timezone.now()-timedelta(seconds=1),
         integration_config=SimpleNamespace(network_enabled=True,status="verified"))
     monkeypatch.setattr(provider,"authorized_store",lambda store:auth)
+    monkeypatch.setattr(provider,"credential_refresh_state",lambda auth:{"requires_manual_recovery":False})
     monkeypatch.setattr(engine,"step",lambda task,adapter:adapter.call("get_shop_flash_sale_list"))
     for _ in range(5):
         StoreTask.objects.filter(pk=task.id).update(next_attempt_at=None)

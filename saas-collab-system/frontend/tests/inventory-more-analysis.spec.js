@@ -29,7 +29,7 @@ describe('inventory more analysis navigation', () => {
     const wrapper = mount(InventoryWorkbench, { global: { stubs } });
     await wrapper.setProps({ warehouseDetails: true });
     await flushPromises();
-    expect(wrapper.get('h1').text()).toBe('仓库库存明细查询');
+    expect(wrapper.get('h1').text()).toBe('仓库库存明细');
     expect(wrapper.find('[data-testid="decisions"]').exists()).toBe(false);
     expect(wrapper.text()).not.toContain('更多分析');
     expect(mocks.fetch).toHaveBeenCalledOnce();

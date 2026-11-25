@@ -18,6 +18,7 @@ from apps.integrations.net_guard import PlatformHttpClient
 from apps.integrations.oauth_errors import OAuthFlowError, OAUTH_RATE_LIMITED
 from apps.integrations.production_settings import get_runtime_platform_config
 from apps.integrations.security import sanitize_text
+from apps.integrations.automatic_refresh import credential_refresh_state
 from .domain import digest, normalize_items
 from .models import AppPacer, StoreTask, TenantControl
 from .services import authorized_store
@@ -59,6 +60,11 @@ class Rejected(Exception):
     def __init__(self, code, message="平台明确拒绝本次操作"):
         super().__init__(message)
         self.code = code
+
+
+def _manual_credential_recovery_required(auth):
+    state = credential_refresh_state(auth)
+    return state.get("requires_manual_recovery") is True or state.get("state") == "disabled"
 
 
 class ShopeeAdapter:
@@ -151,6 +157,8 @@ class ShopeeAdapter:
             require_token_validity(auth, minimum_validity_seconds=30)
             custody = checked_custody_backend()
         except CredentialAccessError as exc:
+            if exc.code == "TOKEN_REFRESH_REQUIRED" and _manual_credential_recovery_required(auth):
+                raise ValidationError("商城授权续期已需人工恢复；请核对托管回执或重新授权，本次未提交平台请求。") from None
             raise CredentialWait(exc) from None
         runtime = get_runtime_platform_config("shopee")
         host = str(runtime.get("api_host") or "").rstrip("/")
@@ -164,6 +172,8 @@ class ShopeeAdapter:
             secret, token = retrieve_marketplace_credentials(
                 config, auth, custody=custody, minimum_validity_seconds=30)
         except CredentialAccessError as exc:
+            if exc.code == "TOKEN_REFRESH_REQUIRED" and _manual_credential_recovery_required(auth):
+                raise ValidationError("商城授权续期已需人工恢复；请核对托管回执或重新授权，本次未提交平台请求。") from None
             raise CredentialWait(exc) from None
         path = "/api/v2/shop_flash_sale/" + endpoint
         stamp = int(time.time())

@@ -282,6 +282,10 @@ class FileCredentialStore:
                 return record
         return None
 
+    def _operation_records(self, operation_hash):
+        records = (self._read(path) for path in self._paths())
+        return [record for record in records if record.get("operation_id_hash") == operation_hash]
+
     def lookup_operation(self, operation_id, *, close=False):
         if not isinstance(operation_id, str) or not 1 <= len(operation_id) <= 160:
             raise FileCustodyValidationError("Operation identifier is invalid.")
@@ -297,8 +301,7 @@ class FileCredentialStore:
                         os.fsync(descriptor)
                     finally:
                         os.close(descriptor)
-            matches = [self._read(path) for path in self._paths()]
-            matches = [record for record in matches if record.get("operation_id_hash") == operation_hash]
+            matches = self._operation_records(operation_hash)
             if len(matches) > 1:
                 raise FileCustodyError("Custody operation has conflicting references.")
             return {"found": True, **self._reference(matches[0])} if matches else {"found": False}

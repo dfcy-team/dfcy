@@ -62,11 +62,12 @@ def process_next_lookup(job, *, run_guard=None, readiness=None, permission_cache
     )
     # Bound database work and serialize competing unified dispatchers while selecting.
     with transaction.atomic():
-        row = eligible.select_for_update(skip_locked=True, of=('self',)).select_related(
-            "order__store", "requested_by").defer("order__source_details").order_by(
-                "requested_at", "pk").first()
-        if row is None:
+        lookup_pk = eligible.select_for_update(skip_locked=True, of=('self',)).order_by(
+            "requested_at", "pk").values_list("pk", flat=True).first()
+        if lookup_pk is None:
             return None
+        row = OrderWarehouseLookup.objects.select_related(
+            "order__store", "requested_by").defer("order__source_details").get(pk=lookup_pk)
         if row.status not in {"pending", "running"}:
             if not row.polling_until or row.polling_until <= now:
                 return None
@@ -93,4 +94,4 @@ def process_next_lookup(job, *, run_guard=None, readiness=None, permission_cache
     from .warehouse_orders import synchronize
     result = synchronize(lookup_id, revision, run_guard=run_guard)
     return {"lookup_id": lookup_id, "status": result,
-            "queried": result not in {"superseded", "already_running"}}
+            "queried": result not in {"superseded", "already_running", "cancelled"}}
