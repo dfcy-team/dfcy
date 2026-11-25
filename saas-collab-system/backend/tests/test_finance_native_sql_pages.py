@@ -13,6 +13,8 @@ def test_native_finance_sql_pages_preserve_groups_and_upper_bound():
                   if isinstance(node, ast.FunctionDef) and node.name == 'read_finance')
     sql_reader = next(node for node in ast.walk(tree)
                       if isinstance(node, ast.FunctionDef) and node.name == 'read_sql')
+    upper_reader = next(node for node in ast.walk(tree)
+                        if isinstance(node, ast.FunctionDef) and node.name == 'upper_value')
     rows = [(pk, 1, date(2026, 11, 1), 'same' if pk <= 601 else 'z',
              'fee', '1', '1', 'PHP', 'matched', None, 'fee')
             for pk in range(1, 1102)]
@@ -37,11 +39,6 @@ def test_native_finance_sql_pages_preserve_groups_and_upper_bound():
         def order_by(self, *args):
             return self
 
-        def first(self):
-            upper = max(row[0] for row in rows)
-            rows.append((upper + 1, *rows[-1][1:]))
-            return upper
-
         def extra(self, *, where, params):
             assert 'BINARY' in where[0]
             return Query(self.bounds, params, self.limit)
@@ -53,7 +50,8 @@ def test_native_finance_sql_pages_preserve_groups_and_upper_bound():
         @property
         def query(self):
             return SimpleNamespace(get_compiler=lambda **kwargs: SimpleNamespace(
-                as_sql=lambda: ('SELECT * FROM `finance` LIMIT 500', [self])))
+                as_sql=lambda: ('SELECT id FROM `finance`' +
+                    (' LIMIT ' + str(self.limit) if self.limit is not None else ''), [self])))
 
     def key(row):
         return row[3], row[2], row[7], row[0]
@@ -68,6 +66,12 @@ def test_native_finance_sql_pages_preserve_groups_and_upper_bound():
         def execute(self, sql, params):
             assert 'FORCE INDEX' in sql
             query = params[0]
+            if sql.startswith('SELECT MAX('):
+                assert query.limit is None and 'LIMIT' not in sql
+                upper = max(row[0] for row in rows)
+                self.batch = [(upper,)]
+                rows.append((upper + 1, *rows[-1][1:]))
+                return
             assert query.limit == 500
             self.batch = sorted((row for row in rows
                 if row[0] <= query.bounds['pk__lte']
@@ -78,13 +82,16 @@ def test_native_finance_sql_pages_preserve_groups_and_upper_bound():
         def fetchall(self):
             return self.batch
 
+        def fetchone(self):
+            return self.batch[0]
+
     namespace = dict(stores={1: object()}, ordered=Query(), finance_fields=(),
                      connection=SimpleNamespace(vendor='mysql', cursor=Cursor,
                          ops=SimpleNamespace(quote_name=lambda value: '`' + value + '`')),
                      FinanceRow=namedtuple('FinanceRow',
                          'pk store_id business_date external_order_id raw_fee_name raw_amount '
                          'signed_amount currency match_status raw_envelope_id fee_category'))
-    exec(compile(ast.Module(body=[sql_reader, reader], type_ignores=[]), str(source), 'exec'), namespace)
+    exec(compile(ast.Module(body=[sql_reader, upper_reader, reader], type_ignores=[]), str(source), 'exec'), namespace)
     actual = list(namespace['read_finance']())
     assert [tuple(row) for row in actual] == expected
     assert pages == [500, 500, 101, 0]

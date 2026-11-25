@@ -259,12 +259,17 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                 index = 'idx_fin_tx_store_date'
                 sql = sql.replace('FROM '+table, 'FROM '+table+' FORCE INDEX ('+connection.ops.quote_name(index)+')', 1)
             return sql, params
+        def upper_value(queryset, field):
+            sql, params = read_sql(queryset.order_by().values_list(field, flat=True))
+            column = connection.ops.quote_name(field)
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT MAX('+column+') FROM ('+sql+') AS finance_upper', params)
+                return cursor.fetchone()[0]
         envelope_ids = set()
         for store_id in sorted(stores):
             ids = finance.filter(store_id=store_id, platform='shopee', raw_envelope_id__isnull=False).order_by().values_list('raw_envelope_id', flat=True).distinct()
             if connection.vendor == 'mysql':
-                from django.db.models import Max
-                upper = finance.filter(store_id=store_id, platform='shopee').aggregate(upper=Max('raw_envelope_id'))['upper']
+                upper = upper_value(finance.filter(store_id=store_id, platform='shopee'), 'raw_envelope_id')
                 last = 0
                 while upper is not None and last < upper:
                     page = ids.filter(raw_envelope_id__gt=last, raw_envelope_id__lte=upper).order_by('raw_envelope_id')[:500]
@@ -295,7 +300,7 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                     for values in query.iterator(chunk_size=500):
                         yield FinanceRow(*values)
                     continue
-                upper = query.order_by('-pk').values_list('pk', flat=True).first()
+                upper = upper_value(query, 'id')
                 last = None
                 table = connection.ops.quote_name(query.model._meta.db_table)
                 while upper is not None:
