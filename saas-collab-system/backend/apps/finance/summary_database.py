@@ -172,6 +172,22 @@ def item_price(line):
     return text(value)
 
 
+def bounded_raw_envelopes(queryset):
+    # MySQL buffers a full result even with iterator(); LIMIT must reach SQL.
+    upper = queryset.order_by('-pk').values_list('pk', flat=True).first()
+    if upper is None:
+        return
+    last = 0
+    while True:
+        batch = list(queryset.filter(pk__gt=last, pk__lte=upper).order_by('pk')[:20])
+        if not batch:
+            return
+        for envelope in batch:
+            yield envelope
+        last = batch[-1].pk
+        batch.clear()
+
+
 def product_quotes(envelopes):
     """Allowlist product fields; never forward arbitrary provider/customer payloads."""
     quotes, metadata = {}, {}
@@ -298,7 +314,7 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
     # Read exact provider escrow versions referenced by posted financial facts.
     envelopes = SyncRawEnvelope.objects.filter(tenant=user.tenant, pk__in=envelope_ids).order_by()
     escrow = {}
-    for envelope in envelopes.iterator(chunk_size=20):
+    for envelope in bounded_raw_envelopes(envelopes) if native else envelopes.iterator(chunk_size=20):
         for index, trace in enumerate(envelope.payload.get('responses') or []):
             body = (trace.get('payload') or {}).get('response') or {}
             if not body.get('order_sn') or not body.get('order_income'):
@@ -467,8 +483,9 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
     for r in product_query:
         catalogue.append({k: getattr(r, k) for k in ['store_id', 'platform_product_id', 'platform_variant_id', 'platform_sku', 'internal_sku_id', 'title']})
         products[(r.store_id, r.platform_product_id)] = {'store_id': r.store_id, 'platform_product_id': r.platform_product_id, 'title': r.title, 'url': ''}
-    quotes, saved_products = product_quotes(SyncRawEnvelope.objects.filter(
-        tenant=user.tenant, store_id__in=stores, endpoint__icontains='product').order_by().iterator(chunk_size=10))
+    product_envelopes = SyncRawEnvelope.objects.filter(
+        tenant=user.tenant, store_id__in=stores, endpoint__icontains='product').order_by()
+    quotes, saved_products = product_quotes(bounded_raw_envelopes(product_envelopes) if native else product_envelopes.iterator(chunk_size=10))
     for key, product in saved_products.items():
         if product['title']:products[key] = product
     if native:

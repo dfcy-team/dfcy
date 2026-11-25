@@ -6,13 +6,13 @@
   "validation": {
     "backend": {
       "status": "PASS",
-      "summary": "197 passed",
-      "log_sha256": "a2960f8ecdfa7853556b63e4e3bf74c1c8e39e960242bf67e9cdf52c6bbca270"
+      "summary": "198 passed",
+      "log_sha256": "d5cd43cdf3adb9ca3094592b91a04e9ac4523bc5ec54387166e0cc22dd443163"
     },
     "frontend": {
       "status": "PASS",
-      "summary": "293 passed",
-      "log_sha256": "0e6481e62e89135e9302b0f9dbe7ab0bf01ad69315978a2f296cecd0c97ca1df"
+      "summary": "294 passed",
+      "log_sha256": "689e3773e814156abd4dc6760d85e1d2820d21eeb419b87e33c1efa39e71ef5a"
     },
     "build": {
       "status": "PASS",
@@ -66,12 +66,30 @@
       "cpu": 0.5,
       "memory_mib": 1792
     },
+    "r30": {
+      "status": "RUNNING",
+      "candidate_scope": "SQL-bounded raw reads plus current-query-only cache, before high-water refinement",
+      "production_switched": false
+    },
+    "oom_review": {
+      "raw_payload_sql_limit": 20,
+      "raw_payload_high_water_id": true,
+      "query_result_cache": "current filters and view, two modes",
+      "raw_flow_page_max": 100,
+      "settings_cache_mib": 32,
+      "unresolved": [
+        "Large settings document fully decompressed before filtering",
+        "Full cost composition constructed before presentation paging",
+        "Large SKU/product-link groups and multi-worker concurrency need peak verification"
+      ]
+    },
     "blockers": [
       "Diagnose and pass current-month default query",
       "Cloud cross-month-week and scope-transition verification",
       "Current cloud baseline and release coordination",
       "Shared runtime image switch impact confirmation",
-      "Production settings/save regression and user acceptance"
+      "Production settings/save regression and user acceptance",
+      "OOM peak and concurrency acceptance across remaining paths"
     ]
   },
   "source_git_blob_sha256": {
@@ -84,7 +102,7 @@
     "saas-collab-system/backend/apps/finance/summary_browser_shell.py": "535f86a5ecf5e474a06e8281cb34686eba153910a33d1761e1c0edad548ea174",
     "saas-collab-system/backend/apps/finance/summary_composition.js": "b6c3987636d53fb9c9d78ecf35eda576b1e8f1452edc2f020d6ba9ee6140cc5e",
     "saas-collab-system/backend/apps/finance/summary_cost_classification.py": "f86d7a1cc85b0858c4f8dcf514a9c52f95279b8d49baa1a5ba4b3e30c2bed076",
-    "saas-collab-system/backend/apps/finance/summary_database.py": "313634f65244441e22e71f6a007fe7e6c3c36875f06d3459f4b664e10a9a7df5",
+    "saas-collab-system/backend/apps/finance/summary_database.py": "abd485a620968b51c22787b28643d0fbb026c16bde4f8218786cefcd19c080c2",
     "saas-collab-system/backend/apps/finance/summary_database_document.py": "780d559bf298a125f63fceb0dfdddd1b3daeba482f87a2182f7001b4468bf7e3",
     "saas-collab-system/backend/apps/finance/summary_documents.py": "e84bbcab6e956c6b1686e0d3e58ff0e94f9d56e7c3ebddce9d3936154c168cdb",
     "saas-collab-system/backend/apps/finance/summary_engine.cjs": "fcfe8ee60f8b5ff6dfa8700fd418de1d45ed449bce7da0d9e535d145c74aba90",
@@ -94,7 +112,7 @@
     "saas-collab-system/backend/apps/finance/summary_jobs.py": "d2aa6df3f7fccf9e47841040f956a26bf0af7f177eb88a5d37a9178b899c46bd",
     "saas-collab-system/backend/apps/finance/summary_maintenance.py": "6ff011d562f8ad0e1ff94fa84bf55783ce5ee107344678239acb5edde796a5b6",
     "saas-collab-system/backend/apps/finance/summary_models.py": "09c5c1299abfd4a338128a8279cc2a21bb56f316dc129152e03d1e0a305c4d7e",
-    "saas-collab-system/backend/apps/finance/summary_native.cjs": "08b254ab70d7fee6f50860a03aebb2c8bb329e8b576c6be2441c2757a64468c4",
+    "saas-collab-system/backend/apps/finance/summary_native.cjs": "b35f911e048851c0c93a9df02d76014cae219f6c2a821e44ba96eb44b42f7973",
     "saas-collab-system/backend/apps/finance/summary_native.py": "1ed5f49917384c377044e228b3ca5359f542fbe8deb7aad51f8cc24ae7e0b6b1",
     "saas-collab-system/backend/apps/finance/summary_order_ledger.cjs": "b03db0a285b459eb5ba21a662527e784fa206512b0effb9e3db06e2b83d26619",
     "saas-collab-system/backend/apps/finance/summary_participation.js": "6962867f68a99f45b87d341aee6532ee35d58a29278c11a610faca0a1322d0a6",

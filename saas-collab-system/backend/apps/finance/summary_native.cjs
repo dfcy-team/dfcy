@@ -57,9 +57,11 @@ function scopedOptions(s,filters){
  s.scopedOptionCache.set(key,options);return options;
 }
 function query(s,view,filters,mode,scope='store'){
+ const group=JSON.stringify([view,filters,scope]);
+ if(s.queryGroup!==group){s.queries.clear();s.queryGroup=group;}
  const key=JSON.stringify([view,filters,mode,scope]);s.c.HTML2_STORE_HIERARCHY.setMode(mode);
  if(s.queries.has(key)){const rows=s.queries.get(key);s.queries.delete(key);s.queries.set(key,rows);return rows;}
- const rows=calculate(s,view,filters,mode,scope);if(s.queries.size>=4)s.queries.delete(s.queries.keys().next().value);s.queries.set(key,rows);return rows;
+ const rows=calculate(s,view,filters,mode,scope);s.queries.set(key,rows);return rows;
 }
 function calculate(s,view,filters,mode,scope='store'){
  const {c,p}=s,type=filters.period_type||'month',key=type+'|'+mode;c.HTML2_STORE_HIERARCHY.setMode(mode);
@@ -273,7 +275,7 @@ async function dispatch(request,timings){
  if(input.action==='table')return table(s,input);if(input.action==='table_detail')return detail(s,input);if(input.action==='history'){const rows=plain(s.c.LEDGER_FEES.history().concat(s.c.RAW_PARTICIPATION.state().history)).filter(row=>{const ids=input.filters?._stores;if(!Array.isArray(ids))return true;const stores=[row.before?.store,row.after?.store].filter(v=>v!=null);return stores.length>0&&stores.every(id=>ids.includes(String(id)));}).sort((a,b)=>b.at.localeCompare(a.at)),size=20,page=input.page||1;return{rows:rows.slice((page-1)*size,page*size),total:rows.length,page};}throw Error('未知查询。');
  }finally{timings.calculate_ms=performance.now()-calculateStarted;}
 }
-module.exports={summaryRatio,fieldIssues,summaryTotals,scopeMatches,scopedOptions,directoryOptions,calculate,table,detail};
+module.exports={summaryRatio,fieldIssues,summaryTotals,scopeMatches,scopedOptions,directoryOptions,query,calculate,table,detail};
 if(require.main===module){
 const rl=readline.createInterface({input:process.stdin,crlfDelay:Infinity});
 rl.on('line',line=>{try{const request=JSON.parse(line),timings={};Promise.resolve(dispatch(request,timings)).then(result=>process.stdout.write(JSON.stringify({ok:true,result,timings})+'\n'),error=>process.stdout.write(JSON.stringify({ok:false,error:error.message})+'\n'));}catch(error){process.stdout.write(JSON.stringify({ok:false,error:error.message})+'\n');}});

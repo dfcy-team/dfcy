@@ -12,6 +12,30 @@ from tests.test_finance_summary import context, URL
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
+def test_raw_payload_queries_are_sql_bounded_and_preserve_scope_and_all_rows(context):
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+    from apps.integrations.models import SyncRawEnvelope
+    from apps.finance.summary_database import bounded_raw_envelopes
+    from tests.test_sales_management import create_run
+    _, user, dataset, _ = context
+    run = create_run(user.tenant, 'sales_order', 'memory-bounded-raw')
+    expected = []
+    for index in range(41):
+        row = SyncRawEnvelope.objects.create(tenant=user.tenant, sync_run=run,
+            store_id=dataset.metadata['store_ids'][0], platform='shopee', endpoint='product',
+            sequence=index, payload={'records': [{'item_name': 'synthetic-'+str(index)}]}, payload_hash='a'*64)
+        expected.append(row.pk)
+    queryset = SyncRawEnvelope.objects.filter(tenant=user.tenant, sync_run=run)
+    with CaptureQueriesContext(connection) as captured:
+        result = list(bounded_raw_envelopes(queryset))
+    assert [row.pk for row in result] == expected
+    assert 'LIMIT 1' in captured[0]['sql'] and 'payload' not in captured[0]['sql']
+    assert all('LIMIT 20' in query['sql'] and 'OFFSET' not in query['sql'] for query in captured[1:])
+    assert len(captured) == 5
+    assert list(bounded_raw_envelopes(queryset.filter(pk__in=expected[::2]))) == result[::2]
+
+
 @pytest.fixture(autouse=True)
 def broker(monkeypatch):
     cache.clear()
