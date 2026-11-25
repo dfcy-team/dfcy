@@ -67,8 +67,26 @@
       "memory_mib": 1792
     },
     "r30": {
-      "status": "RUNNING",
-      "candidate_scope": "SQL-bounded raw reads plus current-query-only cache, before high-water refinement",
+      "status": "FAILED",
+      "candidate_scope": "SQL-bounded raw reads and current-query-only cache, before high-water refinement",
+      "results": [],
+      "error_type": "CalculationTimeout",
+      "source_children": [
+        {
+          "returncode": 0
+        }
+      ],
+      "memory_events": {
+        "low": 0,
+        "high": 0,
+        "max": 123650,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      },
+      "cgroup_peak_mib": 1792.0,
+      "business_writes": 0,
+      "db_writes": 0,
       "production_switched": false
     },
     "oom_review": {
