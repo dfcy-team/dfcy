@@ -83,7 +83,7 @@ for path, expected in files.items():
     require(digest(blob("HEAD", path)) == expected, f"source file SHA mismatch: {path}")
 
 baseline = identity["baseline"]
-require(baseline["sha256"] == "d005a3e14a58c41308b1ace7a7310dc6d89a1d3a46a0f85dec3a205db9027305", "independently approved V518 baseline mismatch")
+require(baseline["sha256"] == "0c22a7a6d640e8ce420357aa81b5867dfae03c3e6a848c946ae6d3ea2305c86f", "independently approved V518 baseline mismatch")
 require(re.fullmatch(r"[0-9a-f]{64}", baseline["sha256"]) is not None, "invalid approved baseline digest")
 require(bool(os.environ.get("EXPECTED_BASELINE_SHA")) and baseline["sha256"] == os.environ["EXPECTED_BASELINE_SHA"], "baseline SHA environment binding mismatch")
 require(baseline["source_sha"] == source["parent_sha"] and baseline["version"] == "2.44.518", "approved baseline source/version mismatch")
@@ -117,23 +117,27 @@ for path in parent_migrations:
 # Actual wrapper stdout receipt is embedded in identity; verify its byte hash before parsing.
 rehearsal_capture = identity["rehearsal"]
 receipt_raw = decode_capture(rehearsal_capture, "rehearsal receipt")
-require(digest(receipt_raw) == "9cbc06267102610b56c902d9f3fff2b5138a02396a879c58d57fe9bd0da839d7", "independently approved actual R3 receipt mismatch")
+require(digest(receipt_raw) == "442c1fba8a846fc375606760d623f50c5b544814a5c6ebd2e6b4d1f20c7d4195", "independently approved actual R4 checkpoint receipt mismatch")
 receipt = json.loads(receipt_raw.decode("utf-8"))
 require(receipt["status"] == "PASS", "remote wrapper did not pass")
 require(receipt["source_sha"] == source["sha"], "wrapper source SHA mismatch")
 require(receipt["backup_sha256"] == rehearsal_capture["backup_sha256"], "wrapper backup SHA mismatch")
 require(receipt["source_archive_sha256"] == rehearsal_capture["source_archive_sha256"], "wrapper archive SHA mismatch")
-require(receipt["backup_sha256"] == "97624d3422064f48fd64a4dfdbe540163e08d4173610d33efd4dfaea4943701c", "approved rehearsal backup mismatch")
+require(receipt["backup_sha256"] == "36d4fc017dd48b70740ec9fb5440b6e0a89c5d479c0d0fa99040ccb905d319cf", "approved rehearsal backup mismatch")
 require(receipt["source_archive_sha256"] == "611cef0e5d76c9e15111bbff375c03bfa50a0f9940287afc1c2ffceaacdd8fb2", "approved source archive mismatch")
 require(receipt["cleanup_verified"] is True, "wrapper cleanup was not verified")
 require(receipt["protected_state_unchanged"] is True, "protected release files changed")
 require(receipt["production_app_unchanged"] is True, "production app container changed")
 require(receipt["test_artifacts_retained"] is True, "test artifacts were not retained")
+require(receipt["approved_checkpoint_sha256"] == baseline["sha256"], "wrapper checkpoint binding mismatch")
+require(receipt["production_roles_unchanged"] is True and receipt["production_roles_verified"] == 14, "production role preservation mismatch")
 checks = receipt["isolation_checks"]
 require(checks["db_network"] == "none" and checks["probe_shares_db_network"] is True, "network isolation checks failed")
 
 # The probe uses its real nested receipt schema; do not infer proof from wrapper status.
 probe = receipt["probe_receipt"]
+require(probe["checkpoint_sha256"] == baseline["sha256"] and probe["checkpoint_tables_verified"] == 412 and probe["checkpoint_rows_verified"] == 3552466 and probe["checkpoint_metadata_tables_verified"] == 3, "restored backup does not exactly match approved checkpoint")
+require(baseline["protected_tables"] == 412 and baseline["protected_rows"] == 3552466, "approved checkpoint row scope mismatch")
 require(probe["status"] == "PASS", "database probe failed")
 require(probe["source_sha"] == source["sha"], "probe source SHA mismatch")
 require(probe["source_tree"] == source["tree_sha"], "probe source tree mismatch")

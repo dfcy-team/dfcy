@@ -255,7 +255,7 @@ jobs:
           ref: ${{ github.sha }}
           path: .v518-cumulative-control
           persist-credentials: false
-      - name: Check out protected V533 cumulative release control
+      - name: Check out protected V533 R2 cumulative release control
         if: inputs.action == 'deploy' && inputs.release_sha == '081b87a0a6c2e153ae889b855e3aecbfd2e3ba20'
         uses: actions/checkout@v4
         with:
