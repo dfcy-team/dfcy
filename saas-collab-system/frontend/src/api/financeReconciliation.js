@@ -18,12 +18,14 @@ export const confirmReconciliationMatch = (id) => requestApi({ method: 'post', u
 export const rejectReconciliationMatch = (id, reason) => requestApi({ method: 'post', url: `/api/finance/reconciliation/matches/${id}/reject/`, data: { reason } });
 export const resolveReconciliationException = (id, reason) => requestApi({ method: 'post', url: `/api/finance/reconciliation/exceptions/${id}/resolve/`, data: { reason } });
 
-export const fetchFinanceSummary = (params = {}) => requestApi({ method:'get', url:'/api/finance/summary/', params, noMockFallback:true, timeout:120000 });
-export const fetchFinanceSummaryJob = (id) => requestApi({ method:'get', url:`/api/finance/summary/jobs/${id}/`, noMockFallback:true });
-export const rebuildFinanceSummary = (id, revision) => requestApi({ method:'post', url:'/api/finance/summary/'+id+'/rebuild/', data:{revision}, noMockFallback:true, timeout:180000 });
-export const fetchFinanceSummaryDocument = (id) => fetchApiFile(`/api/finance/summary/${id}/document/`);
+export const fetchFinanceSummary = (params = {}, {signal} = {}) => requestApi({ signal, method:'get', url:'/api/finance/summary/', params, noMockFallback:true, timeout:120000 });
+export const fetchFinanceSummaryJob = (id, {signal} = {}) => requestApi({ signal, method:'get', url:`/api/finance/summary/jobs/${id}/`, noMockFallback:true });
+export const fetchFinanceSourceFlows = (params, {signal} = {}) => requestApi({signal,method:'get',url:'/api/finance/summary/source-flows/',params,noMockFallback:true,timeout:30000});
+export const fetchFinanceSourceFlowDetail = (source, id, {signal} = {}) => requestApi({signal,method:'get',url:`/api/finance/summary/source-flows/${encodeURIComponent(source)}/${id}/`,noMockFallback:true,timeout:30000});
+export const rebuildFinanceSummary = (id, revision, scope) => requestApi({ method:'post', url:'/api/finance/summary/'+id+'/rebuild/', data:{revision,...(scope ? {scope} : {})}, noMockFallback:true, timeout:180000 });
+export const fetchFinanceSummaryDocument = (id, { toolsOnly = false, storeId = '', signal } = {}) => fetchApiFile(`/api/finance/summary/${id}/document/${toolsOnly ? '?tools=1' + (storeId ? '&store=' + encodeURIComponent(storeId) : '') : ''}`, { timeout: 120000, signal });
 export const saveFinanceSummary = (id, data) => requestApi({ method:'post', url:`/api/finance/summary/${id}/settings/`, data, noMockFallback:true, timeout:120000 });
-export const fetchFinanceSummaryTable = (id, params) => requestApi({ method:'get', url:`/api/finance/summary/${id}/table/`, params, noMockFallback:true, timeout:120000 });
-export const fetchFinanceSummaryDetail = (id, params) => requestApi({ method:'get', url:`/api/finance/summary/${id}/table-detail/`, params, noMockFallback:true, timeout:120000 });
+export const fetchFinanceSummaryTable = (id, params, {signal} = {}) => requestApi({ signal, method:'get', url:id==null?'/api/finance/summary/query/':`/api/finance/summary/${id}/table/`, params, noMockFallback:true, timeout:120000 });
+export const fetchFinanceSummaryDetail = (id, params, {signal} = {}) => requestApi({ signal, method:'get', url:id==null?'/api/finance/summary/query-detail/':`/api/finance/summary/${id}/table-detail/`, params, noMockFallback:true, timeout:120000 });
 export const saveFinanceSummaryFee = (id, data) => requestApi({ method:'post', url:`/api/finance/summary/${id}/fee/`, data, noMockFallback:true, timeout:120000 });
-export const fetchFinanceSummaryHistory = (id, params) => requestApi({ method:'get', url:`/api/finance/summary/${id}/history/`, params, noMockFallback:true, timeout:120000 });
+export const fetchFinanceSummaryHistory = (id, params, {signal} = {}) => requestApi({ signal, method:'get', url:`/api/finance/summary/${id}/history/`, params, noMockFallback:true, timeout:120000 });

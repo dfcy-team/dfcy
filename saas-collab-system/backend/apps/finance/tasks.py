@@ -11,6 +11,7 @@ from django.utils import timezone
 from .platform_wallet_models import PlatformWalletSync, PlatformWalletCursor
 from .platform_wallet_service import require_sync, visible_stores, sync_store
 from .summary_jobs import run_calculation, dispatch_calculations  # noqa: F401
+from .summary_documents import warm_settings_documents  # noqa: F401
 
 
 @shared_task(acks_late=True, soft_time_limit=1740, time_limit=1800)

@@ -15,9 +15,25 @@
       warehouse_id:c.warehouse_id,effective_from:c.cost_effective_from,effective_to:c.cost_effective_to,
       original_amount:c.unit_cost==null?null:micro(c.net_cost),reasons:c.reasons||[]}}))];
   }
-  const rows=['order_fee','refund'].includes(f.kind)&&f.sp6th_components&&f.currency===(f.original_currency||f.currency)
-   ?f.sp6th_components.map(c=>({key:c.field,label:c.label+' · '+c.field,amount:micro(c.amount),leaf:true,level:2,status:f.status,source:c.field}))
-   :ledgerParts(f.source==='SaaS平台结算'?{...f,source:'平台结算'}:f);
+  const normalized=f.source==='SaaS平台结算'?{...f,source:'平台结算'}:f;
+  const sourceGroup=f.platform==='lazada'&&f.rows?.length?{platform:'lazada'}:
+   f.platform==='shopee'&&typeof SNAPSHOT!=='undefined'&&(typeof hasShopeeIncome==='function'?hasShopeeIncome(f):(SNAPSHOT.shopee_income||[]).some(r=>String(r.store_id)===String(f.store_id)&&r.order===f.external_order_id&&r.date===f.date&&r.currency===(f.original_currency||f.currency)))?
+    {platform:'shopee',store_id:f.store_id,order:f.external_order_id,date:f.date,currency:f.original_currency||f.currency,rows:f.rows||[]}:null;
+  let rows=!sourceGroup&&['order_fee','refund'].includes(f.kind)&&f.sp6th_components&&f.currency===(f.original_currency||f.currency)
+   ?f.sp6th_components.map(c=>({key:c.field,label:c.label+' · '+c.field,amount:c.amount==null?null:micro(c.amount),leaf:true,level:2,status:f.status,source:c.field}))
+   :ledgerParts(normalized,sourceGroup);
+  if(sourceGroup&&f.kind==='order_fee'&&f.sp6th_components){
+   const components=new Map(f.sp6th_components.map(c=>[c.field,c])),used=new Set();
+   const local=c=>c.amount==null?null:f.currency===(f.original_currency||f.currency)?micro(c.amount):f.fx?convertAmount(c.amount,f.fx.rate):null;
+   rows=rows.filter(r=>!r.leaf||components.has(r.source)).map(r=>{
+    if(!r.leaf)return r;used.add(r.source);return {...r,amount:local(components.get(r.source))};
+   });
+   for(const c of components.values())if(!used.has(c.field))rows.push({key:c.field,label:c.label+' · '+c.field,amount:local(c),leaf:true,level:2,status:f.status,source:c.field});
+  }
+  for(const r of rows)if(r.leaf&&r.key?.startsWith('local:')){
+   r.label=typeof kindLabel==='function'?kindLabel(f.kind):({sales:'订单销售额',refund:'订单退款',order_fee:'订单费用',adjustment:'订单调整',shop_adjustment:'店铺调整',advertising:'广告花费',product_cost:'商品成本',gcash:'GCash退款',promotion:'刷单费用',warehouse_order:'仓库处理费',warehouse_other:'仓库其他处理费'})[f.kind]||f.kind;
+   r.source=[f.source,r.source,'来源未提供更细子项；可展开来源明细核对原始记录'].filter(Boolean).join('；');
+  }
   const stack=[],result=[];
   for(const r of rows){
    while(stack.length&&stack.at(-1).level>=r.level)stack.pop();

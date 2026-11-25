@@ -22591,6 +22591,162 @@
       "owner": "finance"
     },
     {
+      "route": "api/finance/summary/query-detail/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/query-detail/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/query-detail/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/query/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/query/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/query/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/source-flows/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/source-flows/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/source-flows/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/source-flows/<str:source>/<int:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/source-flows/<str:source>/<int:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/source-flows/<str:source>/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
       "route": "api/finance/transactions/",
       "method": "GET",
       "action": "read",
@@ -58553,5 +58709,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "fc3660a88b42f57d0b87dba99e56f80b498aa477e35445b0b25f55b2ab9ee930"
+  "catalog_hash": "e620eb0aa9d30279d5df88fc82af7401b8a51bb42b30e0e9b56abccb8dfb60b2"
 }

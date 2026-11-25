@@ -125,3 +125,32 @@ it('Shopee月度广告报告保留已筛选的实际日报，供周／半月读�
   const rows=dailyAdvertising(s,[{kind:'advertising',source_id:'hierarchy-ad:58',store_code:'SP6TH',month:'2026-09',amount:'-3'}],'operations');expect(rows.map(r=>[r.period_date,r.amount])).toEqual([['2026-09-03','-1.000000'],['2026-09-18','-2.000000']]);expect(rows[0].source_proof.actual_source_ids).toEqual(['day:1']);
  }finally{fs.unlinkSync(file);fs.rmdirSync(dir);}
 });
+
+it('SaaS Lazada复用旧结算分类与子项层级，不退化为来源名称或平铺',()=>{
+ const c=runtime();let received;c.ledgerParts=(f,g)=>{received=g;return g?.platform==='lazada'?fees:[{key:'local:'+f.source+':'+f.kind,label:f.source,amount:-900000n,level:2,leaf:true}];};
+ const rows=c.FINANCE_COMPOSITION.fromEntries([{kind:'order_fee',platform:'lazada',source:'SaaS平台结算',currency:'PHP',amount:'-900000',rows:[{name:'Commission',amount:'-800000'}]}],-900000n);
+ expect(received.platform).toBe('lazada');expect(rows.map(r=>r.label)).toEqual(['平台费用','佣金','支付手续费','手续费返还']);expect(rows[0].included).toBe(false);expect(rows.filter(r=>r.included).reduce((n,r)=>n+r.amount,0n)).toBe(-900000n);
+});
+it.each(['sales','refund','advertising','gcash','promotion','warehouse_order','warehouse_other'])('无可用子项的%s按科目标注，不用来源名称冒充构成',kind=>{
+ const c=runtime();c.ledgerParts=f=>[{key:'local:'+f.source+':'+f.kind,label:f.source,amount:10000n,level:2,leaf:true,source:'直接归属'}];
+ const rows=c.FINANCE_COMPOSITION.fromEntries([{kind,source:'SaaS平台结算'}],10000n);expect(rows[0].label).not.toBe('平台结算');expect(rows[0].source).toContain('未提供');expect(rows[0].amount).toBe(10000n);
+});
+
+it('Shopee使用已接入的官方income恢复旧构成函数，而非平铺费用字段',()=>{
+ const c=runtime();const income={store_id:58,order:'SP-1',date:'2026-09-01',currency:'PHP'};c.SNAPSHOT={shopee_income:[income]};let received;
+ c.ledgerParts=(f,g)=>{received=g;return fees;};c.FINANCE_COMPOSITION.fromEntries([{kind:'order_fee',platform:'shopee',source:'SaaS平台结算',store_id:58,external_order_id:'SP-1',date:'2026-09-01',currency:'PHP',sp6th_components:[{field:'commission_fee',amount:'-900000'}]}],-900000n);
+ expect(received).toMatchObject({platform:'shopee',store_id:58,order:'SP-1'});
+});
+
+it('真实旧模板分类函数在SaaS Lazada流水上恢复分类、小计与费用子项',()=>{
+ const require=createRequire(import.meta.url),{createEngine}=require('../../backend/apps/finance/summary_engine.cjs');const s=createEngine('../backend/apps/finance/templates/database-v1.html.gz',{}, {retainSource:false});
+ const rows=s.c.FINANCE_COMPOSITION.fromEntries([{kind:'order_fee',platform:'lazada',source:'SaaS平台结算',currency:'PHP',amount:'-9',rows:[{name:'Commission',amount:'-8'},{name:'Reversal Commission',amount:'1'},{name:'Payment Fee',amount:'-2'}]}],-9000000n);
+ expect(rows.map(r=>r.label)).toEqual(['Lazada · 佣金及冲销','Commission','Reversal Commission','Lazada · 支付手续费及返还','Payment Fee']);expect(rows[0].amount).toBe(-7000000n);expect(rows[0].included).toBe(false);expect(rows.filter(r=>r.included).reduce((n,r)=>n+r.amount,0n)).toBe(-9000000n);
+});
+
+it('旧分类树只挂入当前店适用的结算字段，不把其他店费用误报为缺失',()=>{
+ const c=runtime();c.micro=n=>n==null?null:BigInt(n);c.SNAPSHOT={shopee_income:[{store_id:58,order:'SP-1',date:'2026-09-01',currency:'PHP'}]};
+ c.ledgerParts=()=>[{key:'sp:fees',label:'Shopee · 费用与收费小计',level:2,leaf:false,amount:null},{key:'sp:fee:commission_fee',label:'佣金',level:3,leaf:true,amount:-10000n,source:'commission_fee'},{key:'sp:fee:optional',label:'其他店适用费用',level:3,leaf:true,amount:null,source:'optional'}];
+ const rows=c.FINANCE_COMPOSITION.fromEntries([{kind:'order_fee',platform:'shopee',source:'SaaS平台结算',store_id:58,external_order_id:'SP-1',date:'2026-09-01',currency:'PHP',sp6th_components:[{field:'commission_fee',amount:'-10000'}]}],-10000n);
+ expect(rows.map(r=>r.label)).toEqual(['Shopee · 费用与收费小计','佣金']);expect(rows[0].amount).toBe(-10000n);
+});

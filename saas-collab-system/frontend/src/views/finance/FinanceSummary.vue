@@ -11,9 +11,10 @@
     </header>
     <el-alert v-if="batch?.source_changed" title="原始业务数据在接入后有更新；当前仍展示已验收批次，需重新核对并接入新批次。刷新页面不会自动混入未验收数据。" type="warning" :closable="false" show-icon />
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
+    <el-button v-if="error && toolsOnly" :disabled="loading || saving" @click="load">重新加载设置</el-button>
     <div class="summary-frame" :aria-busy="loading || saving">
-      <div v-if="loading || saving" class="summary-busy" role="status">{{ saving ? '正在校验并保存到本地SaaS…' : '正在加载财务汇总…' }}</div>
-      <iframe v-if="document" ref="frame" :srcdoc="document" :style="{ height: frameHeight + 'px' }" :inert="loading || saving" title="财务汇总及流水费用调整" sandbox="allow-scripts allow-popups allow-downloads" @load="loading = false" />
+      <div v-if="loading || saving" class="summary-busy" role="status">{{ saving ? '正在校验并保存到本地SaaS…' : loadStatus }}</div>
+      <iframe v-if="document" ref="frame" :srcdoc="document" :style="{ height: frameHeight + 'px' }" :inert="loading || saving" title="财务汇总及流水费用调整" sandbox="allow-scripts allow-popups allow-downloads" @load="frameLoaded" />
     </div>
   </section>
 </template>
@@ -25,36 +26,51 @@ const props = defineProps({ initialContext: { type:Object, default:null }, tools
 
 const batch = ref(null), frame = ref(null), document = ref(''), error = ref(''), loading = ref(false), saving = ref(false);
 const frameHeight = ref(600);
+const loadStatus = ref('正在读取账务设置…');
 const formatTime = value => new Date(value).toLocaleString('zh-CN', { timeZone:'Asia/Shanghai', hour12:false });
-let template = '', sourceHash = '', documentVersion = '', requestVersion = 0, alive = true;
+let template = '', sourceHash = '', documentVersion = '', loadedStore = '', requestVersion = 0, alive = true;
 let position = null, pendingScroll = null;
+let frameTimer, frameVersion=0, readController;
+function frameLoaded() { if(loading.value)loadStatus.value='正在检查账务设置功能…'; }
 const outerScroll = () => frame.value?.closest('.app-main')?.scrollTop || 0;
 function show(context) {
   pendingScroll = context?.outerScroll ?? null;
-  const bootstrap = JSON.stringify({ dataset:batch.value.dataset, revision:batch.value.revision,
+  const bootstrap = JSON.stringify({ frame_id:++frameVersion, dataset:batch.value.dataset, revision:batch.value.revision,
     values:batch.value.values, can_edit:batch.value.can_edit, toolsOnly:props.toolsOnly, viewport_height:window.innerHeight, context }).replace(/</g, '\\u003c');
   loading.value = true;
+  loadStatus.value = props.toolsOnly ? '正在初始化广告及账务设置…' : '正在初始化财务汇总…';
   document.value = template.replace('__SAAS_FINANCE_BOOTSTRAP__', () => bootstrap);
+  clearTimeout(frameTimer);
+  frameTimer = setTimeout(() => {
+    if (!alive || !loading.value) return;
+    document.value = ''; loading.value = false;
+    error.value = '账务设置初始化超时，请核对当前版本后重新加载。';
+  }, 60000);
 }
 async function load() {
+  readController?.abort();readController=new AbortController();const signal=readController.signal;
   const version = ++requestVersion;
   loading.value = true; error.value = '';
+  loadStatus.value = '正在读取设置版本…';
   try {
-    const response = await fetchFinanceSummary();
+    const response = await fetchFinanceSummary({}, {signal});
     if (!alive || version !== requestVersion) return;
     if (!response.success) throw new Error(response.message || '财务批次加载失败');
     const next = response.data;
-    if (document.value && batch.value?.dataset === next.dataset && batch.value?.revision === next.revision && batch.value?.can_edit === next.can_edit && sourceHash === next.source_hash && documentVersion === next.document_version) {
+    const desiredStore = props.toolsOnly ? String((position || props.initialContext)?.fields?.store || next.source?.store_ids?.[0] || '') : '';
+    if (document.value && batch.value?.dataset === next.dataset && batch.value?.revision === next.revision && batch.value?.can_edit === next.can_edit && sourceHash === next.source_hash && documentVersion === next.document_version && loadedStore === desiredStore) {
       batch.value = next; loading.value = false; return;
     }
-    if (sourceHash !== next.source_hash || documentVersion !== next.document_version || !template) {
-      const result = await fetchFinanceSummaryDocument(next.dataset);
+    if (sourceHash !== next.source_hash || documentVersion !== next.document_version || loadedStore !== desiredStore || !template) {
+      loadStatus.value = props.toolsOnly ? '正在读取广告及账务设置页面…' : '正在读取财务汇总页面…';
+      const result = props.toolsOnly ? await fetchFinanceSummaryDocument(next.dataset, {toolsOnly:true,storeId:desiredStore,signal}) : await fetchFinanceSummaryDocument(next.dataset,{signal});
       if (!alive || version !== requestVersion) return;
       if (!result.success) throw new Error(result.message || '财务页面加载失败');
       template = await result.blob.text();
       if (!template.includes('__SAAS_FINANCE_BOOTSTRAP__')) throw new Error('财务页面版本异常，请重新接入已验收批次');
       sourceHash = next.source_hash;
       documentVersion = next.document_version;
+      loadedStore = desiredStore;
     }
     if (!alive || version !== requestVersion) return;
     const context = position ? { ...position, outerScroll:outerScroll() } : props.initialContext || undefined;
@@ -67,11 +83,21 @@ async function onMessage(event) {
   const message = event.data;
   if (event.source !== frame.value?.contentWindow || !message || !batch.value) return;
   if (message.dataset !== batch.value.dataset || message.revision !== batch.value.revision) return;
+  if (message.type === 'finance-summary-ready' || message.type === 'finance-summary-error') {
+    if (message.frame_id !== frameVersion) return;
+    clearTimeout(frameTimer); loading.value = false;
+    if (message.type === 'finance-summary-error') { document.value = ''; error.value = '账务设置初始化失败，请重新加载；保存结果请以当前版本和操作记录为准。'; }
+    return;
+  }
   if (message.type === 'finance-summary-size') {
     if (Number.isFinite(message.height) && message.height > 0) frameHeight.value = Math.ceil(message.height);
     nextTick(onResize);
     if (pendingScroll != null) { const top=pendingScroll; pendingScroll=null; nextTick(()=>{ const main=frame.value?.closest('.app-main'); if(main)main.scrollTop=top; }); }
     return;
+  }
+  if (message.type === 'finance-summary-tool-scope') {
+    if (!props.toolsOnly || loading.value || saving.value || message.frame_id !== frameVersion) return;
+    position = message.context; await load(); return;
   }
   if (message.type === 'finance-summary-context') { position = message.context; return; }
   if (message.type !== 'finance-summary-write' || saving.value) return;
@@ -84,7 +110,9 @@ async function onMessage(event) {
   } catch (reason) {
     if (!alive) return;
     // Re-read authoritative state after a conflict or an uncertain network result.
-    const response = await fetchFinanceSummary().catch(() => null);
+    readController?.abort();readController=new AbortController();
+    const response = await fetchFinanceSummary({}, {signal:readController.signal}).catch(() => null);
+    if(!alive)return;
     if (response?.success && response.data.source_hash === sourceHash) { batch.value = response.data; show({ ...message.context, outerScroll:outerScroll() }); }
     else { document.value = ''; loading.value = false; }
     error.value = (reason?.message || '保存结果未确认') + '；请核对当前版本和操作记录后再修改。';
@@ -96,7 +124,7 @@ function onResize() {
   el.contentWindow?.postMessage({ type:'finance-summary-viewport', dataset:batch.value?.dataset, height:window.innerHeight, top:Math.max(0,mainTop-rect.top), visible:Math.max(160,window.innerHeight-Math.max(mainTop,rect.top)-16) }, '*');
 }
 onMounted(() => { window.addEventListener('message', onMessage); window.addEventListener('resize', onResize); window.addEventListener('scroll', onResize, true); load(); });
-onBeforeUnmount(() => { alive = false; requestVersion++; window.removeEventListener('message', onMessage); window.removeEventListener('resize', onResize); window.removeEventListener('scroll', onResize, true); });
+onBeforeUnmount(() => { alive = false; readController?.abort();requestVersion++; clearTimeout(frameTimer); window.removeEventListener('message', onMessage); window.removeEventListener('resize', onResize); window.removeEventListener('scroll', onResize, true); });
 </script>
 
 <style scoped>

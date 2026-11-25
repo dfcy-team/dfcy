@@ -1,6 +1,8 @@
 (function(){
  'use strict';
  const initial=__SAAS_FINANCE_BOOTSTRAP__,values={...initial.values};
+ function ready(){globalThis.SAAS_READY=true;parent.postMessage({type:'finance-summary-ready',frame_id:initial.frame_id,dataset:initial.dataset,revision:initial.revision},'*');}
+ addEventListener('error',()=>{if(!globalThis.SAAS_READY)parent.postMessage({type:'finance-summary-error',frame_id:initial.frame_id,dataset:initial.dataset,revision:initial.revision},'*');});
  if(initial.toolsOnly)document.documentElement.classList.add('saas-settings-only');
  function context(){const table=document.getElementById('ledger-table'),fields=Object.fromEntries([...document.querySelectorAll('#filters input,#filters select')].map(e=>[e.id,e.value]));if(initial.toolsOnly){fields.store=document.getElementById('tool-shop')?.value||fields.store;fields.month=document.getElementById('tool-month')?.value||fields.month;}return{toolPanel:document.body.dataset.toolPanel,toolKind:document.getElementById('tool-kind')?.value,view:state.view,page:state.page,mode:globalThis.HTML2_STORE_HIERARCHY?.mode(),skuScope:document.getElementById('sku-scope')?.value,scrollLeft:table.scrollLeft,scrollTop:table.scrollTop,tabs:globalThis.HTML2_TAB_FILTERS?.memory?.(),fields};}
  function reasonFor(key,next){
@@ -19,7 +21,7 @@
  globalThis.SAAS_STORAGE={getItem:key=>values[key]||null,setItem(key,value){
   if(!initial.can_edit)throw Error('当前账号没有财务调整权限。');
   const next=JSON.parse(value);let submitted=value;
-  if(key==='html2-profit-closed-periods-v1')submitted=JSON.stringify(Object.fromEntries(Object.entries(next).map(([month,book])=>[month,{reason:book.reason,adjustmentMonth:book.adjustmentMonth}])));
+  if(key==='html2-profit-closed-periods-v1')submitted=JSON.stringify(Object.fromEntries(Object.entries(next).map(([month,book])=>[month,{shop:book.shop,month:book.month,reason:book.reason,adjustmentMonth:book.adjustmentMonth}])));
   const reason=reasonFor(key,next);values[key]=value;globalThis.SAAS_INVALIDATE();
   parent.postMessage({type:'finance-summary-write',dataset:initial.dataset,revision:initial.revision,key,value:submitted,reason,context:context()},'*');
  }};
@@ -51,10 +53,9 @@
   }
   let currentView=state.view;
   const priorRender=renderLedger;renderLedger=function(){const changed=currentView!==state.view;currentView=state.view;const result=priorRender.apply(this,arguments);if(changed){document.getElementById('ledger-table').scrollLeft=0;document.getElementById('ledger-table').scrollTop=0;}scope();presentation();return result;};
-  globalThis.SAAS_READY=true;
-  if(initial.toolsOnly){SAAS_SETUP_TOOLS(initial);return;}
+  if(initial.toolsOnly){SAAS_SETUP_TOOLS(initial);ready();return;}
   const table=document.getElementById('ledger-table');table.addEventListener('scroll',()=>parent.postMessage({type:'finance-summary-context',dataset:initial.dataset,revision:initial.revision,context:context()},'*'),{passive:true});
-  const ctx=initial.context;if(!ctx){renderLedger();return;}
+  const ctx=initial.context;if(!ctx){renderLedger();ready();return;}
   globalThis.HTML2_TAB_FILTERS?.restoreMemory?.(ctx.tabs);
   if(ctx.mode)HTML2_STORE_HIERARCHY.setMode(ctx.mode);
   state.view=ctx.view||'store';renderLedger();
@@ -64,5 +65,6 @@
   readFilters();state.page=ctx.page||1;renderLedger();
   if(invalid.length){const note=document.createElement('p');note.className='notice warn';note.textContent='原筛选条件已不适用，已清除：'+invalid.join('、');document.getElementById('filters').after(note);}
   requestAnimationFrame(()=>{table.scrollLeft=ctx.scrollLeft||0;table.scrollTop=ctx.scrollTop||0;});
+  ready();
  });
 })();

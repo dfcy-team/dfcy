@@ -135,6 +135,31 @@ def test_large_close_snapshot_is_compressed_losslessly_and_verified():
         unpack_values(stored)
 
 
+def test_source_participation_uses_authoritative_validation_and_existing_revision_audit(context, monkeypatch):
+    client, user, dataset, state = context
+    grant(user, 'finance.import')
+    calls = []
+    key = 'saas-finance-source-participation-v1'
+    def prepare(dataset, payload):
+        calls.append(payload)
+        return {'key': key, 'value': json.dumps({'version': 1, 'changes': {}, 'history': [{'after': payload['record']}]})}
+    monkeypatch.setattr('apps.finance.summary_views.engine', prepare)
+    monkeypatch.setattr('apps.finance.summary_service.engine', lambda dataset, payload: {'values': {payload['key']: payload['value']}})
+    record = {'id': 'finance-transaction:1', 'operation': 'exclude_source', 'reason': '核对重复记录'}
+    url = URL+f'{dataset.pk}/fee/'
+    response = client.post(url, {'revision': 0, 'record': record}, format='json')
+    assert response.status_code == 200
+    assert calls[0]['action'] == 'prepare_participation'
+    assert calls[0]['record'] == record
+    state.refresh_from_db()
+    assert key in state.values
+    history = json.loads(state.values[key])['history']
+    assert history[-1]['actor'] == {'id': str(user.pk), 'name': user.full_name or user.username}
+    assert history[-1]['revision'] == 1
+    assert FinanceAuditLog.objects.filter(object_id=str(dataset.pk), action='summary_setting').exists()
+    assert client.post(url, {'revision': 0, 'record': record}, format='json').status_code == 409
+
+
 @pytest.fixture
 def context(db, settings, tmp_path, monkeypatch):
     tenant, _, store, _ = create_scope('financial-summary')
@@ -264,3 +289,56 @@ def test_missing_document_is_reported_in_metadata(context):
     finally:
         path.write_bytes(saved)
     assert client.get(URL, {'native': '1'}).data['data']['source_available'] is True
+
+
+def test_tools_document_store_scope_is_validated(context, monkeypatch):
+    client, _, dataset, _ = context
+    dataset.metadata['database_scope']={'stores':dataset.metadata['store_ids']}
+    dataset.save()
+    calls=[]
+    monkeypatch.setattr('apps.finance.summary_views.prepared_document',lambda *args: calls.append(args) or b'test')
+    url=URL+f'{dataset.pk}/document/?tools=1'
+    assert client.get(url+'&store=99999999').status_code == 400
+    assert not calls
+    assert client.get(url).status_code == 200
+    assert calls[-1][-1] == dataset.metadata['store_ids'][0]
+
+
+def test_light_polling_omits_directory_history_and_settings(context, monkeypatch):
+    client, _, dataset, _ = context
+    dataset.metadata['database_scope']={'stores':dataset.metadata['store_ids']}
+    dataset.save()
+    monkeypatch.setattr('apps.finance.summary_service.source_checkpoint',lambda ids:pytest.fail('status polling source scan'))
+    response=client.get(URL,{'native':'1','status':'1'})
+    assert response.status_code==200
+    data=response.data['data']
+    assert data['lightweight'] and data['dataset']==dataset.pk
+    assert 'tenant_id' in data and 'can_edit' in data and 'source_available' in data
+    assert not {'values','source','scope_stores','rebuild_history','document_version'} & data.keys()
+    assert response['Cache-Control']=='no-store'
+
+
+def test_item_checkpoint_normalizes_timezone_and_missing_index_falls_back(context,monkeypatch):
+    from datetime import datetime
+    from unittest.mock import Mock
+    from django.db import connection,OperationalError
+    from django.db.models import Count,Max
+    from apps.commerce.models import SalesOrderItem
+    from apps.finance.summary_service import checkpoint_aggregate
+    from django.utils import timezone
+    query=SalesOrderItem.objects.none()
+    with monkeypatch.context() as patch:
+        patch.setattr(connection,'vendor','mysql')
+        compiled=Mock();compiled.as_sql.return_value=('SELECT "sales_order_item"."id" AS "id", "sales_order_item"."updated_at" AS "updated_at" FROM "sales_order_item"',[])
+        # A non-empty SQL compiler stub keeps this test independent of fixture orders.
+        patch.setattr(type(query.query),'get_compiler',lambda *args,**kwargs:compiled)
+        cursor=Mock();cursor.__enter__=Mock(return_value=cursor);cursor.__exit__=Mock(return_value=False)
+        cursor.fetchone.return_value=(2,datetime(2026,11,1))
+        patch.setattr(connection,'cursor',lambda:cursor)
+        result=checkpoint_aggregate(query,'updated_at')
+        assert result['count']==2 and timezone.is_aware(result['last'])
+        assert 'FORCE INDEX' in cursor.execute.call_args.args[0]
+        fallback=Mock(return_value={'count':0,'last':None});patch.setattr(type(query),'aggregate',fallback)
+        cursor.execute.side_effect=OperationalError(1176,'synthetic missing index')
+        assert checkpoint_aggregate(query,'updated_at')=={'count':0,'last':None}
+        assert fallback.call_count==1

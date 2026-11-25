@@ -1,4 +1,5 @@
 """Reviewed source migration and explicit database-only reaggregation."""
+import gc
 import gzip
 import hashlib
 import json
@@ -105,6 +106,9 @@ def rebuild(dataset, user, revision, *, publication_guard=None, scope_override=N
     file = private_root()/(digest+'.html.gz')
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_bytes(gzip.compress(html))
+    source_counts = source['source_counts']
+    del html, template, source
+    gc.collect()
     candidate = FinanceSummaryDataset(document_file=file.name, source_hash=digest)
     values = unpack_values(original_values)
     info = engine(candidate, {'action': 'inspect', 'state': values})
@@ -153,7 +157,7 @@ def rebuild(dataset, user, revision, *, publication_guard=None, scope_override=N
             metadata={**info, **({'automatic_update_enabled': dataset.metadata['automatic_update_enabled']} if 'automatic_update_enabled' in dataset.metadata else {}),
                 **({'bootstrap_candidate': True, 'automatic_update_enabled': False, 'template_version': dataset.metadata.get('template_version')} if bootstrap else {}),
                 'performance': {'read_seconds': round(read_seconds, 3), 'elapsed_seconds': round(time.perf_counter()-started, 3), 'python_cpu_seconds': round(time.process_time()-cpu_started, 3)}, 'data_origin': 'saas_database', 'database_scope': scope,
-                'store_ids': scope['stores'], 'checkpoint': checkpoint, 'source_counts': source['source_counts'],
+                'store_ids': scope['stores'], 'checkpoint': checkpoint, 'source_counts': source_counts,
                 'basis': '全部金额、商品归属、成本、汇率来自SaaS数据库；点击重新汇总读取最新来源；缺项保留待核',
                 'automatic_scope': automatic_scope, 'previous_dataset': dataset.pk, 'reconciliation': reconciliation,
                 **({'source_checks': source_checks} if source_checks is not None else {})})
@@ -161,5 +165,8 @@ def rebuild(dataset, user, revision, *, publication_guard=None, scope_override=N
         FinanceAuditLog.objects.create(tenant=user.tenant, actor=user, action='summary_rebuild',
             object_type='finance_summary', object_id=str(fresh.pk),
             masked_detail={'previous_dataset': dataset.pk, 'source_hash': digest,
-                           'source_counts': source['source_counts'], 'checks': reconciliation['checks']})
+                           'source_counts': source_counts, 'checks': reconciliation['checks']})
+    if not bootstrap:
+        from .summary_documents import queue_settings_warmup
+        transaction.on_commit(lambda: queue_settings_warmup(fresh.pk))
     return fresh

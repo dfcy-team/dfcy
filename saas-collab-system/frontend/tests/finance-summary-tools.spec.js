@@ -7,7 +7,7 @@ const source = readFileSync(resolve(process.cwd(), '../backend/apps/finance/summ
 afterEach(() => { document.body.innerHTML = ''; document.head.querySelectorAll('style').forEach(s => s.remove()); });
 
 describe('独立账务设置面板', () => {
-  it('费用按工具当前店铺选择，不受旧账单筛选残留影响；保留三个功能入口', () => {
+  it('只保留广告和关账入口，旧费用勾选定位回到广告且不展示旧费用表单', () => {
     document.body.innerHTML = '<main><input id="month"><select id="store"><option value="50">LZ9PH</option><option value="30">SP8PH</option></select></main><dialog id="ads-settings-drawer"></dialog><dialog id="drawer"><h2 id="drawer-title"></h2><div id="drawer-body"></div></dialog><details><input id="profit-close-month"><button id="profit-close-save"></button></details>';
     const state = { filters: {} };
     const context = { document, Option, state, KINDS: { order_fee: '订单费用' },
@@ -20,15 +20,18 @@ describe('独立账务设置面板', () => {
     };
     vm.createContext(context); vm.runInContext(source, context);
     context.SAAS_SETUP_TOOLS({ can_edit: true, context: { toolPanel: 'fees', fields: { store: '50', month: '2026-09' } } });
-    expect(document.querySelectorAll('[data-tool]')).toHaveLength(3);
-    expect(document.querySelector('[data-fee-selection]').dataset.feeSelection).toBe('50');
-    expect(document.querySelector('#drawer').hasAttribute('open')).toBe(true);
+    expect(document.querySelectorAll('[data-tool]')).toHaveLength(2);
+    expect(document.querySelector('[data-tool="fees"]')).toBeNull();
+    expect(document.querySelector('#tool-kind')).toBeNull();
+    expect(document.querySelector('[data-fee-selection]')).toBeNull();
+    expect(document.querySelector('#drawer').hasAttribute('open')).toBe(false);
+    expect(document.querySelector('[data-tool="advertising"]').getAttribute('aria-pressed')).toBe('true');
     document.querySelector('#tool-shop').value = '30';
     document.querySelector('#tool-apply').click();
     expect(document.querySelector('[data-fee-selection]')).toBeNull();
     document.querySelector('#tool-shop').value = '50';
     document.querySelector('#tool-apply').click();
-    expect(document.querySelector('[data-fee-selection]').dataset.feeSelection).toBe('50');
+    expect(document.querySelector('[data-fee-selection]')).toBeNull();
     document.querySelector('[data-tool="closing"]').click();
     expect(document.querySelector('#drawer').hasAttribute('open')).toBe(false);
     expect(document.querySelector('#profit-close-month').value).toBe('2026-09');

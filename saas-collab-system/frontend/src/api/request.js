@@ -133,6 +133,7 @@ export function withApiStatus(response, apiStatus) {
 }
 
 export function normalizeApiError(error) {
+  if (error?.code === 'ERR_CANCELED') return { success: false, code: 'REQUEST_CANCELED', message: '请求已取消', data: null, http_status: null };
   const payload = error?.response?.data;
   if (isApiEnvelope(payload)) {
     return { ...normalizeApiResponse(payload), http_status: error.response.status };
@@ -182,7 +183,7 @@ export async function requestApi(config) {
   }
 }
 
-export async function fetchApiFile(url) {
+export async function fetchApiFile(url, { timeout = 0, signal } = {}) {
   if (!isTrustedApiFilePath(url)) {
     return {
       success: false,
@@ -196,7 +197,7 @@ export async function fetchApiFile(url) {
     const headers = access ? { Authorization: `Bearer ${access}` } : {};
     const membershipId = globalThis.sessionStorage?.getItem('saas-collab.active-membership.v1');
     if (access && membershipId && /^\d+$/.test(membershipId)) headers['X-Org-Membership'] = membershipId;
-    const fetchFile = () => axios.get(`${import.meta.env.VITE_API_BASE_URL || ''}${url}`, { responseType: 'blob', headers });
+    const fetchFile = () => axios.get(`${import.meta.env.VITE_API_BASE_URL || ''}${url}`, { responseType: 'blob', headers, timeout, signal });
     let response;
     try { response = await fetchFile(); }
     catch (error) {
