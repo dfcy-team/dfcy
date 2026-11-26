@@ -1,0 +1,36 @@
+{
+  "status": "PASS",
+  "scope": "sales-order workspace frontend only",
+  "version": "2.44.543",
+  "batch": "sales-order-workspace-20261126",
+  "frontend_image": "sha256:6cbe706b8c20d062853d30c5bde23d55e870cae814b09ccfc167647fb87189c2",
+  "previous_frontend_image": "sha256:4627137f8729becd693159fff00e39e291b7c4c3f95f2b35bd45e7631259d52c",
+  "backup_container": "production-frontend-1-before-sales-orders-20261126-1795658220",
+  "backend_unchanged": true,
+  "other_running_services_unchanged": true,
+  "container_configuration_preserved": true,
+  "runtime_image_reference_updated_only": true,
+  "runtime_tls_binds_preserved": true,
+  "public_asset_hashes_verified": 64,
+  "preserved_runtime_asset_hashes": {
+    "assets/cockpitDraft-CAhVwypZ.js": {
+      "sha256": "6beb297c1b4b05f6290e3bdeea44422256cc0c814b51f8c1cac41ef1536c147d",
+      "bytes": 2153
+    },
+    "assets/restore-nov23-1229/assets/OperatingHandoff-0fd13e19aa9d.js": {
+      "sha256": "041991fe0383b5efc4cfbd00140d9fc662300da827a099b0fddb5f845dc175fc",
+      "bytes": 39414
+    }
+  },
+  "formal_registration": false,
+  "user_acceptance": "pending",
+  "post_memory_peak_mib": 7.25,
+  "post_memory_events": {
+    "low": 0,
+    "high": 0,
+    "max": 0,
+    "oom": 0,
+    "oom_kill": 0,
+    "oom_group_kill": 0
+  }
+}

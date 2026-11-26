@@ -47,6 +47,14 @@
       "permission_code": "masterdata.view"
     },
     {
+      "file": "src/components/OrderStatusLog.vue",
+      "permission_code": "sales_management.orders.view"
+    },
+    {
+      "file": "src/components/OrderWarehouseInfo.vue",
+      "permission_code": "sales_management.orders.view"
+    },
+    {
       "file": "src/components/ProductMappingPanel.vue",
       "permission_code": "integrations.product_mapping.confirm"
     },
@@ -1879,5 +1887,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "73d90b9591b3ea7e8228cdfd4dbf05c267f87bb8c49173a9cd8deaf1347b5e0c"
+  "surface_hash": "7bfae0fb81945e0f3e5823cb67af08cfc2959044978e7523cfd314ca97ff930d"
 }

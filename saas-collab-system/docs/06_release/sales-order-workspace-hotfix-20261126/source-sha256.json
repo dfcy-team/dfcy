@@ -1,0 +1,10 @@
+{
+  "frontend/src/views/sales-management/SalesWorkspace.vue": "0c18eced1335473d0f4b7abeb2ccf50ef7c553136cda277c669a656093b2c048",
+  "frontend/src/views/sales-management/pageContracts.js": "abe3ec16486c30fb42d179f227de1cda04cea2df958589486fe54a38ade43c5d",
+  "frontend/src/api/salesManagement.js": "5d447d4a1db757b0df92e097caf68d42739c7c5bcd5e28fc79fe123e5a10b765",
+  "frontend/src/utils/orderPresentation.js": "a174820dc12f464590024f4d1b2e042244a9a0f46fed9edcdfb654735207e1be",
+  "frontend/src/components/SalesOrderCards.vue": "81351c76399308c2e0167403aeccf1bf916b3182182b9bfb774f9ceaa8d62b52",
+  "frontend/src/components/SalesOrderDetailPanel.vue": "1771808f5d1d42f87cf3e6d432903fcf1729fd1d15070f173766f3f430dda3a4",
+  "frontend/src/components/OrderWarehouseInfo.vue": "06a2dbe9fc6adac503219991a9084ca3f00c154efe5a2b89018e7cc7b376e14b",
+  "frontend/src/components/OrderStatusLog.vue": "ae7751a5cbc62f8ba00d636ce049d288cf26f3bf9726f8a5252f78569d292371"
+}
