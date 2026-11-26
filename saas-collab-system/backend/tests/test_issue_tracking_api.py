@@ -207,3 +207,72 @@ def test_menu_requires_existing_enabled_rule(monkeypatch):
     assert c.post(path,payload,format='json').status_code==400
     MenuRule.objects.create(tenant=t,menu_key='/configured',enabled=False)
     assert c.post(path,payload,format='json').status_code==400
+
+
+@pytest.mark.django_db
+def test_attachment_image_validation_cap_and_metadata_prefetch(django_assert_num_queries):
+    import io
+    from PIL import Image
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+    from apps.issue_tracking.models import MenuRule, Attachment
+    t=Tenant.objects.create(name='img',code='tracking-img'); d=Department.objects.create(tenant=t,name='d')
+    u=CustomUser.objects.create_user(username='img-user',tenant=t,user_type='internal')
+    issue=Issue.objects.create(tenant=t,creator=u,assignee=u,department=d,title='image',menu_key='/img',due_at=timezone.now())
+    MenuRule.objects.create(tenant=t,menu_key='/img',screenshot_enabled=False)
+    c=APIClient(); c.force_authenticate(u); base='/api/internal/issue-tracking/'
+    # Tiny real PNG sent with a deliberately generic MIME type.
+    stream=io.BytesIO(); Image.new('RGB',(1,1),(255,0,0)).save(stream,format='PNG'); png=stream.getvalue()
+    bad=c.post(base+f'issues/{issue.pk}/attachments/',{'file':SimpleUploadedFile('fake.bin',png,content_type='application/octet-stream')},format='multipart')
+    assert bad.status_code==400
+    invalid=c.post(base+f'issues/{issue.pk}/attachments/',{'file':SimpleUploadedFile('broken.png',b'not png',content_type='application/octet-stream')},format='multipart')
+    assert invalid.status_code==400
+    MenuRule.objects.filter(tenant=t,menu_key='/img').update(screenshot_enabled=True)
+    assert c.post(base+f'issues/{issue.pk}/attachments/',{'file':SimpleUploadedFile('ok.txt',b'text')},format='multipart').status_code==201
+    for i in range(19): Attachment.objects.create(issue=issue,uploader=u,name=f'{i}.txt',content=b'x')
+    over=c.post(base+f'issues/{issue.pk}/attachments/',{'file':SimpleUploadedFile('extra.txt',b'x')},format='multipart')
+    assert over.status_code==400
+    with CaptureQueriesContext(connection) as queries:
+        got=c.get(base+f'issues/{issue.pk}/')
+    assert got.status_code==200
+    attachment_sql=[q['sql'].lower() for q in queries if 'issue_tracking_attachment' in q['sql'].lower()]
+    assert attachment_sql and all('"content"' not in sql for sql in attachment_sql)
+
+
+@pytest.mark.django_db
+def test_relation_fields_reject_out_of_scope_ids_uniformly():
+    from apps.issue_tracking.models import MenuRule
+    t=Tenant.objects.create(name='scope',code='tracking-scope'); other=Tenant.objects.create(name='scope2',code='tracking-scope2')
+    d=Department.objects.create(tenant=t,name='d'); od=Department.objects.create(tenant=other,name='od')
+    u=CustomUser.objects.create_user(username='scope-user',tenant=t,user_type='internal',is_superuser=True)
+    foreign=CustomUser.objects.create_user(username='scope-foreign',tenant=other,user_type='internal')
+    c=APIClient(); c.force_authenticate(u); base='/api/internal/issue-tracking/'
+    for uid in (foreign.pk,999999):
+        response=c.post(base+'issues/',{'title':'x','department':d.pk,'assignee':uid,'due_at':timezone.now().isoformat()},format='json')
+        assert response.status_code==400
+    for did in (od.pk,999999):
+        response=c.post(base+'rules/',{'menu_key':f'/r{did}','candidate_departments':[did]},format='json')
+        assert response.status_code==400
+    MenuRule.objects.create(tenant=t,menu_key='/safe')
+
+
+@pytest.mark.django_db
+def test_collaborator_primary_key_resolution_does_not_reveal_foreign_user_existence():
+    from types import SimpleNamespace
+    from apps.issue_tracking.serializers import IssueSerializer
+    tenant=Tenant.objects.create(name='collaborator tenant',code='collaborator-scope')
+    other=Tenant.objects.create(name='foreign collaborator tenant',code='collaborator-other')
+    dept=Department.objects.create(tenant=tenant,name='active department')
+    actor=CustomUser.objects.create_user(username='collaborator-actor',tenant=tenant,user_type='internal')
+    foreign=CustomUser.objects.create_user(username='collaborator-foreign',tenant=other,user_type='internal')
+    payload={'title':'synthetic','assignee':actor.pk,'department':dept.pk,'due_at':timezone.now().isoformat(),'collaborators':[foreign.pk]}
+    def errors():
+        serializer=IssueSerializer(data=payload,context={'request':SimpleNamespace(user=actor)})
+        assert not serializer.is_valid()
+        return serializer.errors
+    before=errors()
+    assert before['collaborators'][0].code=='does_not_exist'
+    foreign.delete()
+    assert errors()==before
+    assert not IssueSerializer().fields['collaborators'].child_relation.queryset.exists()

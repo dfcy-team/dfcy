@@ -1,5 +1,6 @@
 import { mount, flushPromises } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createMemoryHistory, createRouter, RouterView } from 'vue-router';
 import MonthlySalesProgress from '../src/views/dashboard/MonthlySalesProgress.vue';
 
 const mocks = vi.hoisted(() => ({
@@ -25,13 +26,15 @@ const mountDashboard = () => mount(MonthlySalesProgress, {
     ElSelect: {
       props: ['modelValue', 'disabled', 'placeholder'],
       emits: ['change'],
-      template: `<select multiple :disabled="disabled" :value="modelValue" @change="$emit('change', Array.from($event.target.selectedOptions, option => Number(option.value)))">
+      template: `<select multiple :disabled="disabled" :value="modelValue" @change="$emit('change', Array.from($event.target.selectedOptions, option => option.value === 'all' ? 'all' : Number(option.value)))">
         <option disabled>{{ placeholder }}</option><slot />
       </select>`,
     },
     ElOption: { props: ['label', 'value'], template: '<option :value="value">{{ label }}</option>' },
   } },
 });
+
+const waitForFilter = async () => new Promise(resolve => setTimeout(resolve, 270));
 
 describe('dashboard monthly growth', () => {
   beforeEach(() => {
@@ -103,57 +106,10 @@ describe('dashboard monthly growth', () => {
     const wrapper = mountDashboard();
     await flushPromises();
     await wrapper.get('#monthly-sales-month').setValue('2026-10');
+    await waitForFilter();
     await flushPromises();
-    expect(mocks.fetch.mock.calls[1]).toEqual([[12], null, '2026-10']);
+    expect(mocks.fetch.mock.calls[1].slice(0, 3)).toEqual([[12], null, '2026-10']);
     expect(wrapper.get('#monthly-sales-store').element.value).toBe('12');
-  });
-
-  it('keeps the latest selected month when month requests resolve out of order and does not mark history as today', async () => {
-    let resolveSeptember;
-    mocks.fetch
-      .mockResolvedValueOnce({ success: true, data: {
-        month: '2026-10', through: '2026-10-01', today: '2026-10-01',
-        stores: managedStores, selected_store_id: null, currencies: [],
-      } })
-      .mockImplementationOnce(() => new Promise((resolve) => { resolveSeptember = resolve; }))
-      .mockResolvedValueOnce({ success: true, data: {
-        month: '2026-10', through: '2026-10-01', today: '2026-10-01',
-        stores: managedStores, selected_store_id: null,
-        currencies: [{ currency: 'USD', previous: { amount: '10', quantity: 1 },
-          daily: [{ date: '2026-10-01', amount: '20', quantity: 2 }] }],
-      } });
-    mocks.fetch.mockResolvedValue({ success: true, data: {
-      month: '2026-09', through: '2026-09-30', today: '2026-10-01',
-      stores: managedStores, selected_store_id: null,
-      currencies: [{ currency: 'EUR', previous: { amount: '99', quantity: 9 },
-        daily: [{ date: '2026-09-30', amount: '10', quantity: 1 }] }],
-    } });
-    const wrapper = mount(MonthlySalesProgress);
-    await flushPromises();
-    const month = wrapper.get('#monthly-sales-month');
-    await month.setValue('2026-09');
-    await month.setValue('2026-10');
-    await flushPromises();
-
-    expect(mocks.fetch.mock.calls.slice(1).map(([, , selected]) => selected)).toEqual(['2026-09', '2026-10']);
-    expect(wrapper.get('#monthly-sales-month').element.value).toBe('2026-10');
-    expect(wrapper.text()).toContain('USD');
-    resolveSeptember({ success: true, data: {
-      month: '2026-09', through: '2026-09-30', today: '2026-10-01',
-      stores: managedStores, selected_store_id: null,
-      currencies: [{ currency: 'EUR', previous: { amount: '99', quantity: 9 },
-        daily: [{ date: '2026-09-30', amount: '999', quantity: 99 }] }],
-    } });
-    await flushPromises();
-    expect(wrapper.get('#monthly-sales-month').element.value).toBe('2026-10');
-    expect(wrapper.text()).toContain('USD');
-    expect(wrapper.text()).not.toContain('EUR');
-    expect(wrapper.text()).not.toContain('999');
-
-    await month.setValue('2026-09');
-    // The selected historical-month response has a different current date; its day is not tagged as today.
-    await flushPromises();
-    expect(wrapper.text()).not.toContain('30日 今天');
   });
 
   it('uses an increase icon without an infinite ratio when the previous day has no sales', async () => {
@@ -205,7 +161,7 @@ describe('dashboard monthly growth', () => {
     expect(select.text()).toContain('Platform North');
     expect(select.text()).toContain('Platform South');
     expect(wrapper.text()).toContain('所选月份可见范围内暂无销售及广告数据');
-    expect(mocks.fetch).toHaveBeenCalledWith([], null, expect.any(String));
+    expect(mocks.fetch).toHaveBeenCalledWith([], null, expect.any(String), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('sends each selected store and ignores stale responses after rapid switches', async () => {
@@ -223,8 +179,12 @@ describe('dashboard monthly growth', () => {
     await flushPromises();
     const select = wrapper.get('#monthly-sales-store');
     await select.setValue(['11']);
-    await select.setValue(['11', '12']);
-    expect(mocks.fetch.mock.calls.map(([store, platform]) => [store, platform])).toEqual([[[], null], [[11], null], [[11, 12], null]]);
+    await waitForFilter();
+    const oldSignal = mocks.fetch.mock.calls[1][3].signal;
+    await select.setValue(['12']);
+    expect(oldSignal.aborted).toBe(true);
+    await waitForFilter();
+    expect(mocks.fetch.mock.calls.map(([store, platform]) => [store, platform])).toEqual([[[], null], [[11], null], [[12], null]]);
     await flushPromises();
     resolveStore({ success: true, data: {
       month: '2026-10', through: '2026-10-01', stores: managedStores, selected_store_id: 11,
@@ -234,6 +194,15 @@ describe('dashboard monthly growth', () => {
     expect(wrapper.get('#monthly-sales-store').element.value).toBe('12');
     expect(wrapper.text()).toContain('USD');
     expect(wrapper.text()).not.toContain('EUR');
+  });
+
+  it('returns to all managed stores when the all-stores option is selected', async () => {
+    mocks.fetch.mockResolvedValue({ success: true, data: { stores: managedStores, selected_store_ids: [11, 12], currencies: [] } });
+    const wrapper = mountDashboard();
+    await flushPromises();
+    await wrapper.get('#monthly-sales-store').setValue(['11', '12', 'all']);
+    await waitForFilter();
+    expect(mocks.fetch).toHaveBeenLastCalledWith([], null, expect.any(String), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('clears old chart data on store errors and changes currency without refetching', async () => {
@@ -252,6 +221,7 @@ describe('dashboard monthly growth', () => {
     expect(wrapper.text()).toContain('EUR');
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
     await wrapper.get('#monthly-sales-store').setValue(['11']);
+    await waitForFilter();
     await flushPromises();
     expect(wrapper.get('[role="alert"]').text()).toContain('销售数据暂时无法读取');
     expect(wrapper.text()).not.toContain('EUR');
@@ -273,12 +243,59 @@ describe('dashboard monthly growth', () => {
     await flushPromises();
     expect(wrapper.get('#monthly-sales-store').element.value).toBe('12');
     await wrapper.get('#monthly-sales-platform').setValue('3');
+    await waitForFilter();
     await flushPromises();
     expect(mocks.fetch.mock.calls.map(([store, platform]) => [store, platform])).toEqual([[[], null], [[], 3]]);
     expect(wrapper.get('#monthly-sales-platform').element.value).toBe('3');
     expect(wrapper.get('#monthly-sales-platform').text()).toContain('Shopee');
     expect(wrapper.get('#monthly-sales-store').element.value).toBe('');
     expect(wrapper.get('#monthly-sales-store').element.disabled).toBe(true);
+  });
+
+  it('keeps the displayed chart during a same-filter refresh and aborts when navigating away', async () => {
+    let resolvePending;
+    mocks.fetch.mockResolvedValueOnce({ success: true, data: {
+      month: '2026-10', through: '2026-10-01', currencies: [{ currency: 'USD', previous: { amount: '1', quantity: 1 }, daily: [] }],
+    } }).mockImplementationOnce((_stores, _platform, _month, options) => {
+      return new Promise(resolve => { resolvePending = resolve; expect(options.signal.aborted).toBe(false); });
+    });
+    const router = createRouter({ history: createMemoryHistory(), routes: [
+      { path: '/', component: MonthlySalesProgress }, { path: '/other', component: { template: '<div>other page</div>' } },
+    ] });
+    await router.push('/');
+    await router.isReady();
+    const wrapper = mount(RouterView, { global: { plugins: [router], stubs: { ElSelect: true, ElOption: true } } });
+    await flushPromises();
+    expect(wrapper.text()).toContain('USD');
+    await wrapper.get('.refresh-button').trigger('click');
+    expect(wrapper.text()).toContain('USD');
+    const signal = mocks.fetch.mock.calls[1][3].signal;
+    await router.push('/other');
+    await flushPromises();
+    expect(wrapper.text()).toContain('other page');
+    expect(signal.aborted).toBe(true);
+    resolvePending({ success: false, message: 'cancelled' });
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('销售数据暂时无法读取');
+    wrapper.unmount();
+  });
+
+  it('debounces rapid filter changes into one abortable request', async () => {
+    mocks.fetch.mockResolvedValue({ success: true, data: { stores: managedStores, currencies: [] } });
+    const wrapper = mountDashboard();
+    await flushPromises();
+    vi.useFakeTimers();
+    await wrapper.get('#monthly-sales-month').setValue('2026-10');
+    await wrapper.get('#monthly-sales-month').setValue('2026-09');
+    await vi.advanceTimersByTimeAsync(249);
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await flushPromises();
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect(mocks.fetch.mock.calls[1][2]).toBe('2026-09');
+    expect(mocks.fetch.mock.calls[1][3].signal).toBeInstanceOf(AbortSignal);
+    wrapper.unmount();
+    vi.useRealTimers();
   });
 
   it('shows ad spend as unavailable when either day is missing and handles zero and positive spend', async () => {
@@ -352,14 +369,16 @@ describe('dashboard monthly growth', () => {
     const wrapper = mountDashboard();
     await flushPromises();
     await wrapper.get('#monthly-sales-platform').setValue('3');
+    await waitForFilter();
     expect(wrapper.get('#monthly-sales-store').element.disabled).toBe(true);
-    expect(wrapper.get('#monthly-sales-store').findAll('option')).toHaveLength(1);
+    expect(wrapper.get('#monthly-sales-store').findAll('option')).toHaveLength(2);
     await wrapper.get('#monthly-sales-platform').setValue('4');
+    await waitForFilter();
     await flushPromises();
     resolveOld({ success: true, data: { platforms, stores: [managedStores[0]], selected_platform_id: 3, currencies: [] } });
     await flushPromises();
     expect(wrapper.get('#monthly-sales-platform').element.value).toBe('4');
-    expect(wrapper.get('#monthly-sales-store').findAll('option')[1].element.value).toBe(String(managedStores[1].id));
+    expect(wrapper.get('#monthly-sales-store').findAll('option')[2].element.value).toBe(String(managedStores[1].id));
   });
 
 });

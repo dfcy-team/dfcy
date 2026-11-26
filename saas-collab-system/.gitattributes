@@ -1,2 +1,6 @@
 *.md whitespace=-trailing-space
 backend/apps/packing/assets/fonts/sc-f2-label-font-v1/LICENSE.txt whitespace=-trailing-space
+
+# Finance integrity manifests bind exact LF bytes across Windows and Linux.
+backend/apps/finance/templates/settings-shell-v1.html text eol=lf
+backend/apps/finance/templates/settings-layout-v1.js text eol=lf

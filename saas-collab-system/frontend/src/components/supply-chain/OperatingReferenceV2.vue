@@ -25,7 +25,7 @@
         <el-table :data="rows" row-key="spu_id" :expand-row-keys="expandedSpus" border @expand-change="expandSpu" @sort-change="changeSort" empty-text="当前筛选下暂无商品">
           <el-table-column type="expand" width="48"><template #default="{row: group}">
             <section class="sku-details" :aria-label="`${group.spu_code} SKU明细`" v-loading="skuDetails[group.spu_id]?.loading">
-              <p class="muted">{{group.spu_name}} · 全部 {{number(group.sku_count)}} 个 SKU，其中 {{number(group.matched_sku_count)}} 个符合当前筛选。</p>
+              <p class="muted">{{group.spu_name}} · 全部 {{number(group.sku_count)}} 个 SKU，其中 {{number(group.matched_sku_count)}} 个符合当前筛选。原始建议 {{number(group.suggested_quantity)}} 件 · 净需求 {{knownNumber(group.net_demand_quantity, group.stock_balance_complete)}} 件 · 结余 {{knownNumber(group.surplus_quantity, group.stock_balance_complete)}} 件</p>
               <el-alert v-if="skuDetails[group.spu_id]?.error" :title="skuDetails[group.spu_id].error" type="error" :closable="false" />
       <el-table :data="skuDetails[group.spu_id]?.rows || []" border empty-text="暂无 SKU 明细">
         <el-table-column v-if="visibleColumns.includes('abc')" label="综合 ABC" min-width="220"><template #default="{row}"><InventoryAbcBadges :row="row" entity-type="sku"/></template></el-table-column>
@@ -41,6 +41,7 @@
         <el-table-column v-if="visibleColumns.includes('eta')" label="最近预计到仓" min-width="145"><template #default="{row}">{{ etaDate(row.next_eta) }}<small v-if="row.next_eta?.quantity">{{ number(row.next_eta.quantity) }} 件</small></template></el-table-column>
         <el-table-column v-if="visibleColumns.includes('gap')" label="采购落实缺口" width="120"><template #default="{row}">{{ number(row.replenishment_gap) }}</template></el-table-column>
         <el-table-column v-if="visibleColumns.includes('suggested_quantity')" label="建议新增量" prop="suggested_quantity" width="115"><template #default="{row}"><strong>{{ number(row.suggested_quantity ?? (row.recognized_reference?.confirmed_deductions ? row.recognized_reference.quantity_reference : null)) }}</strong><small v-if="row.suggested_quantity == null && row.recognized_reference?.confirmed_deductions && row.recognized_reference.has_observed_basis">按已知数据</small></template></el-table-column>
+        <el-table-column label="库存结余" width="110"><template #default="{row}">{{ number(row.stock_balance_quantity ?? row.business_decision?.stock_balance_quantity) }}</template></el-table-column>
         <el-table-column v-if="visibleColumns.includes('risk')" label="依据" width="130"><template #default="{row}"><el-button link type="primary" @click="openEvidence(row)">查看计算依据</el-button></template></el-table-column>
         <el-table-column v-if="audience==='operator' && analysisMode==='country'" label="选择" width="70" fixed="right"><template #default="{row}"><el-checkbox :model-value="!!chosen[row.sku_id]" :disabled="loading || !Number(row.suggested_quantity) || Number(row.suggested_quantity)<0" :aria-label="`选择${row.sku_code || row.sku}`" @change="value=>toggle(row,value)"/></template></el-table-column>
       </el-table>
@@ -70,6 +71,7 @@
         <el-table-column v-if="visibleColumns.includes('eta')" label="最近预计到仓" min-width="145"><template #default="{row}">{{ etaDate(row.next_eta) }}<small v-if="row.next_eta?.quantity">{{ number(row.next_eta.quantity) }} 件</small></template></el-table-column>
         <el-table-column v-if="visibleColumns.includes('gap')" label="采购落实缺口" width="120"><template #default="{row}">{{ number(row.replenishment_gap) }}</template></el-table-column>
         <el-table-column v-if="visibleColumns.includes('suggested_quantity')" label="建议新增量" prop="suggested_quantity" sortable="custom" width="115"><template #default="{row}"><strong>{{ number(row.suggested_quantity) }}</strong></template></el-table-column>
+        <el-table-column label="库存结余" width="110"><template #default="{row}">{{ number(row.stock_balance_quantity ?? row.business_decision?.stock_balance_quantity) }}</template></el-table-column>
         <el-table-column v-if="visibleColumns.includes('risk')" label="风险 / 依据" min-width="205"><template #default="{row}"><el-tag size="small" :type="riskType(row.risk_level)">{{ riskLabel(row.risk_level) }}</el-tag><small v-for="issue in row.issues || []" :key="issue">{{issueLabel(issue)}}</small><el-button link type="primary" @click="openEvidence(row)">查看公式与来源</el-button></template></el-table-column>
         <el-table-column v-if="audience==='operator' && analysisMode==='country'" label="选择" width="70" fixed="right"><template #default="{row}"><el-checkbox :model-value="!!chosen[row.sku_id]" :disabled="loading || !Number(row.suggested_quantity) || Number(row.suggested_quantity)<0" :aria-label="`选择${row.sku_code || row.sku}`" @change="value=>toggle(row,value)"/></template></el-table-column>
       </el-table></div>
@@ -81,11 +83,11 @@
       </el-button>
     </div>
     <el-drawer v-if="audience==='operator' && analysisMode==='country' && floatingBasket" v-model="basketOpen" title="运营订货草稿购物篮" direction="rtl" size="min(620px, 96vw)" :append-to-body="true" class="order-basket-drawer">
-      <p class="muted">已选 {{selectedRows.length}} 个 SKU，建议新增量合计 {{number(selectedQuantity)}} 件。选中内容会带入可编辑草稿；确认前不会保存或提交。</p>
+      <p class="muted">已选 {{selectedRows.length}} 个 SKU，原始建议 {{number(selectedQuantity)}} 件 · 当前订货数量 {{number(editedQuantityTotal)}} 件。选中内容会带入可编辑草稿；确认前不会保存或提交。</p>
       <div v-if="selectedRows.length" class="basket-lines">
         <article v-for="row in selectedRows" :key="row.sku_id" class="basket-line">
           <div class="basket-line-main"><DocumentSkuV2 :sku="row.sku_code || row.sku" :legacy-sku-code="row.legacy_sku_code"/><strong>{{row.product_name || '未命名商品'}}</strong><small>新 SPU：{{row.spu_code || '未维护'}} · 旧 SPU：{{row.legacy_spu_code || '未维护'}}</small></div>
-          <div class="basket-line-qty"><span>建议数量</span><strong>{{number(row.suggested_quantity)}} 件</strong></div>
+          <div class="basket-line-qty"><span>原始建议 {{number(row.suggested_quantity)}} 件</span><el-input-number :model-value="basketQuantity(row)" :min="1" :precision="0" :step="1" controls-position="right" :aria-label="`${row.sku_code || row.sku}订货数量`" @change="value=>setBasketQuantity(row,value)"/><small>可改订货数量</small></div>
           <el-button type="danger" link :aria-label="`移除${row.sku_code || row.sku}`" @click="removeBasketLine(row)">移除</el-button>
         </article>
       </div>
@@ -196,6 +198,8 @@ let detailEpoch=0;
 const skuDetails=ref({}),expandedSpus=ref([]);
 const spuColumns=[{key:'sales_30',label:'近30天销量合计'},{key:'available_stock',label:'可售库存合计'},{key:'production_unshipped',label:'采购待发合计'},{key:'incoming_quantity',label:'发货在途合计'},{key:'suggested_quantity',label:'建议新增量合计'}];
 const selectedQuantity=computed(()=>selectedRows.value.reduce((sum,row)=>sum+Math.max(0,Number(row.suggested_quantity)||0),0));
+const editedQuantityTotal=computed(()=>selectedRows.value.reduce((sum,row)=>sum+(Number(row.edited_order_quantity ?? row.suggested_quantity)||0),0));
+const knownNumber=(value,complete)=>complete===false||value==null?'待核对':number(value);
 const basketConfirmDisabled=computed(()=>blocked.value||loading.value||jobStatus.value!=='completed'||!jobId.value||!selectedRows.value.length);
 function stopPolling(){pollController?.abort();pollController=null;}
 function reset({clearJob=true}={}){clearDetails();basketOpen.value=false;requestSequence++;jobGeneration++;stopPolling();loading.value=false;rows.value=[];chosen.value={};page.value=1;totalRows.value=0;summary.value={};error.value='';jobError.value='';evidenceVisible.value=false;evidenceRow.value=null;if(clearJob){jobId.value='';jobStatus.value='';jobProcessed.value=0;jobTotal.value=0;generatedAt.value='';formula.value='';jobStrategyVersion.value='';observationStart.value='';observationEnd.value='';revalidationNote.value='';}}
@@ -239,22 +243,30 @@ async function loadSkuDetails(group,pageIndex=0,generation=jobGeneration){
   const id=group.spu_id,currentJob=jobId.value,epoch=detailEpoch;
   const token=(skuDetails.value[id]?.token || 0)+1;
   skuDetails.value={...skuDetails.value,[id]:{...skuDetails.value[id],loading:true,error:'',token}};
+  const transient=error=>error?.name==='TypeError'||error?.name==='TimeoutError'||['ETIMEDOUT','ECONNRESET','ECONNABORTED','ERR_NETWORK'].includes(error?.code)||/timeout|timed out|network error/i.test(String(error?.message||''));
   try{
-    const response=await fetchReplenishmentJobRows(currentJob,{group_by:'sku',spu_id:id,quantity_filter:'all',limit:20,offset:pageIndex*20});
+    let response;
+    for(let attempt=0;attempt<2;attempt++){
+      try{
+        response=await fetchReplenishmentJobRows(currentJob,{group_by:'sku',spu_id:id,quantity_filter:'all',limit:20,offset:pageIndex*20});
+        if(response?.success||![408,425,429,500,502,503,504].includes(Number(response?.http_status)))break;
+        if(attempt===1)break;
+      }catch(error){if(attempt===1||!transient(error)||error?.name==='AbortError')throw error;}
+    }
     if(generation!==jobGeneration || epoch!==detailEpoch || currentJob!==jobId.value || skuDetails.value[id]?.token!==token)return;
-    if(!response?.success)throw Error(response?.message || 'SKU明细读取失败');
+    if(!response?.success){const status=Number(response?.http_status);const error=Error('SKU明细读取失败');error.friendlyMessage=[401,403].includes(status)?'当前账号无权读取SKU明细，请核对登录状态和数据权限。':([408,425,429,500,502,503,504].includes(status)?'网络暂时不稳定，SKU明细读取失败，请收起后重新展开重试。':'SKU明细读取失败，请收起后重新展开重试。');throw error;}
     const data=response.data || {};
     skuDetails.value={...skuDetails.value,[id]:{rows:data.rows || [],total:Number(data.count || 0),page:pageIndex+1,loading:false,error:'',token}};
-  }catch(e){if(generation===jobGeneration && epoch===detailEpoch && currentJob===jobId.value && skuDetails.value[id]?.token===token)skuDetails.value={...skuDetails.value,[id]:{...skuDetails.value[id],loading:false,error:e.message || 'SKU明细读取失败'}};}
+  }catch(e){if(generation===jobGeneration && epoch===detailEpoch && currentJob===jobId.value && skuDetails.value[id]?.token===token)skuDetails.value={...skuDetails.value,[id]:{...skuDetails.value[id],loading:false,error:e.friendlyMessage || (e?.name==='AbortError'?'读取已取消，请重新展开。':'网络暂时不稳定，SKU明细读取失败，请收起后重新展开重试。')}};}
 }
 function expandSpu(group,expanded){
   expandedSpus.value=expanded.map(row=>row.spu_id);
-  if(expandedSpus.value.includes(group.spu_id) && !skuDetails.value[group.spu_id])void loadSkuDetails(group);
+  if(expandedSpus.value.includes(group.spu_id) && (!skuDetails.value[group.spu_id] || skuDetails.value[group.spu_id]?.error))void loadSkuDetails(group);
 }
 function toggleSpu(group){
   const id=group.spu_id;
   if(expandedSpus.value.includes(id))expandedSpus.value=expandedSpus.value.filter(value=>value!==id);
-  else{expandedSpus.value=[...expandedSpus.value,id];if(!skuDetails.value[id])void loadSkuDetails(group);}
+  else{expandedSpus.value=[...expandedSpus.value,id];if(!skuDetails.value[id]||skuDetails.value[id]?.error)void loadSkuDetails(group);}
 }
 async function selectPage(){
   if(!groupedView.value){rows.value.filter(row=>Number(row.suggested_quantity)>0).forEach(row=>toggle(row,true));return;}
@@ -277,7 +289,9 @@ async function selectPage(){
   finally{if(generation===jobGeneration)loading.value=false;}
 }
 
-function emitSelection(){if(analysisMode.value!=='country'||blocked.value||jobStatus.value!=='completed'||!jobId.value||!selectedRows.value.length)return;emit('select',{parameters:{...requestBody(),job_id:jobId.value,activity_start:activityStart.value||null,activity_end:activityEnd.value||null,activity_factor:Number(activityFactor.value)},rows:selectedRows.value});}
+function basketQuantity(row){return row.edited_order_quantity ?? row.suggested_quantity;}
+function setBasketQuantity(row,value){const quantity=Number(value);if(!Number.isSafeInteger(quantity)||quantity<=0)return;chosen.value={...chosen.value,[row.sku_id]:{...row,edited_order_quantity:quantity}};}
+function emitSelection(){if(analysisMode.value!=='country'||blocked.value||jobStatus.value!=='completed'||!jobId.value||!selectedRows.value.length)return;emit('select',{parameters:{...requestBody(),job_id:jobId.value,activity_start:activityStart.value||null,activity_end:activityEnd.value||null,activity_factor:Number(activityFactor.value)},rows:selectedRows.value.map(row=>({...row,edited_order_quantity:basketQuantity(row)}))});}
 function openEvidence(row){evidenceRow.value=row;evidenceVisible.value=true;}
 function openBasket(){basketOpen.value=true;}
 function removeBasketLine(row){toggle(row,false);}

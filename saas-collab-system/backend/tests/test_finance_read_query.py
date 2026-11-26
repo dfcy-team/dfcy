@@ -142,7 +142,7 @@ def test_source_materialization_is_reused_across_views_and_pages(context, monkey
     native = Mock(return_value={'rows': []})
     monkeypatch.setattr('apps.finance.summary_native.query', native)
     spec = {'scope': {'from': '2026-10-01', 'to': '2026-10-31', 'stores': dataset.metadata['store_ids']},
-            'settings': None, 'generation': 1, 'refresh': False}
+            'settings': None, 'generation': 1, 'refresh': False, 'accounting_history_version': 1}
     execute(seed, user, {'_database_query': spec, 'view': 'store'})
     execute(seed, user, {'_database_query': spec, 'view': 'order', 'page': 2})
     assert collect.call_count == 1 and native.call_count == 2

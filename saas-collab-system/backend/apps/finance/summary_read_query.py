@@ -144,13 +144,56 @@ def query_scope(user, filters):
     return {'from': start.isoformat(), 'to': end.isoformat(), 'stores': ids}
 
 
+def accounting_source_scope(scope, state):
+    """Read every frozen original period before comparing it with current facts.
+
+    Filters still select the requested display period; this widens only the
+    authorized source dates, never the set of stores.
+    """
+    from .summary_service import unpack_values
+    try:
+        books = json.loads(unpack_values(state.values).get('html2-profit-closed-periods-v1', '{}'))
+        if not isinstance(books, dict):
+            raise ValueError()
+        lower, upper = date.fromisoformat(scope['from']), date.fromisoformat(scope['to'])
+        for key, book in books.items():
+            if not isinstance(book, dict) or not isinstance(book.get('rows'), list):
+                raise ValueError()
+            month = book.get('month') or str(key)[-7:]
+            if not isinstance(month, str) or not re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', month):
+                raise ValueError()
+            adjustment = book.get('adjustmentMonth')
+            if not isinstance(adjustment, str) or not re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', adjustment) or adjustment <= month:
+                raise ValueError()
+            first = date.fromisoformat(month + '-01')
+            last = first.replace(day=calendar.monthrange(first.year, first.month)[1])
+            lower, upper = min(lower, first), max(upper, last)
+    except (ValueError, TypeError, KeyError):
+        raise ValidationError('已关账期间依据不完整，请核对账务设置后重试。') from None
+    return {**scope, 'from': lower.isoformat(), 'to': upper.isoformat()}
+
+
+def query_accounting_state(user, version, fallback=None):
+    if not version:
+        return fallback
+    try:
+        return FinanceSummaryState.objects.get(dataset_id=version[0], revision=version[1],
+            dataset__tenant_id=user.tenant_id)
+    except FinanceSummaryState.DoesNotExist:
+        raise ValidationError('账务设置已变化，请刷新后重新查询。') from None
+
+
 def request_query(user, payload, *, refresh=False, context=None):
     from .summary_jobs import request_calculation, current_dataset
     from .summary_models import FinanceSummaryCalculation
     from .summary_scopes import check_job_scope
     require_access(user)
     scope = query_scope(user, payload['filters'])
-    spec = {'scope': scope, 'settings': settings_version(user.tenant_id),
+    version = settings_version(user.tenant_id)
+    state = query_accounting_state(user, version)
+    if state is not None:
+        scope = accounting_source_scope(scope, state)
+    spec = {'scope': scope, 'settings': version, 'accounting_history_version': 1,
             'generation': int(timezone.now().timestamp()) // (60 if refresh else 300), 'refresh': bool(refresh)}
     if context and not refresh:
         parent = FinanceSummaryCalculation.objects.filter(pk=context, tenant=user.tenant, kind='query',
@@ -158,7 +201,7 @@ def request_query(user, payload, *, refresh=False, context=None):
         if parent:
             check_job_scope(parent, user)
             previous = parent.request.get('_database_query') or {}
-            if previous.get('scope') == scope and current_dataset(parent):
+            if previous.get('accounting_history_version') == 1 and previous.get('scope') == scope and current_dataset(parent):
                 spec = previous
     payload = {**payload, 'filters': {**payload['filters'], '_stores': list(map(str, scope['stores']))},
                '_database_query': spec}
@@ -219,6 +262,11 @@ def execute(dataset, user, payload):
     from .summary_native import query, CalculationBusy, materialization_guard
     from .summary_jobs import calculation_key
     spec = payload['_database_query']
+    if spec.get('accounting_history_version') != 1:
+        raise ValidationError('查询版本已更新，请重新发起查询。')
+    state = query_accounting_state(user, spec['settings'], dataset.accounting_state)
+    if accounting_source_scope(spec['scope'], state) != spec['scope']:
+        raise ValidationError('本次查询缺少已关账期间依据，请重新发起查询。')
     key = calculation_key(dataset, 'query', {'_database_query': spec})
     path = private_root() / ('read-query-' + key + '.html.gz')
     proof = path.with_suffix('.json')
@@ -239,9 +287,6 @@ def execute(dataset, user, payload):
             if cache.get(lock_key) == token:
                 cache.delete(lock_key)
     info = json.loads(proof.read_text(encoding='utf-8'))
-    state = dataset.accounting_state
-    if spec['settings']:
-        state = FinanceSummaryState.objects.get(dataset_id=spec['settings'][0], revision=spec['settings'][1])
     derived = SimpleNamespace(tenant_id=dataset.tenant_id, pk=dataset.pk, source_hash=info['sha256'],
         document_file=path.name, metadata={'database_scope': spec['scope'], 'direct_query': True}, accounting_state=state)
     result = query(derived, {k: v for k, v in payload.items() if k != '_database_query'})

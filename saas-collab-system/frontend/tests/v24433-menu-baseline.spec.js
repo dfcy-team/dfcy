@@ -1,9 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import menuV542 from './fixtures/menu-v542-baseline.json';
 import { canAccessPath, canAccessWarehouseExceptions, filterMenuItems, filterSidebarMenuItems, flattenMenuItems, menuItems } from '../src/router/menu';
 
 describe('current deployment menu baseline', () => {
+  it('preserves every V542 menu object and order except the V544 configuration entry', () => {
+    const cloned = JSON.parse(JSON.stringify(menuItems));
+    const system = cloned.find(item => item.label === '系统管理');
+    expect(system.children.filter(item => item.path === '/system/issue-tracking')).toEqual([
+      { path: '/system/issue-tracking', label: '事件跟踪配置', permissions: ['issue_tracking.configure'], menuPermissions: ['menu.system.issue_tracking.view'] }
+    ]);
+    system.children = system.children.filter(item => item.path !== '/system/issue-tracking');
+    expect(cloned).toEqual(menuV542);
+    expect(flattenMenuItems(menuItems).some(item => item.path === '/issue-tracking')).toBe(false);
+  });
+
   it('consolidates inventory menus without granting access to the other inventory view', () => {
     const category = 'menu.sales_management.category_inventory.view';
     const warehouse = 'menu.sales_management.warehouse_details.view';
@@ -87,7 +99,7 @@ describe('current deployment menu baseline', () => {
     // archive entry into the two foundation pages.
     // Four aggregate governance/pilot centers replace eight legacy menu
     // entries; supply-chain navigation now exposes only the V2 workspaces.
-    expect(flattenMenuItems(menuItems)).toHaveLength(133);
+    expect(flattenMenuItems(menuItems)).toHaveLength(134);
     expect(menuItems.find(item => item.label === '达人管理').children.filter(item => item.path === '/influencers/requirements')).toHaveLength(1);
   });
 
@@ -152,7 +164,7 @@ describe('current deployment menu baseline', () => {
       expect(flatItems.filter((item) => item.path === route), route).toHaveLength(1);
     }
     expect(menuItems.some((item) => item.label === '系统治理')).toBe(false);
-    expect(flatItems).toHaveLength(133);
+    expect(flatItems).toHaveLength(134);
   });
 
   it('keeps the current dark desktop and mobile navigation palette', () => {

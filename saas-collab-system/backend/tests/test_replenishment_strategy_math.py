@@ -94,6 +94,41 @@ def test_unknown_warehouse_demand_does_not_become_a_known_zero():
     assert result['suggested_quantity'] is None
 
 
+@pytest.mark.parametrize('block', [
+    'unauthorized', 'received_awaiting_wms', 'warehouse_supply_scope_incomplete',
+    'unassigned_warehouse_supply', 'wms_receipt_overlap_unresolved',
+    'dispatch_allocation_overallocated', 'shipment_receipt_overallocated',
+    'wms_allocation_requires_review',
+])
+def test_hard_supply_scope_blocks_positive_suggestion(block):
+    row = _exact_row({30: 30})
+    if block == 'unauthorized':
+        row['pipeline']['authorized'] = False
+    elif block == 'received_awaiting_wms':
+        row['pipeline']['received_awaiting_wms'] = True
+    else:
+        row['pipeline']['issues'] = [block]
+    strategy = SimpleNamespace(sales_model='ordinary', sales_weights={}, lead_days=45,
+                               cycle_days=10, safety_days=35)
+    result = evaluate_replenishment_row(row, strategy, sales_end=date(2026, 1, 1), today=date(2026, 1, 2))
+    assert result['suggested_quantity'] is None
+    assert result['source_blocked'] is True
+
+
+def test_collection_gap_and_missing_stock_keep_explicit_zero_estimate():
+    row = _exact_row({30: 30})
+    row.update(available_stock=None, inventory_complete=False)
+    row['sales_windows'][2].update(coverage_complete=False, recognized_units=30)
+    strategy = SimpleNamespace(sales_model='ordinary', sales_weights={}, lead_days=45,
+                               cycle_days=10, safety_days=35)
+    result = evaluate_replenishment_row(row, strategy, sales_end=date(2026, 1, 1), today=date(2026, 1, 2))
+    assert result['suggested_quantity'] == 90
+    assert result['source_blocked'] is False
+    assert result['source_stock'] is None
+    assert result['calculation_stock'] == 0
+    assert {'sales', 'inventory'} <= set(result['business_decision']['defaulted_inputs'])
+
+
 def test_forecast_shortage_is_risk_even_when_no_purchase_quantity_is_suggested():
     row = _exact_row({30: 30})
     row['available_stock'] = 3
@@ -153,3 +188,29 @@ def test_scope_gap_keeps_verified_observations_separate_from_order_quantity():
     reference = recognized_reference(row, strategy, calculated=result, today=today)
     assert reference['quantity_reference'] is None
     assert reference['has_observed_basis'] is False
+
+
+@pytest.mark.parametrize('issue', ['unmapped_sales_lines', 'bundle_composition_unverified', 'no_authorized_sales_store'])
+def test_low_frequency_checks_its_actual_90_day_window(issue):
+    row = _exact_row({30: 30, 90: 90})
+    row['sku_id'] = 1
+    row['sales_windows'].append({'days': 90, 'units': 90, 'recognized_units': 90, 'coverage_complete': True, 'issues': [issue]})
+    strategy = SimpleNamespace(sales_model='ordinary', sales_weights={'7':50,'15':30,'30':20}, sku_policies={'1': {'mode': 'low_frequency'}}, lead_days=45, cycle_days=10, safety_days=35)
+    result = evaluate_replenishment_row(row, strategy, sales_end=date(2026, 1, 1), today=date(2026, 1, 2))
+    assert result['source_blocked'] is True
+    assert result['suggested_quantity'] is None
+    assert result['business_decision']['suggested_quantity'] is None
+    assert result['business_decision']['can_order'] is False
+    strategy.sku_policies = {}
+    ordinary = evaluate_replenishment_row(row, strategy, sales_end=date(2026, 1, 1), today=date(2026, 1, 2))
+    assert ordinary['source_blocked'] is False
+    assert ordinary['suggested_quantity'] == 90
+
+
+def test_hard_inventory_in_general_issues_blocks_even_if_blocking_projection_omits_it():
+    row = _exact_row({30: 30})
+    row['issues'] = ['unmapped_inventory']
+    strategy = SimpleNamespace(sales_model='ordinary', sales_weights={}, lead_days=45, cycle_days=10, safety_days=35)
+    result = evaluate_replenishment_row(row, strategy, sales_end=date(2026, 1, 1), today=date(2026, 1, 2))
+    assert result['source_blocked'] and result['suggested_quantity'] is None
+    assert result['business_decision']['can_order'] is False

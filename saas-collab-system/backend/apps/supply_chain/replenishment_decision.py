@@ -25,7 +25,7 @@ def calculate_decision(*, daily_sales, available_stock, production_unshipped,
     if purchase_multiple < 1 or carton_quantity < 1 or minimum_order < 0:
         raise ValueError("Purchase quantities must be nonnegative with positive multiples.")
     if daily_sales is None or available_stock is None:
-        return {"category": "unavailable", "suggested_quantity": None, "can_order": False}
+        return {"category": "unavailable", "suggested_quantity": None, "stock_balance_quantity": None, "can_order": False}
     daily = Fraction(*daily_ratio) if daily_ratio else Fraction(Decimal(str(daily_sales)))
     stock = Fraction(Decimal(str(available_stock)))
     production = max(Fraction(0), Fraction(Decimal(str(production_unshipped or 0))))
@@ -55,7 +55,8 @@ def calculate_decision(*, daily_sales, available_stock, production_unshipped,
         last = min(today + timedelta(days=horizon), activity_end)
         activity_days = max(0, (last - first).days + 1)
     target = daily * (horizon + activity_days * (Fraction(Decimal(str(activity_factor))) - 1))
-    raw_quantity = max(0, ceil(target - stock - incoming - production - submitted - reserved))
+    stock_balance_quantity = ceil(target - stock - incoming - production - submitted - reserved)
+    raw_quantity = max(0, stock_balance_quantity)
     suggested = round_purchase(raw_quantity, purchase_multiple=purchase_multiple,
                                carton_quantity=carton_quantity, minimum_order=minimum_order) if orderable else 0
     balance = stock
@@ -84,6 +85,7 @@ def calculate_decision(*, daily_sales, available_stock, production_unshipped,
     else:
         category = "sufficient"
     return {"category": category, "suggested_quantity": suggested,
+            "stock_balance_quantity": stock_balance_quantity,
             "raw_purchase_quantity": raw_quantity, "rounding_quantity": suggested - raw_quantity if orderable else 0,
             "can_order": orderable and suggested > 0,
             "first_shortage_date": first_shortage.isoformat() if first_shortage else None,

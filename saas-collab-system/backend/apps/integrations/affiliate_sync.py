@@ -117,7 +117,7 @@ def build_plan(job, store, policy, now=None):
         days = sorted({_day(value) for value in trial})
         if len(days) != len(trial) or any(day < floor or day > last for day in days):
             raise ReadonlyConfigurationError("AFFILIATE_TRIAL_OUTSIDE_APPROVED_RANGE")
-        new_days, archive_next = [], None
+        new_days, archive, archive_next = [], [], None
     else:
         progress = dict(SyncCursor.objects.filter(tenant_id=job.tenant_id, sync_job=job,
                          cursor_key__in=["affiliate-next-new-day", "affiliate-history-day"])
@@ -137,10 +137,40 @@ def build_plan(job, store, policy, now=None):
         days = list(dict.fromkeys([*new_days, *recent, *archive]))
         if len(days) > 14:
             raise ReadonlyConfigurationError("AFFILIATE_DAILY_DAY_BUDGET_EXCEEDED")
+    pending = SyncCursor.objects.filter(tenant_id=job.tenant_id, sync_job=job, cursor_key="affiliate-identity-pending").first()
+    retry_next, outside_count = None, 0
+    if pending and trial is None and pending.detail_state:
+        binding = f"{store.pk}:{site}"
+        if pending.cursor_value != binding:
+            raise ReadonlyConfigurationError("AFFILIATE_PENDING_SCOPE_CHANGED")
+        all_pending = sorted(_day(value) for value in pending.detail_state)
+        pending_days = [day for day in all_pending if floor <= day <= last]
+        outside_count = sum(day < floor for day in all_pending)
+        if pending_days:
+            retry = SyncCursor.objects.filter(tenant_id=job.tenant_id, sync_job=job,
+                cursor_key="affiliate-identity-retry-offset").first()
+            offset = (retry.detail_state or {}).get("offset", 0) if retry else 0
+            if (retry and retry.cursor_value != binding) or type(offset) is not int or offset < 0:
+                raise ReadonlyConfigurationError("AFFILIATE_PENDING_RETRY_STATE_INVALID")
+            quota = min(4, len(pending_days))
+            retries = [pending_days[(offset + index) % len(pending_days)] for index in range(quota)]
+            # Keep a latest-day collection slot plus the normal new-day chain.
+            normal = list(dict.fromkeys([last, *new_days, *days]))[:14-quota]
+            days = list(dict.fromkeys([*normal, *retries]))
+            retry_next = (offset + quota) % len(pending_days)
+        # Unapproved old dates remain quarantined; never expand approval or erase them.
+        selected = set(days)
+        completed_prefix = []
+        for archive_item in archive:
+            if archive_item not in selected:
+                break
+            completed_prefix.append(archive_item)
+        archive_next = (completed_prefix[-1] + timedelta(days=1)).isoformat() if completed_prefix else None
     return {"version": VERSION, "count_unit": AFFILIATE_COUNT_UNIT, "tenant_id": job.tenant_id, "store_id": store.pk,
             "timezone": store.timezone, "snapshot_source": source, "site": site,
             "historical_start": floor.isoformat(), "days": [day.isoformat() for day in days],
-            "new_days": [day.isoformat() for day in new_days], "archive_next": archive_next}
+            "new_days": [day.isoformat() for day in new_days], "archive_next": archive_next,
+            "identity_retry_next": retry_next, "pending_outside_approved_range_count": outside_count}
 
 
 class DatabasePageJournal:
@@ -297,6 +327,7 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
                     journal.save(descriptor, projected)
                 details.update(projected)
             seen = set()
+            valid_rows, quarantined = [], []
             for row in rows:
                 key = (row["order_id"], row["sku_id"])
                 if key in seen:
@@ -307,21 +338,52 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
                 if (detail.get("payment_status") != "verified_single_line" or detail.get("sku_id") != row["sku_id"]
                         or row.get("quantity") != 1):
                     row["payment"] = {"amount": None, "currency": store.currency.upper()}
-                self.normalize_record(row)
+                try:
+                    self.normalize_record(row)
+                except DatasetError as exc:
+                    if str(exc) != "affiliate_creator_identity_missing":
+                        raise
+                    quarantined.append({"key": self._identity_key(row), "row_hash": digest_bytes(canonical_bytes(row)), "index": len(seen) - 1, "reason": str(exc)})
+                else:
+                    valid_rows.append(row)
+            self.page_quarantine = quarantined
+            self.fetch_missing_quarantine = list(quarantined)
+            self.page_valid_keys = [self._identity_key(row) for row in valid_rows]
+            self.page_row_evidence = {self._identity_key(row): {"row_hash": digest_bytes(canonical_bytes(row)), "index": index} for index, row in enumerate(rows)}
+            self.current_day = day.isoformat()
             self.verified_day_digest = digest_bytes(canonical_bytes([
-                _order_values(AffiliateOrderSnapshot(**self.normalize_record(row))) for row in rows]))
+                _order_values(AffiliateOrderSnapshot(**self.normalize_record(row))) for row in valid_rows]))
         except DatasetError as exc:
             raise ReadonlyConfigurationError("AFFILIATE_DATA_CONTRACT:" + str(exc)) from None
-        return {"records": rows, "day": day.isoformat(), "index": index,
+        return {"records": valid_rows, "raw_records": rows, "day": day.isoformat(), "index": index,
                 "next_cursor": prefix + str(index + 1) if index + 1 < len(plan["days"]) else "",
                 "raw_responses": [{"endpoint": "projected://affiliate/complete-day",
                     "payload": {"business_day": day.isoformat(), "coverage": client.last_page_summary}}]}
+
+    def _identity_key(self, row):
+        plan = self.scope["affiliate_plan"]
+        return digest_bytes(canonical_bytes([plan["tenant_id"], plan["store_id"], plan["site"], row["business_day"], row["order_id"], row["sku_id"]]))
 
     def normalize_record(self, row):
         store, plan = self.authorization.store, self.scope["affiliate_plan"]
         quantity = row.get("quantity")
         if type(quantity) is not int or not 1 <= quantity <= 2147483647:
             raise DatasetError("affiliate_quantity_unknown")
+        observations = [parse_datetime(str(row.get(field) or ""))
+                        for field in ("affiliate_observed_at", "detail_observed_at")]
+        if any(value is None or timezone.is_naive(value) for value in observations):
+            raise DatasetError("affiliate_observation_required")
+        values = {"source": plan["snapshot_source"], "shop_abbr": store.code, "shop_name": store.name,
+                  "site": plan["site"], "store_id": store.pk, "data_time": datetime.combine(_day(row["business_day"]), time.min, UTC),
+                  "order_id": row["order_id"], "sku_id": row["sku_id"], "product_id": row["product_id"],
+                  "product_name": "", "creator_username": row.get("creator_username") or "",
+                  "creator_username_normalized": normalize_account(row.get("creator_username") or ""),
+                  "quantity": quantity, "currency": store.currency.upper(), "fully_returned": _refund(row.get("fully_return")),
+                  "settlement_status": row.get("settlement_status"), "order_status": row["order_status"],
+                  "payment_amount": _money(row["payment"], store.currency.upper()),
+                  "source_updated_at": min(observations)}
+        for key, field in MONEY_FIELDS.items():
+            values[field] = _money(row[key], store.currency.upper())
         creator = row.get("creator_username")
         if not creator:
             candidates = list(AffiliateOrderSnapshot.objects.filter(
@@ -341,6 +403,8 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
                     raise DatasetError("affiliate_creator_identity_missing")
                 creator = video.creator_username
             else:
+                if len(candidates) > 1:
+                    raise DatasetError("affiliate_existing_identity_ambiguous")
                 if len(candidates) != 1:
                     raise DatasetError("affiliate_creator_identity_missing")
                 current = candidates[0]
@@ -348,31 +412,20 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
                         or SITE_COUNTRIES.get(current.site) != SITE_COUNTRIES.get(plan["site"])
                         or current.data_time.date() != _day(row["business_day"])
                         or current.product_id != row["product_id"]
-                        or not current.creator_username_normalized
+                         ):
+                    raise DatasetError("affiliate_protected_identity_conflict")
+                if (not current.creator_username_normalized
                         or normalize_account(current.creator_username) != current.creator_username_normalized):
                     raise DatasetError("affiliate_creator_identity_missing")
                 creator = current.creator_username
-        observations = [parse_datetime(str(row.get(field) or ""))
-                        for field in ("affiliate_observed_at", "detail_observed_at")]
-        if any(value is None or timezone.is_naive(value) for value in observations):
-            raise DatasetError("affiliate_observation_required")
-        values = {"source": plan["snapshot_source"], "shop_abbr": store.code, "shop_name": store.name,
-                  "site": plan["site"], "store_id": store.pk, "data_time": datetime.combine(_day(row["business_day"]), time.min, UTC),
-                  "order_id": row["order_id"], "sku_id": row["sku_id"], "product_id": row["product_id"],
-                  "product_name": "", "creator_username": creator,
-                  "creator_username_normalized": normalize_account(creator),
-                  "quantity": quantity, "currency": store.currency.upper(), "fully_returned": _refund(row.get("fully_return")),
-                  "settlement_status": row.get("settlement_status"), "order_status": row["order_status"],
-                  "payment_amount": _money(row["payment"], store.currency.upper()),
-                  "source_updated_at": min(observations)}
-        for key, field in MONEY_FIELDS.items():
-            values[field] = _money(row[key], store.currency.upper())
+        values.update(creator_username=creator, creator_username_normalized=normalize_account(creator))
         values["source_row_key"] = affiliate_order_source_row_key(**{key: values[key]
             for key in ("data_time", "shop_abbr", "site", "order_id", "sku_id")})
         return values
 
     def persist_records(self, sync_job, records):
         from apps.influencers.management.commands.import_affiliate_orders_csv import Command
+        self.page_quarantine = list(self.fetch_missing_quarantine)
         fingerprint = digest_bytes(canonical_bytes([_order_values(AffiliateOrderSnapshot(**values)) for values in records]))
         if fingerprint != getattr(self, "verified_day_digest", None):
             raise ReadonlyConfigurationError("AFFILIATE_COMPLETE_DAY_REQUIRED")
@@ -390,8 +443,12 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
                 if current:
                     if (current.store_id not in (None, values["store_id"]) or SITE_COUNTRIES.get(current.site) != SITE_COUNTRIES.get(values["site"])
                             or current.data_time.date() != values["data_time"].date() or current.product_id != values["product_id"]
-                            or current.creator_username_normalized != values["creator_username_normalized"]):
+                            ):
                         raise ReadonlyConfigurationError("AFFILIATE_PROTECTED_IDENTITY_CONFLICT")
+                    if current.creator_username_normalized != values["creator_username_normalized"]:
+                        self.page_quarantine.append({"key": self._identity_key({**values, "business_day": self.current_day}), **self.page_row_evidence[self._identity_key({**values, "business_day": self.current_day})], "reason": "affiliate_creator_identity_conflict"})
+                        results.append({"action": "quarantined"})
+                        continue
                     incoming = {**values, "source": current.source, "source_row_key": current.source_row_key,
                         "data_time": current.data_time, "site": current.site, "shop_name": current.shop_name,
                         "product_name": current.product_name, "creator_username": current.creator_username,
@@ -429,7 +486,35 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
     def after_page_persist(self, sync_job, page, results):
         self._fence(sync_job)
         plan = self.scope["affiliate_plan"]
-        if page["day"] in plan["new_days"]:
+        pending, _ = SyncCursor.objects.select_for_update().get_or_create(tenant_id=sync_job.tenant_id, sync_job=sync_job, cursor_key="affiliate-identity-pending", defaults={"cursor_value": "", "detail_state": {}})
+        scope_binding = f"{plan["store_id"]}:{plan["site"]}"
+        if pending.detail_state and pending.cursor_value != scope_binding:
+            raise DatasetError("affiliate_pending_scope_changed")
+        state = dict(pending.detail_state or {})
+        pending.cursor_value = scope_binding
+        day_state = dict(state.get(page["day"], {}))
+        quarantined = {item["key"]: {**item, "raw_ref": str(getattr(self, "page_raw_ref", "")),
+            "raw_envelope_id": getattr(self, "page_raw_envelope_id", None)} for item in self.page_quarantine}
+        for key in self.page_valid_keys:
+            if key not in quarantined:
+                day_state.pop(key, None)
+        day_state.update(quarantined)
+        if day_state:
+            state[page["day"]] = day_state
+        else:
+            state.pop(page["day"], None)
+        if len(canonical_bytes(state)) > 131072:
+            raise DatasetError("affiliate_quarantine_capacity_exceeded")
+        pending.detail_state = state
+        pending.save(update_fields=["cursor_value", "detail_state", "updated_at"])
+        self.has_pending_identity = bool(state)
+        self.scope_pending_identity = any(day in state for day in plan["days"])
+        self.page_quarantine_audit = list(quarantined.values())
+        current_new = SyncCursor.objects.filter(tenant_id=sync_job.tenant_id, sync_job=sync_job, cursor_key="affiliate-next-new-day").first()
+        expected_day = max(_day(plan["historical_start"]), _day(current_new.cursor_value)).isoformat() if current_new else plan["historical_start"]
+        # Traversal progress is separate from the success checkpoint. Facts and
+        # quarantine evidence have committed together; pending dates replay independently.
+        if page["day"] == expected_day and page["day"] in plan["new_days"]:
             SyncCursor.objects.update_or_create(tenant_id=sync_job.tenant_id, sync_job=sync_job,
                 cursor_key="affiliate-next-new-day", defaults={"cursor_value": (_day(page["day"]) + timedelta(days=1)).isoformat()})
         changed = [item["order_snapshot_id"] for item in results if item["action"] in {"created", "updated"}]
@@ -450,6 +535,11 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
     def finalize_run(self, sync_job):
         self._fence(sync_job)
         plan = self.scope["affiliate_plan"]
+        if plan.get("identity_retry_next") is not None:
+            SyncCursor.objects.update_or_create(tenant_id=sync_job.tenant_id, sync_job=sync_job,
+                cursor_key="affiliate-identity-retry-offset", defaults={
+                    "cursor_value": f"{plan['store_id']}:{plan['site']}",
+                    "detail_state": {"offset": plan["identity_retry_next"]}})
         if plan["archive_next"] is not None:
             SyncCursor.objects.update_or_create(tenant_id=sync_job.tenant_id, sync_job=sync_job,
                 cursor_key="affiliate-history-day", defaults={"cursor_value": plan["archive_next"]})

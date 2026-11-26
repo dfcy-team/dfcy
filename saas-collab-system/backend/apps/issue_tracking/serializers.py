@@ -11,6 +11,19 @@ class IssueSerializer(serializers.ModelSerializer):
     last_feedback_at = serializers.SerializerMethodField()
     confirmation_wait_seconds = serializers.SerializerMethodField()
     is_overdue = serializers.SerializerMethodField()
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
+        request=self.context.get('request')
+        tenant=getattr(getattr(request,'user',None),'tenant_id',None)
+        if not tenant:
+            self.fields['assignee'].queryset=self.fields['assignee'].queryset.none()
+            self.fields['collaborators'].child_relation.queryset=self.fields['collaborators'].child_relation.queryset.none()
+            self.fields['department'].queryset=self.fields['department'].queryset.none()
+        else:
+            users=get_user_model().objects.filter(tenant_id=tenant,is_active=True,user_type='internal')
+            self.fields['assignee'].queryset=users
+            self.fields['collaborators'].child_relation.queryset=users
+            self.fields['department'].queryset=Department.objects.filter(tenant_id=tenant,status='active')
     def get_first_feedback_at(self,obj):
         row=obj.events.filter(action='feedback',data__actor_role__in=['assignee','collaborator']).first()
         return row.created_at if row else None
@@ -30,7 +43,9 @@ class IssueSerializer(serializers.ModelSerializer):
     def get_events(self,obj):
         return list(obj.events.values('id','actor','action','content','data','created_at'))
     def get_attachments(self,obj):
-        return list(obj.attachments.values('id','name','content_type','created_at'))
+        rows=getattr(obj,'_attachment_metadata',None)
+        if rows is None: rows=obj.attachments.only('id','name','content_type','created_at').all()
+        return [{'id':a.pk,'name':a.name,'content_type':a.content_type,'created_at':a.created_at} for a in rows]
     def get_permissions(self,obj):
         from .access import allowed
         actions=['reopen'] if obj.status=='closed' else ['feedback','close','reassign','reschedule','transfer']
@@ -49,6 +64,10 @@ class IssueSerializer(serializers.ModelSerializer):
         return data
 
 class GrantSerializer(serializers.ModelSerializer):
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs); request=self.context.get('request'); tenant=getattr(getattr(request,'user',None),'tenant_id',None)
+        self.fields['user'].queryset=get_user_model().objects.filter(tenant_id=tenant,is_active=True,user_type='internal') if tenant else get_user_model().objects.none()
+        self.fields['department'].queryset=Department.objects.filter(tenant_id=tenant,status='active') if tenant else Department.objects.none()
     class Meta:
         model=ManagementGrant
         fields='__all__'
@@ -64,6 +83,10 @@ class GrantSerializer(serializers.ModelSerializer):
         return data
 
 class RuleSerializer(serializers.ModelSerializer):
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs); request=self.context.get('request'); tenant=getattr(getattr(request,'user',None),'tenant_id',None)
+        self.fields['default_assignee'].queryset=get_user_model().objects.filter(tenant_id=tenant,is_active=True,user_type='internal') if tenant else get_user_model().objects.none()
+        self.fields['candidate_departments'].child_relation.queryset=Department.objects.filter(tenant_id=tenant,status='active') if tenant else Department.objects.none()
     class Meta:
         model=MenuRule
         fields='__all__'

@@ -356,7 +356,7 @@ class ReplenishmentJobRows(ReplenishmentJobDetail):
         from django.db.models import Count
         display_counts = {}
         if not (request.query_params.get('group_by') == 'sku' and request.query_params.get('spu_id')):
-            display_counts = qs.aggregate(suggested=Count('pk', filter=Q(display_suggestion__gt=0)),
+            display_counts = qs.aggregate(reference=Count('pk', filter=Q(payload__recognized_reference__has_observed_basis=True, display_suggestion__gt=0) & ~Q(payload__business_decision__category__in=['purchase', 'expedite', 'inactive'])), suggested=Count('pk', filter=Q(display_suggestion__gt=0)),
                                           pending=Count('pk', filter=Q(display_suggestion__isnull=True)),
                                           purchase=Count('pk', filter=Q(payload__business_decision__category='purchase')),
                                           expedite=Count('pk', filter=Q(payload__business_decision__requires_expedite=True)),
@@ -365,6 +365,8 @@ class ReplenishmentJobRows(ReplenishmentJobDetail):
         if quantity_filter in {'action', 'purchase', 'expedite', 'no_sales', 'sufficient', 'inactive'}:
             categories_filter = ['purchase', 'expedite'] if quantity_filter == 'action' else [quantity_filter]
             selected = Q(payload__business_decision__category__in=categories_filter)
+            if quantity_filter == 'action':
+                selected |= Q(payload__recognized_reference__has_observed_basis=True, display_suggestion__gt=0) & ~Q(payload__business_decision__category='inactive')
             if quantity_filter == 'expedite':
                 selected = Q(payload__business_decision__requires_expedite=True)
             legacy = Q(payload__business_decision__isnull=True)
@@ -519,8 +521,13 @@ class ReplenishmentJobRows(ReplenishmentJobDetail):
                     return Coalesce(*[numeric(path) for path in paths], output_field=field)
                 stock = known('available_stock', 'recognized_reference__observed_available_stock')
                 incoming = known('business_decision__incoming_quantity', 'pipeline__effective_incoming')
+                signed = numeric('business_decision__stock_balance_quantity')
+                full = full.annotate(signed_balance=signed)
                 metrics = full.order_by().values('report_spu_id').annotate(
                     sku_count=Count('pk'), suggested_quantity=Sum('display_suggestion'),
+                    stock_balance_coverage_count=Count('signed_balance'),
+                    net_demand_quantity=Sum('signed_balance'),
+                    surplus_quantity=Sum(Case(When(signed_balance__lt=0, then=-F('signed_balance')), When(signed_balance__isnull=False, then=Value(0)), default=Value(None), output_field=field)),
                     available_stock=Sum(stock),
                     sales_7=Sum(known('formula_evidence__sales__7__units', 'recognized_reference__observed_sales_windows__7')),
                     sales_15=Sum(known('formula_evidence__sales__15__units', 'recognized_reference__observed_sales_windows__15')),
@@ -555,6 +562,10 @@ class ReplenishmentJobRows(ReplenishmentJobDetail):
                 rows = []
                 for metric in page_groups:
                     sid = metric.pop('report_spu_id'); spu = spus.get(sid, {})
+                    metric['stock_balance_complete'] = metric['stock_balance_coverage_count'] == metric['sku_count']
+                    if not metric['stock_balance_complete']:
+                        metric['net_demand_quantity'] = None
+                        metric['surplus_quantity'] = None
                     rep = representatives.get(sid, (None, None))[1]
                     rows.append({**metric, 'spu_id': sid, 'spu_code': spu.get('spu_code', ''),
                         'legacy_spu_code': spu.get('legacy_spu_code', ''), 'spu_name': spu.get('product_name', ''),
@@ -703,7 +714,7 @@ def run_replenishment_calculation(job_id):
                 has_submitted_demand=Decimal(str(line.get("submitted_demand") or "0")) > 0,
                 # Internal view calls bypass response rendering; evidence may contain
                 # datetime/date/Decimal values that JSONField cannot encode itself.
-                payload=pack_payload(json.loads(json.dumps(line, cls=DjangoJSONEncoder)))))
+                payload=pack_payload(json.loads(json.dumps({**line, "legacy_reference": _legacy_replenishment_reference(line)}, cls=DjangoJSONEncoder)))))
         with transaction.atomic():
             _restore_actor(job)
             if (_scope_signature(actor, business_day=job.business_date if _daily_calculation(job) else None) != job.permission_signature or

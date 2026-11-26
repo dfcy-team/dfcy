@@ -31,7 +31,7 @@ def test_internal_user_with_finance_view_permission_can_access_finance_health():
     tenant = Tenant.objects.create(name="Tenant", code="tenant")
     user = create_user(tenant, "finance-user", CustomUser.UserType.INTERNAL)
     role = Role.objects.create(tenant=tenant, name="Finance Viewer", code="finance-viewer")
-    permission = Permission.objects.get(code="finance.view")
+    permission, _ = Permission.objects.get_or_create(code="finance.view", defaults={"name": "查看财务"})
     role.permissions.add(permission)
     UserRole.objects.create(tenant=tenant, user=user, role=role)
     client = APIClient()

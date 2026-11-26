@@ -65,6 +65,26 @@ def create_job(api, world, strategy, callbacks, **parameters):
     return response.data['data']
 
 
+@pytest.mark.parametrize('source_evidence', [{'source_blocked': True}, {'pipeline': {'authorized': False}}, {'pipeline': {'issues': ['warehouse_supply_scope_incomplete']}}, {'formula_evidence': {'sales_model': 'low_frequency'}, 'business_decision': {}}])
+def test_snapshot_transfer_rejects_hard_source_marker_but_allows_estimated_scope(world, configured, source_evidence):
+    from django.core.exceptions import ValidationError
+    from apps.sales_management.operating import _validate_daily_selection, _source_supply_blocked
+    from apps.commerce.country_decisions import permission_signature
+
+    actor, _, _ = configured
+    assert _source_supply_blocked({'source_blocked': False,
+        'blocking_issues': ['collection_coverage_unproven']}) is False
+    assert _source_supply_blocked({'source_blocked': True}) is True
+    sku_id = world['sku'].pk
+    snapshot = {'country_id': world['country'].pk, 'source_kind': 'cycle',
+        'permission_signature': permission_signature(actor),
+        'lines': [{'sku_id': sku_id, 'suggested_quantity': 10, **source_evidence}]}
+    payload = {'country_id': world['country'].pk, 'source_kind': 'cycle',
+        'lines': [{'sku_id': sku_id, 'quantity': 10}]}
+    with pytest.raises(ValidationError):
+        _validate_daily_selection(actor, snapshot, payload)
+
+
 def test_full_country_filters_later_chunks_and_reads_never_recalculate(world, configured, django_capture_on_commit_callbacks):
     actor, strategy, _ = configured
     for index, sku in enumerate((world['sku'], world['sku_b'])):
@@ -121,14 +141,16 @@ def test_full_country_filters_later_chunks_and_reads_never_recalculate(world, co
         search = api.get(BASE + result['id'] + '/rows/', {'search': 'J044'}).data['data']
         assert search['count'] == 1
         zero = api.get(BASE + result['id'] + '/rows/', {'quantity_filter': 'zero'}).data['data']
-        assert zero['count'] == 19
+        assert zero['count'] == 20
         observed = api.get(BASE + result['id'] + '/rows/', {'quantity_filter': 'observed'}).data['data']
-        assert observed['count'] == 26 and observed['counts']['observed'] == 26
-        assert observed['rows'][0]['sku_code'] == 'J000'
+        assert observed['count'] == 25 and observed['counts']['observed'] == 25
+        assert observed['rows'][0]['sku_code'] == 'J020'
+        zero_rows = api.get(BASE + result['id'] + '/rows/', {'quantity_filter': 'zero'}).data['data']['rows']
+        estimated = next(row for row in zero_rows if row['sku_code'] == 'J000')
+        assert estimated['suggested_quantity'] == 0
+        assert estimated['source_blocked'] is False
         unknown = api.get(BASE + result['id'] + '/rows/', {'quantity_filter': 'unknown'}).data['data']
-        assert unknown['count'] == 1
-        assert unknown['rows'][0]['suggested_quantity'] is None
-        assert unknown['rows'][0]['recognized_reference']['can_create_order'] is False
+        assert unknown['count'] == 0
     assert ReplenishmentCalculationRow.objects.count() == 45
     jobs.run_replenishment_calculation(result['id'])
     assert ReplenishmentCalculationRow.objects.count() == 45
@@ -273,3 +295,34 @@ def test_matching_active_job_is_reused_even_when_another_job_is_newer(world, con
     assert second.status_code == 202
     duplicate = create_job(api, world, strategy, django_capture_on_commit_callbacks)
     assert duplicate['id'] == first['id'] and ReplenishmentCalculationJob.objects.count() == 2
+
+
+@pytest.mark.parametrize('mode', ['low_frequency', 'ordinary'])
+@pytest.mark.parametrize('editing', [False, True])
+def test_actual_legacy_daily_payload_uses_matching_sku_strategy_without_model_projection(world, configured, mode, editing):
+    from django.core.exceptions import ValidationError
+    from types import SimpleNamespace
+    from apps.sales_management.operating import _validate_daily_selection
+    from apps.commerce.country_decisions import permission_signature
+    actor, strategy, _ = configured
+    sku_id = world['sku'].pk
+    strategy.sku_policies = {str(sku_id): {'mode': mode}}
+    from apps.supply_chain.models import domain_write
+    with domain_write():
+        strategy.save(update_fields=['sku_policies'])
+    snapshot = {'country_id': world['country'].pk, 'source_kind': 'cycle',
+        'strategy_id': strategy.pk, 'strategy_version': strategy.version,
+        'permission_signature': permission_signature(actor),
+        'lines': [{'sku_id': sku_id, 'suggested_quantity': 10,
+            'formula_evidence': {'sales': {'30': {'units': 30}}}, 'business_decision': {}}]}
+    payload = {'country_id': world['country'].pk, 'source_kind': 'cycle', 'lines': [{'sku_id': sku_id, 'quantity': 10}]}
+    current = SimpleNamespace(pk=999) if editing else None
+    with patch('apps.sales_management.operating._country', side_effect=AssertionError('eligible legacy proceeds to normal scope validation')) as scoped:
+        if mode == 'low_frequency':
+            with pytest.raises(ValidationError):
+                _validate_daily_selection(actor, snapshot, payload, current)
+            scoped.assert_not_called()
+        else:
+            with pytest.raises(AssertionError, match='eligible legacy proceeds'):
+                _validate_daily_selection(actor, snapshot, payload, current)
+            scoped.assert_called_once()

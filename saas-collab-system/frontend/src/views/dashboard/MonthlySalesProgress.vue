@@ -4,7 +4,7 @@
       <div>
         <p class="eyebrow">销售进度</p>
         <h2 id="monthly-sales-title">每日销售增长率</h2>
-        <p class="description">按当前账号权限范围内的平台和店铺统计非取消订单及广告花费；显示每日环比。TikTok 广告花费优先采用已验证的 GMV Max 数据，无可用 GMV Max 时采用竞价广告数据。</p>
+        <p class="description">按当前账号权限范围内的平台和店铺统计非取消订单及广告花费；显示每日环比。TikTok 广告按已采集来源估算：有已验证 GMV Max 的广告账户优先使用 GMV Max，其余使用竞价广告；跨币种按已保存参考汇率折算。</p>
       </div>
       <button v-if="canRead && !loading" class="refresh-button" type="button" @click="load">刷新</button>
     </header>
@@ -22,6 +22,7 @@
       <el-select id="monthly-sales-store" class="store-multiselect" aria-label="店铺"
         :model-value="selectedStoreIds" :disabled="!stores.length" multiple collapse-tags clearable filterable
         placeholder="全部可管理店铺" @change="changeStore">
+        <el-option :value="allStoresOption" label="全部可管理店铺" />
         <el-option v-for="store in stores" :key="store.id" :value="store.id"
           :label="storeLabel(store)" />
       </el-select>
@@ -31,8 +32,8 @@
     </div>
 
     <div v-if="!canRead" class="chart-state">当前账号暂无销售数据查看权限。</div>
-    <div v-else-if="loading" class="chart-state" role="status">正在读取所选月份销售数据…</div>
-    <div v-else-if="error" class="chart-state" role="alert">
+    <div v-else-if="loading && !data" class="chart-state" role="status">正在读取所选月份销售数据…</div>
+    <div v-else-if="error && !data" class="chart-state" role="alert">
       {{ error }}
       <button type="button" class="retry-button" @click="load">重试</button>
     </div>
@@ -40,6 +41,9 @@
       <span>所选月份可见范围内暂无销售及广告数据。广告花费：{{ data.advertising_status === 'forbidden' ? '无权限' : '暂无数据' }}。</span>
     </div>
     <template v-else>
+      <p v-if="loading || error" class="footnote" :role="error ? 'alert' : 'status'">
+        {{ error || '正在更新销售数据，当前显示上次读取结果…' }}
+      </p>
       <div class="chart-toolbar">
         <div class="month-caption">
           <strong>{{ monthLabel }}</strong>
@@ -113,7 +117,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import { fetchMonthlySalesProgress } from '../../api/salesManagement';
 import { useAuthStore } from '../../stores/auth';
 
@@ -124,6 +128,7 @@ const data = ref(null);
 const loading = ref(true);
 const error = ref('');
 const selectedCurrency = ref('');
+const allStoresOption = "all";
 const selectedStoreIds = ref([]);
 const selectedPlatformId = ref(null);
 const platforms = ref([]);
@@ -138,8 +143,32 @@ const displayCurrencies = computed(() => [
 const monthLabel = computed(() => data.value?.month ? `${data.value.month.slice(0, 4)}年${Number(data.value.month.slice(5))}月` : '本月');
 const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 let requestSequence = 0;
+let activeController = null;
+let filterTimer = null;
+let active = false;
+
+function cancelRequest() {
+  requestSequence += 1;
+  activeController?.abort();
+  activeController = null;
+  loading.value = false;
+}
+
+function scheduleFilterLoad() {
+  cancelRequest();
+  clearTimeout(filterTimer);
+  data.value = null;
+  selectedCurrency.value = '';
+  loading.value = true;
+  error.value = '';
+  filterTimer = setTimeout(() => { filterTimer = null; load(); }, 250);
+}
 
 async function load() {
+  if (!active) return;
+  clearTimeout(filterTimer);
+  filterTimer = null;
+  activeController?.abort();
   const sequence = ++requestSequence;
   if (!canRead.value) {
     loading.value = false;
@@ -148,11 +177,13 @@ async function load() {
   }
   loading.value = true;
   error.value = '';
-  data.value = null;
+  const controller = new AbortController();
+  activeController = controller;
   try {
-    const response = await fetchMonthlySalesProgress(selectedStoreIds.value, selectedPlatformId.value, selectedMonth.value);
-    if (sequence !== requestSequence) return;
+    const response = await fetchMonthlySalesProgress(selectedStoreIds.value, selectedPlatformId.value, selectedMonth.value, { signal: controller.signal });
+    if (sequence !== requestSequence || controller.signal.aborted) return;
     if (!response?.success) {
+      if (response?.http_status === 403) { data.value = null; selectedCurrency.value = ''; }
       error.value = response?.http_status === 403
         ? '当前账号没有销售数据查看权限或可用的数据范围。'
         : '销售数据暂时无法读取，请稍后重试。';
@@ -168,9 +199,9 @@ async function load() {
       selectedCurrency.value = displayCurrencies.value[0]?.currency || '';
     }
   } catch (_failure) {
-    if (sequence === requestSequence) error.value = '销售数据暂时无法读取，请稍后重试。';
+    if (sequence === requestSequence && !controller.signal.aborted) error.value = '销售数据暂时无法读取，请稍后重试。';
   } finally {
-    if (sequence === requestSequence) loading.value = false;
+    if (sequence === requestSequence) { loading.value = false; activeController = null; }
   }
 }
 
@@ -181,17 +212,15 @@ function storeLabel(store) {
 }
 
 function changeStore(values) {
-  selectedStoreIds.value = values;
-  data.value = null;
+  selectedStoreIds.value = values.includes(allStoresOption) ? [] : values;
   selectedCurrency.value = '';
-  load();
+  scheduleFilterLoad();
 }
 
 function changeMonth() {
   if (!selectedMonth.value || selectedMonth.value > todayMonth) selectedMonth.value = todayMonth;
-  data.value = null;
   selectedCurrency.value = '';
-  load();
+  scheduleFilterLoad();
 }
 
 function changePlatform(event) {
@@ -200,13 +229,18 @@ function changePlatform(event) {
   selectedStoreIds.value = [];
   stores.value = [];
   storesLoaded.value = false;
-  data.value = null;
   selectedCurrency.value = '';
-  load();
+  scheduleFilterLoad();
 }
 
-onMounted(load);
+onMounted(() => { active = true; load(); });
+onActivated(() => { if (!active) { active = true; load(); } });
+onDeactivated(() => { active = false; clearTimeout(filterTimer); filterTimer = null; cancelRequest(); });
+onUnmounted(() => { active = false; clearTimeout(filterTimer); filterTimer = null; cancelRequest(); });
 watch(() => auth.currentUser, () => {
+  cancelRequest();
+  clearTimeout(filterTimer);
+  filterTimer = null;
   data.value = null;
   selectedCurrency.value = '';
   selectedStoreIds.value = [];
@@ -215,6 +249,16 @@ watch(() => auth.currentUser, () => {
   stores.value = [];
   storesLoaded.value = false;
   load();
+});
+watch(canRead, (allowed) => {
+  if (!allowed) {
+    cancelRequest();
+    clearTimeout(filterTimer);
+    filterTimer = null;
+    data.value = null;
+    selectedCurrency.value = '';
+    error.value = '';
+  } else if (active) load();
 });
 
 const selected = computed(() => displayCurrencies.value.find((item) => item.currency === selectedCurrency.value));

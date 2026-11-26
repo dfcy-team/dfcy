@@ -138,6 +138,8 @@ def current_dataset(row):
     if direct:
         from .summary_read_query import settings_version
         spec = row.request['_database_query']
+        if spec.get('accounting_history_version') != 1:
+            return None
         interval = 60 if spec.get('refresh') else 300
         source_expired = timezone.now().timestamp()-spec['generation']*interval > 3600+interval
         if source_expired or row.created_at < timezone.now()-timedelta(hours=1) or not dataset or not dataset.metadata.get('query_template') or spec['settings'] != settings_version(row.tenant_id):

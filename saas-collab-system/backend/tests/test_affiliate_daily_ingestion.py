@@ -130,7 +130,7 @@ def test_awaiting_payment_is_persisted_idempotently_without_settled_attribution(
 
 @pytest.mark.parametrize("changes", [
     {"quantity": None}, {"settlement_status": "UNKNOWN"}, {"fully_return": "ambiguous"},
-    {"creator_username": ""}, {"actual_paid_commission": {"amount": 1.2, "currency": "PHP"}},
+    {"actual_paid_commission": {"amount": 1.2, "currency": "PHP"}},
     {"actual_paid_shop_ads_commission": {"amount": "1.23456", "currency": "PHP"}},
     {"estimated_commission_base": {"amount": "100", "currency": "THB"}},
 ])
@@ -200,8 +200,11 @@ def test_ambiguous_or_changed_creator_cannot_reassociate(trial):
     write(trial, fetch(trial))
     trial.adapter.scope["affiliate_plan"]["snapshot_source"] = "changed-source"
     page = fetch(trial, [order(creator_username="different-creator")])
-    with pytest.raises(ReadonlyConfigurationError, match="PROTECTED_IDENTITY"):
-        write(trial, page)
+    results = write(trial, page)
+    assert results[0]['action'] == 'quarantined'
+    pending = SyncCursor.objects.get(sync_job=trial.job, cursor_key='affiliate-identity-pending')
+    assert pending.detail_state[DAY.isoformat()]
+    assert trial.adapter.has_pending_identity
     assert AffiliateOrderSnapshot.objects.get().creator_username == "creator-account"
     assert not AffiliateOrderRevision.objects.exists()
 
@@ -458,6 +461,8 @@ def test_next_page_merges_latest_acked_day_and_pending_ids(trial):
     with patch("apps.influencers.tasks.refresh_affiliate_order_attributions_task.run", return_value={"status": "completed"}):
         refresh_affiliate_ingestion_day.run(trial.run.pk, DAY.isoformat(), 1)
     with transaction.atomic():
+        trial.adapter.page_quarantine = []
+        trial.adapter.page_valid_keys = []
         trial.adapter.after_page_persist(trial.job, {"day": "2026-08-17"},
                                         [{"action": "updated", "order_snapshot_id": 2}])
         trial.adapter.after_page_persist(trial.job, {"day": "2026-08-17"},

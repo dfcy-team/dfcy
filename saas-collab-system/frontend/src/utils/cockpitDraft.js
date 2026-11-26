@@ -18,7 +18,9 @@ export function stageCockpitDraft(ownerId, input, now = Date.now()) {
   const lines = input.rows.map(row => {
     if (!positiveId(row.sku_id) || seen.has(Number(row.sku_id)) || !positiveId(row.suggested_quantity)) throw new Error('商品重复或建议数量无效，请重新核对。');
     seen.add(Number(row.sku_id));
-    return { sku_id: Number(row.sku_id), sku: String(row.sku_code || row.sku || ''), legacy_sku_code: String(row.legacy_sku_code || ''), product_name: String(row.product_name || ''), quantity: Number(row.suggested_quantity), ...(dailyJobId ? Object.fromEntries(['available_stock','in_transit_stock','pipeline','suggested_quantity','issues','source_snapshot_ids','source_run_ids','evidence'].filter(key=>row[key]!==undefined).map(key=>[key,JSON.parse(JSON.stringify(row[key]))])) : {}) };
+    const quantity = Object.prototype.hasOwnProperty.call(row, 'edited_order_quantity') ? row.edited_order_quantity : row.suggested_quantity;
+    if (!positiveId(quantity)) throw new Error('订货数量必须为正整数，请重新核对。');
+    return { sku_id: Number(row.sku_id), sku: String(row.sku_code || row.sku || ''), legacy_sku_code: String(row.legacy_sku_code || ''), product_name: String(row.product_name || ''), quantity: Number(quantity), ...(dailyJobId ? Object.fromEntries(['available_stock','in_transit_stock','pipeline','suggested_quantity','stock_balance_quantity','issues','source_snapshot_ids','source_run_ids','evidence'].filter(key=>row[key]!==undefined).map(key=>[key,JSON.parse(JSON.stringify(row[key]))])) : {}) };
   });
   pending = { ownerKey: cockpitActorKey(ownerId), createdAt: now, snapshot_job_id: dailyJobId, preview_token: input.preview_token || p.preview_token || input.preview?.preview_token, parameters: { country_id: Number(p.country_id), source_kind: p.source_kind, strategy_id: Number(p.strategy_id), algorithm_version: 'weighted_days_v1', sales_end: p.sales_end, activity_start: p.activity_start || null, activity_end: p.activity_end || null, activity_factor: Number(p.activity_factor || 1) }, lines };
 }

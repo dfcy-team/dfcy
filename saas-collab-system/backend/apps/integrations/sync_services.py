@@ -560,8 +560,15 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                 page = cached_page[1]
             _renew_lease(sync_job, run)
             with _lease_heartbeat(sync_job, run), transaction.atomic():
-                archive_raw_page(sync_job, run, adapter, previous_cursor, page)
+                raw_page = {**page, "records": page.get("raw_records", page.get("records", []))}
+                envelope = archive_raw_page(sync_job, run, adapter, previous_cursor, raw_page)
+                adapter.page_raw_ref = getattr(envelope, "raw_ref", "")
+                adapter.page_raw_envelope_id = getattr(envelope, "pk", None)
                 records = page.get("records", [])
+                if sync_job.resource_type == "affiliate_order":
+                    isolated_count = len(page.get("raw_records", records)) - len(records)
+                    run.fetched_count += isolated_count
+                    run.failed_count += isolated_count
                 normalized_records = []
                 for raw_record in records:
                     run.fetched_count += 1
@@ -595,11 +602,17 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                         run.created_count += 1
                     elif result.get("action") == "updated":
                         run.updated_count += 1
+                    elif result.get("action") == "quarantined":
+                        run.failed_count += 1
                     else:
                         run.skipped_count += 1
                 after_page_persist = getattr(adapter, "after_page_persist", None)
                 if callable(after_page_persist):
                     after_page_persist(sync_job, page, results)
+                if hasattr(adapter, "page_quarantine_audit"):
+                    audit = dict((run.masked_log or {}).get("affiliate_identity_quarantine") or {})
+                    audit[page["day"]] = adapter.page_quarantine_audit
+                    run.masked_log = {**(run.masked_log or {}), "affiliate_identity_quarantine": audit}
                 cursor.cursor_value = adapter.get_next_cursor(page)
                 if "detail_state" in page:
                     detail_state = page["detail_state"]
@@ -642,11 +655,23 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                 finalize_run = getattr(adapter, "finalize_run", None)
                 if callable(finalize_run):
                     finalize_run(sync_job)
-                run.status = SyncRun.Status.SUCCESS
+                warehouse_outcome = adapter.completion_outcome(sync_job) if sync_job.resource_type == "warehouse_order_lookup" else {}
+                warehouse_incomplete = bool(warehouse_outcome.get("failed"))
+                run.status = SyncRun.Status.FAILED if warehouse_incomplete else SyncRun.Status.SUCCESS
                 run.finished_at = timezone.now()
-                run.error_code = ""
-                run.masked_error_message = ""
-                if not history_segment:
+                run.error_code = warehouse_outcome.get("error_code", "") if warehouse_incomplete else ""
+                run.masked_error_message = sanitize_text(warehouse_outcome.get("message", "")) if warehouse_incomplete else ""
+                global_partial_identity = bool(getattr(adapter, "has_pending_identity", False))
+                partial_identity = bool(getattr(adapter, "scope_pending_identity", False)) if history_segment else global_partial_identity
+                if partial_identity:
+                    run.status = SyncRun.Status.FAILED
+                    run.error_code = "AFFILIATE_IDENTITY_PARTIAL"
+                    run.masked_error_message = "有效记录已提交；身份隔离记录待核验并整日重采。"
+                    outside = (getattr(adapter, "scope", {}).get("affiliate_plan") or {}).get("pending_outside_approved_range_count", 0)
+                    if outside:
+                        run.masked_error_message = "有效记录已提交；部分隔离日期早于批准起点，已保留，须重新批准后重采。"
+                        run.masked_log = {**(run.masked_log or {}), "affiliate_pending_outside_approved_range_count": outside}
+                if not history_segment and not partial_identity and not warehouse_incomplete:
                     checkpoint, _checkpoint_created = SyncCheckpoint.objects.select_for_update().get_or_create(
                         tenant=sync_job.tenant, sync_job=sync_job, defaults={"version": 0},
                     )
@@ -667,7 +692,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                         "last_page_record_keys": sorted(records[0]) if records and isinstance(records[0], dict) else [],
                         "retry_count": run.retry_count,
                         "last_retry_error": last_retry_error,
-                        "checkpoint": {"version": checkpoint.version if checkpoint else None, "advanced": not bool(history_segment)},
+                        "checkpoint": {"version": checkpoint.version if checkpoint else None, "advanced": not bool(history_segment) and not partial_identity and not warehouse_incomplete},
                         "raw_evidence": raw_evidence,
                         **({"decision_source": {
                             **decision_source,
@@ -679,7 +704,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                 run.masked_log["runtime_budget"] = {
                     **runtime_budget, "pending": False, "completed_at": run.finished_at.isoformat(),
                 }
-                sync_job.status = SyncJob.Status.IDLE
+                sync_job.status = SyncJob.Status.FAILED if partial_identity or warehouse_incomplete else SyncJob.Status.IDLE
                 sync_job.lock_token = ""
                 sync_job.lock_expires_at = None
                 sync_job.lock_heartbeat_at = timezone.now()
@@ -693,7 +718,10 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                     ]
                 )
                 _save_run(run)
-                resolve_sync_failure_alert(sync_job, run)
+                if partial_identity or warehouse_incomplete:
+                    upsert_sync_failure_alert(sync_job, sync_run=run)
+                elif not global_partial_identity:
+                    resolve_sync_failure_alert(sync_job, run)
                 if sync_job.ads_mapping_id:
                     adapter.release()
                 return run, True

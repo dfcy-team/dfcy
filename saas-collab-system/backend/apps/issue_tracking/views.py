@@ -1,7 +1,7 @@
 from datetime import timedelta, datetime, time
 from django.utils.dateparse import parse_date
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Prefetch
 from apps.common.responses import success_response as Response
 from apps.permissions.services import check_user_permission
 from django.http import FileResponse, HttpResponse
@@ -25,7 +25,8 @@ class IssueViewSet(viewsets.GenericViewSet):
     permission_classes=[InternalOnly]
     serializer_class=IssueSerializer
     def get_queryset(self):
-        qs=visible(self.request.user).select_related('creator','assignee','department').prefetch_related('collaborators','events','attachments')
+        metadata=Attachment.objects.only('id','issue_id','name','content_type','created_at')
+        qs=visible(self.request.user).select_related('creator','assignee','department').prefetch_related('collaborators','events',Prefetch('attachments',queryset=metadata,to_attr='_attachment_metadata'))
         if self.action!='list': return qs
         p=self.request.query_params
         mode=p.get('view','')
@@ -148,14 +149,34 @@ class IssueViewSet(viewsets.GenericViewSet):
     @action(detail=True,methods=['post'])
     def attachments(self,request,pk=None):
         issue=self.get_object()
-        if issue.status=='closed': raise ValidationError('事项已关闭')
         if request.user.pk not in {issue.creator_id,issue.assignee_id} and not issue.collaborators.filter(pk=request.user.pk).exists(): raise PermissionDenied('仅参与人可上传附件')
         upload=request.FILES.get('file')
         if not upload or upload.size>10*1024*1024: raise ValidationError('请选择不超过10MB的文件')
+        content=upload.read()
+        actual_image=False
+        image_identified=False
+        import re
+        svg_signature=bool(re.match(rb'\s*(?:<\?xml[^>]*>\s*)?<svg(?:\s|>)',content[:4096],re.I))
+        image_signature=(content.startswith(b'\x89PNG\r\n\x1a\n') or content.startswith(b'\xff\xd8\xff') or content.startswith((b'GIF87a',b'GIF89a')) or (len(content)>=12 and content[:4]==b'RIFF' and content[8:12]==b'WEBP') or content.startswith(b'BM'))
+        try:
+            from PIL import Image
+            import io
+            with Image.open(io.BytesIO(content)) as image:
+                image_identified=True
+                if image.format not in {'PNG','JPEG','GIF','WEBP','BMP'}: raise ValueError('unsupported')
+                image.verify(); actual_image=True
+        except Exception:
+            if image_identified or image_signature or svg_signature or (upload.content_type or '').startswith('image/') or upload.name.lower().endswith(('.png','.jpg','.jpeg','.gif','.webp','.bmp','.svg','.tif','.tiff')):
+                raise ValidationError('图片文件无效')
         rule=MenuRule.objects.filter(tenant_id=issue.tenant_id,menu_key=issue.menu_key).first()
-        if upload.content_type and upload.content_type.startswith('image/') and rule and not rule.screenshot_enabled: raise ValidationError('此页面不允许截图附件')
-        obj=Attachment.objects.create(issue=issue,uploader=request.user,name=upload.name,content=upload.read(),content_type=upload.content_type or 'application/octet-stream')
-        Event.objects.create(issue=issue,actor=request.user,action='attachment',content=obj.name)
+        if actual_image and rule and not rule.screenshot_enabled: raise ValidationError('此页面不允许截图附件')
+        with transaction.atomic():
+            locked=Issue.objects.select_for_update().get(pk=issue.pk)
+            if locked.status=='closed': raise ValidationError('事项已关闭')
+            if request.user.pk not in {locked.creator_id,locked.assignee_id} and not locked.collaborators.filter(pk=request.user.pk).exists(): raise PermissionDenied('仅参与人可上传附件')
+            if Attachment.objects.filter(issue=locked).count()>=20: raise ValidationError('每个事项最多上传20个附件')
+            obj=Attachment.objects.create(issue=locked,uploader=request.user,name=upload.name,content=content,content_type=upload.content_type or 'application/octet-stream')
+            Event.objects.create(issue=locked,actor=request.user,action='attachment',content=obj.name)
         return Response({'id':obj.pk,'name':obj.name},status=201)
 
 class ConfigViewSet(viewsets.ModelViewSet):

@@ -601,7 +601,7 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mappe
                 'amount_by_currency': {k: f'{v:.4f}' for k, v in observed['amounts'][sku.pk].items()},
                 'refund_units': observed['refund_units'][sku.pk],
                 'refund_amount_by_currency': {k: f'{v:.4f}' for k, v in observed['refund_amounts'][sku.pk].items()},
-                'coverage_complete': observed['coverage_complete'], 'stores': observed['stores']})
+                'coverage_complete': observed['coverage_complete'], 'issues': sorted(unknown_codes), 'stores': observed['stores']})
         observed = sales[window_days]
         issues.extend(observed['issues'])
         if not observed['coverage_complete']:
@@ -619,13 +619,17 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mappe
         direct_unknown = bool((unknown_codes - {'bundle_composition_unverified'}).intersection(issues))
         total_demand = None if total_unknown else units
         daily = Decimal(units) / window_days
-        invalid_sales = any(code in issues for code in ('no_sales_facts', 'unmapped_sales_lines', 'collection_coverage_unproven',
+        invalid_sales = any(code in issues for code in ('unmapped_sales_lines',
             'invalid_store_timezone', 'unfinished_store_day', 'no_authorized_sales_store', 'bundle_composition_unverified'))
-        incomplete_supply = any(code in pipe['issues'] for code in ('warehouse_supply_scope_incomplete', 'unassigned_warehouse_supply',
-                                                                   'wms_receipt_overlap_unresolved'))
+        hard_inventory = any(code in issues for code in ('unmapped_inventory', 'ambiguous_inventory_aliases'))
+        hard_supply_issues = {'warehouse_supply_scope_incomplete', 'unassigned_warehouse_supply',
+            'wms_receipt_overlap_unresolved', 'dispatch_allocation_overallocated',
+            'shipment_receipt_overallocated', 'wms_allocation_requires_review'}
+        incomplete_supply = bool(hard_supply_issues & set(pipe.get('issues') or ())) or bool(pipe.get('received_awaiting_wms'))
         quantity = None
-        if not mapped_only and complete and not invalid_sales and pipe['authorized'] and not incomplete_supply:
-            quantity = suggestion_quantity(units, ratio, available,
+        if ((mapped_only or not relevant_unmapped) and not hard_inventory and not invalid_sales
+                and pipe['authorized'] and not incomplete_supply):
+            quantity = suggestion_quantity(units, ratio, available if available is not None else Decimal(0),
                 pipe['effective_incoming'] if include_in_transit else 0, pipe['open_operating_demand'],
                 target_days=target_days if ratio is None else None, window_days=window_days)
         if compact_product_details:
@@ -646,7 +650,10 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mappe
             blocking.append('supply_summary_not_authorized')
         if incomplete_supply:
             blocking.extend(code for code in pipe['issues'] if code in {
-                'warehouse_supply_scope_incomplete', 'unassigned_warehouse_supply', 'wms_receipt_overlap_unresolved'})
+                'warehouse_supply_scope_incomplete', 'unassigned_warehouse_supply', 'wms_receipt_overlap_unresolved',
+                'dispatch_allocation_overallocated', 'shipment_receipt_overallocated', 'wms_allocation_requires_review'})
+        if pipe.get('received_awaiting_wms'):
+            blocking.append('received_awaiting_wms')
         result.append({'sku_id': sku.pk, 'sku': sku.sku_code, 'legacy_sku_code': sku.legacy_sku_code or '',
             'product_name': sku.product_name, 'product_details': details,
             'image_preview_url': f'/api/internal/commerce/inventory/country-decisions/{country.pk}/skus/{sku.pk}/image/' if details.get('image_url') else '',

@@ -118,9 +118,28 @@ def collect_classifications(user, stores, orders, facts, *, native=False):
     for row in read(shipment_query, 'sales_order_id'):
         shipments[row.sales_order_id].append(row)
     sample_query = SampleFulfillment.objects.filter(tenant=user.tenant, store_id__in=stores, is_deleted=False).exclude(status='cancelled').exclude(sample_order_no='')
-    if native:sample_query = sample_query.only('id', 'store_id', 'sample_order_no')
-    for row in read(sample_query, 'sample_order_no', sorted({order.external_order_id for order in orders})):
-        samples[(row.store_id, row.sample_order_no.strip())].append(row)
+    order_keys = {(order.store_id, order.external_order_id) for order in orders}
+    # Match the legacy Python strip semantics, including tabs and Unicode space.
+    # A raw SQL IN before normalization drops historical padded identifiers.
+    def sample_rows():
+        if not native:
+            yield from sample_query.iterator(chunk_size=500)
+            return
+        from django.db.models import Q
+        previous = None
+        while True:
+            page = sample_query.only('id', 'store_id', 'sample_order_no', 'created_at').order_by('-created_at', '-pk')
+            if previous is not None:
+                page = page.filter(Q(created_at__lt=previous[0]) | Q(created_at=previous[0], pk__lt=previous[1]))
+            batch = list(page[:500])
+            if not batch:
+                break
+            yield from batch
+            previous = (batch[-1].created_at, batch[-1].pk)
+    for row in sample_rows():
+        key = (row.store_id, row.sample_order_no.strip())
+        if not native or key in order_keys:
+            samples[key].append(row)
     amounts = {}
     for f in facts:
         if f['kind'] == 'refund' and f['amount'] is not None:

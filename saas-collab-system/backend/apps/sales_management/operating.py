@@ -164,6 +164,36 @@ def _require_operating_sku(sku):
 
 
 DAILY_SNAPSHOT_BASIS = 'daily_replenishment_snapshot_v1'
+_HARD_SUPPLY_BLOCKS = {'warehouse_supply_scope_incomplete', 'unassigned_warehouse_supply',
+    'wms_receipt_overlap_unresolved', 'dispatch_allocation_overallocated',
+    'shipment_receipt_overallocated', 'wms_allocation_requires_review'}
+_SOURCE_ORDER_BLOCKS = _HARD_SUPPLY_BLOCKS | {'no_authorized_sales_store', 'unmapped_sales_lines',
+    'bundle_composition_unverified', 'invalid_store_timezone', 'unfinished_store_day',
+    'unmapped_inventory', 'ambiguous_inventory_aliases'}
+
+
+def _source_supply_blocked(row):
+    evidence = row.get('formula_evidence') or row.get('calculation_evidence') or {}
+    # Legacy 90-day snapshots lack hard-source evidence outside the main 30-day
+    # projection. They must be regenerated before being used for a new order.
+    if evidence.get('sales_model') == 'low_frequency' and (row.get('business_decision') or {}).get('window_issue_version') != 1:
+        return True
+    pipe = row.get('pipeline') or {}
+    issues = set(pipe.get('issues') or ()) | set(row.get('blocking_issues') or ()) | set(row.get('issues') or ())
+    return bool(row.get('source_blocked') or pipe.get('authorized') is False or pipe.get('received_awaiting_wms')
+        or _SOURCE_ORDER_BLOCKS.intersection(issues))
+
+
+
+def _legacy_snapshot_row_blocked(row, strategy=None):
+    if _source_supply_blocked(row):
+        return True
+    if (row.get('business_decision') or {}).get('window_issue_version') == 1:
+        return False
+    if strategy is None:
+        return True  # Unknown historical model cannot prove 90-day source eligibility.
+    policy = (strategy.sku_policies or {}).get(str(row['sku_id']), {})
+    return policy.get('mode', strategy.sales_model) == 'low_frequency'
 
 
 def _validate_daily_selection(actor, snapshot, payload, current=None):
@@ -176,8 +206,15 @@ def _validate_daily_selection(actor, snapshot, payload, current=None):
     ids = [row['sku_id'] for row in payload['lines']]
     if not 1 <= len(ids) <= 100 or len(ids) != len(set(ids)):
         raise ValidationError('每单请选择1–100个不重复的SKU。')
+    legacy_strategy = None
+    if any((row.get('business_decision') or {}).get('window_issue_version') != 1 for row in snapshot.get('lines', [])):
+        from apps.supply_chain.models import ReplenishmentStrategy
+        legacy_strategy = ReplenishmentStrategy.objects.filter(tenant_id=actor.tenant_id,
+            pk=snapshot.get('strategy_id'), country_id=payload['country_id'],
+            version=snapshot.get('strategy_version'), active=True).first()
     eligible = {row['sku_id'] for row in snapshot.get('lines', [])
-                if row.get('suggested_quantity') is not None and Decimal(str(row['suggested_quantity'])) > 0}
+                if not _legacy_snapshot_row_blocked(row, legacy_strategy) and row.get('suggested_quantity') is not None
+                and Decimal(str(row['suggested_quantity'])) > 0}
     if not set(ids) <= eligible:
         raise ValidationError('新增商品不在所选补货快照中，或没有正数建议，请返回补货建议重新选择。')
     country = _country(actor, payload['country_id'])
@@ -228,12 +265,16 @@ def _daily_snapshot_calculation(actor, payload, current=None):
     for row in selected.iterator(chunk_size=20):
         original = restore_snapshot_suggestion(row.payload)
         quantity = row.suggested_quantity
-        if quantity is None:
+        blocked = _legacy_snapshot_row_blocked(original, job.strategy)
+        if blocked:
+            quantity = None
+        elif quantity is None:
             reference = original.get('recognized_reference') or {}
             quantity = reference.get('quantity_reference') if reference.get('confirmed_deductions') else None
         lines.append({**{key: original[key] for key in fields if key in original},
             'sku_id': row.sku_id, 'sku': original.get('sku_code') or original.get('sku') or row.sku_code,
-            'suggested_quantity': quantity})
+            'suggested_quantity': quantity, 'source_blocked': blocked,
+            'pipeline': original.get('pipeline') or {}})
     params = {**(job.config.get('parameters') or {}), 'country_id': job.country_id, 'sku_ids': ids}
     snapshot = {'demand_basis': DAILY_SNAPSHOT_BASIS, 'source_job_id': str(job.pk),
         'source_kind': 'cycle', 'country_id': job.country_id, 'strategy_id': job.strategy_id,
@@ -260,7 +301,8 @@ def _validate_trusted_calculation(actor, calculation, payload, current=None):
                 pk=calculation.get('strategy_id'), country_id=payload['country_id'],
                 version=calculation.get('strategy_version'), active=True).exists():
             raise ValidationError('来源建议对应的策略已更新或停用，请重新选择来源数据。')
-    eligible = {row['sku_id'] for row in calculation.get('lines', []) if row.get('suggested_quantity') is not None}
+    eligible = {row['sku_id'] for row in calculation.get('lines', [])
+                if not _source_supply_blocked(row) and row.get('suggested_quantity') is not None}
     ids = {row['sku_id'] for row in payload['lines']}
     if not ids <= eligible:
         raise ValidationError('部分商品不在原单据依据中，请从补货建议重新选择。')
@@ -300,7 +342,8 @@ def _calculation(actor, payload, current=None):
     if preview.snapshot.get('permission_signature') != permission_signature(actor):
         raise PermissionDenied('计算依据的数据授权已变化，请重新生成建议。')
     _validate_trusted_calculation(actor, preview.snapshot, payload, current)
-    eligible = {r['sku_id'] for r in preview.snapshot['lines'] if r['suggested_quantity'] is not None}
+    eligible = {r['sku_id'] for r in preview.snapshot['lines']
+                if not _source_supply_blocked(r) and r['suggested_quantity'] is not None}
     if any(r['sku_id'] not in eligible for r in payload['lines']):
         raise ValidationError('选中商品缺少有效库存/销量依据；新货请采用手工订货。')
     return {**preview.snapshot, 'operator_reviewed_quantities': payload['lines'], 'preview_token': preview.token}

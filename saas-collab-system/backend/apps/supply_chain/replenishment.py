@@ -86,7 +86,8 @@ def recognized_reference(row, strategy, *, calculated, today, activity_start=Non
     units = {day: windows[str(day)].get('recognized_units') for day in days}
     warehouse_values = [Decimal(warehouse['available_qty']) for warehouse in row.get('warehouses', [])
                         if warehouse.get('available_qty') is not None]
-    stock = calculated['stock']
+    source_stock = row.get('available_stock')
+    stock = Decimal(str(source_stock)) if source_stock is not None else None
     if stock is None and warehouse_values:
         stock = sum(warehouse_values, Decimal(0))
     daily = calculated['daily']
@@ -124,10 +125,10 @@ def recognized_reference(row, strategy, *, calculated, today, activity_start=Non
             + (['在途到货日期或供应数据待核实'] if not calculated['supply_known'] else []),
         'confirmed_deductions': {key: str(value) if value is not None else None for key, value in deductions.items()},
         'excluded_unknown_eta': '0',
-        'quantity_reference': ceil(gap) if gap is not None else None,
+        'quantity_reference': ceil(gap) if gap is not None and daily is not None and daily > 0 else None,
         'scope_issues': sorted(issues & scope_codes),
         'item_issues': sorted(issues - scope_codes),
-        'has_observed_basis': daily is not None and stock is not None}
+        'has_observed_basis': daily is not None and daily > 0 and stock is not None}
 
 
 def target_stock_quantity(daily_sales, start_date, horizon_days, activity_start=None, activity_end=None, activity_factor=Decimal(1)):
@@ -196,31 +197,33 @@ def evaluate_replenishment_row(row, strategy, *, sales_end, activity_start=None,
         ratio = Fraction(Decimal(str(manual))) if manual is not None else None
     elif mode == 'low_frequency':
         ratio = Fraction(Decimal(str(windows['90'].get('recognized_units', windows['90'].get('units'))))) / 90 if 90 in daily_values else None
-    elif all(day in daily_values for day in days):
-        ratio = sum((Fraction(Decimal(str(windows[str(day)].get('recognized_units',
-                          windows[str(day)].get('units'))))) * Fraction(Decimal(str(weights[str(day)])))
+    else:
+        ratio = sum((Fraction(Decimal(str((windows.get(str(day), {}).get('recognized_units', windows.get(str(day), {}).get('units')) or 0)))) * Fraction(Decimal(str(weights[str(day)])))
                       / (day * 100) for day in days), Fraction(0))
     observed_days = (90,) if mode == 'low_frequency' else days
     sales_complete = mode == 'manual' or all(
         windows.get(str(day), {}).get('coverage_complete', True) for day in observed_days
     )
-    if ratio == 0 and not sales_complete:
-        ratio = None
+    # Missing inputs default only in calculation; source evidence stays unchanged.
+    ratio = ratio if ratio is not None else Fraction(0)
     daily = _as_decimal(ratio) if ratio is not None else None
-    blocking = set(row.get('blocking_issues') or ())
+    blocking = set(row.get('blocking_issues') or ()) | set(row.get('issues') or ())
+    for observed_day in observed_days:
+        blocking.update(windows.get(str(observed_day), {}).get('issues') or ())
     stock_complete = bool(row.get('inventory_complete')) and not blocking.intersection({
         'missing_inventory_snapshot', 'available_quantity_unverified', 'inventory_source_incomplete',
         'stale_inventory_snapshot', 'ambiguous_inventory_aliases', 'unmapped_inventory',
     })
-    stock = Decimal(str(row['available_stock'])) if stock_complete and row['available_stock'] is not None else None
+    source_stock = Decimal(str(row['available_stock'])) if row.get('available_stock') is not None else None
+    calculation_stock = source_stock if source_stock is not None else Decimal(0)
     pipe = row['pipeline']
-    supply_known = bool(pipe.get('authorized')) and not pipe.get('received_awaiting_wms') and not any(
-        issue in pipe.get('issues', ()) for issue in (
-            'warehouse_supply_scope_incomplete', 'unassigned_warehouse_supply',
-            'wms_receipt_overlap_unresolved', 'dispatch_allocation_overallocated',
-            'shipment_receipt_overallocated', 'wms_allocation_requires_review',
-        )
-    )
+    hard_supply_issues = {
+        'warehouse_supply_scope_incomplete', 'unassigned_warehouse_supply',
+        'wms_receipt_overlap_unresolved', 'dispatch_allocation_overallocated',
+        'shipment_receipt_overallocated', 'wms_allocation_requires_review',
+    }
+    supply_known = bool(pipe.get('authorized')) and not pipe.get('received_awaiting_wms') and not (
+        hard_supply_issues & set(pipe.get('issues') or ()))
     submitted = pipe.get('submitted_operating_demand') if pipe.get('authorized') else None
     draft = pipe.get('draft_reserved_demand') if pipe.get('authorized') else None
     submitted = Decimal(str(submitted)) if submitted is not None else None
@@ -238,12 +241,23 @@ def evaluate_replenishment_row(row, strategy, *, sales_end, activity_start=None,
         if legacy_quantity:
             shipments = [{'quantity': legacy_quantity, 'expected_date': None}]
     decision = calculate_decision(daily_sales=daily, daily_ratio=(ratio.numerator, ratio.denominator) if ratio is not None else None,
-        available_stock=stock if supply_known and sales_complete else None, production_unshipped=production, shipment_rows=shipments,
+        available_stock=calculation_stock if pipe.get('authorized') else None, production_unshipped=production, shipment_rows=shipments,
         submitted_demand=submitted, draft_reserved=draft, today=today, lead_days=lead,
         cycle_days=strategy.cycle_days, safety_days=safety,
         purchase_multiple=policy.get('purchase_multiple', 1), carton_quantity=policy.get('carton_quantity', 1),
         minimum_order=policy.get('minimum_order', 0), activity_start=event_start,
         activity_end=event_end, activity_factor=factor)
+    source_blocked = not supply_known or bool(blocking.intersection({
+        'no_authorized_sales_store', 'unmapped_sales_lines', 'bundle_composition_unverified',
+        'invalid_store_timezone', 'unfinished_store_day', 'unmapped_inventory', 'ambiguous_inventory_aliases',
+    }))
+    if source_blocked:
+        decision.update(category='unavailable', suggested_quantity=None, can_order=False)
+    decision['source_blocked'] = source_blocked
+    decision['window_issue_version'] = 1
+    decision['estimated'] = not (sales_complete and stock_complete and supply_known)
+    decision['calculation_rule'] = 'available-inputs-v1'
+    decision['defaulted_inputs'] = [name for name, missing in [('sales', not sales_complete), ('inventory', row.get('available_stock') is None), ('supply', not supply_known)] if missing]
     estimated_rows = []
     for shipment in shipments:
         raw = shipment.get('expected_date')
@@ -254,15 +268,17 @@ def evaluate_replenishment_row(row, strategy, *, sales_end, activity_start=None,
     if production:
         estimated_rows.append({'expected_date': today + timedelta(days=lead), 'quantity': production})
     timeline = forecast_timeline(daily=daily, daily_ratio=ratio,
-        today=today, lead_days=lead, cycle_days=strategy.cycle_days, safety_days=safety, stock=stock,
+        today=today, lead_days=lead, cycle_days=strategy.cycle_days, safety_days=safety, stock=calculation_stock,
         eta_rows=estimated_rows, activity_start=event_start, activity_end=event_end, activity_factor=factor)
     incoming = sum((Decimal(str(item['quantity'])) for item in shipments), Decimal(0)) + Decimal(str(production))
-    incoming = incoming if supply_known else None
-    gap = max(Decimal(0), timeline['target_stock'] - stock - incoming) if daily is not None and stock is not None and incoming is not None else None
+    incoming = incoming if pipe.get('authorized') else None
+    gap = max(Decimal(0), timeline['target_stock'] - calculation_stock - incoming) if daily is not None and incoming is not None else None
     return {'daily_ratio': (ratio.numerator, ratio.denominator) if ratio is not None else None, 'windows': windows, 'daily_values': daily_values, 'weights': weights, 'daily': daily,
-        'sales_unknown': daily is None, 'stock': stock, 'supply_known': supply_known,
+        'sales_unknown': daily is None, 'stock': source_stock if stock_complete else None, 'source_stock': source_stock, 'inventory_known': stock_complete and source_stock is not None,
+        'calculation_stock': calculation_stock, 'supply_known': supply_known,
         'submitted': submitted, 'draft_reserved': draft, 'incoming': incoming,
-        'timeline': timeline, 'gap': gap, 'suggested_quantity': decision['suggested_quantity'],
+        'timeline': timeline, 'gap': gap,
+        'suggested_quantity': decision['suggested_quantity'], 'source_blocked': source_blocked,
         'business_decision': decision, 'policy': policy, 'target_days': lead + strategy.cycle_days + safety}
 
 
@@ -564,7 +580,7 @@ class ReplenishmentReferences(ReadAPI):
             non_orderable = lifecycle == 'discontinued' or sales_status in {'paused', 'stopped', 'not_listed'}
             country_risk = classify_country_risk(on_hand_qty=(Decimal(str(row["on_hand_stock"])) if row.get("on_hand_stock") is not None else None),
                 in_transit_qty=Decimal(str(row.get("wms_in_transit_stock") or 0)),
-                available_qty=stock, inventory_known=stock is not None,
+                available_qty=calculated['source_stock'], inventory_known=calculated['inventory_known'],
                 inventory_type=sku.inventory_type, listing_states=listing_evidence.get(sku.pk, ()),
                 has_mapping=bool(listing_evidence.get(sku.pk)))
             row = {**row, 'country_inventory_status': country_risk}
@@ -577,7 +593,7 @@ class ReplenishmentReferences(ReadAPI):
                     {'purchase': 'replenish', 'no_sales': 'new_or_zero_sales',
                      'sufficient': 'normal', 'hidden': 'normal', 'unavailable': 'data_check'}.get(decision['category'], 'normal'))
             supply_action = _supply_action(timeline, suggested, calculated['business_decision'])
-            evidence = {'daily_sales_formula': '普通日均=A30；加权日均=A7×w7+A15×w15+A30×w30',
+            evidence = {'sales_model': calculated['policy'].get('mode', strategy.sales_model), 'daily_sales_formula': '普通日均=A30；加权日均=A7×w7+A15×w15+A30×w30',
                 'sales': {str(d): {'units': windows[str(d)].get('recognized_units', windows[str(d)]['units']), 'daily_units': str(daily_values[d]) if d in daily_values else None, 'weight': weights[str(d)]} for d in (7, 15, 30)},
                 'target_days': str(calculated['target_days']), 'target_stock': str(target_stock) if target_stock is not None else None,
                 'reminder_stock': str(timeline['reminder_stock']) if timeline['reminder_stock'] is not None else None,
@@ -585,7 +601,7 @@ class ReplenishmentReferences(ReadAPI):
                 'first_shortage_date': timeline['first_shortage_date'], 'supply_action': supply_action,
                 'needs_replenishment': timeline['needs_replenishment'],
                 'arrival_gap': timeline['arrival_gap'],
-                'available_stock': str(stock) if stock is not None else None, 'valid_incoming': str(incoming) if incoming is not None else None,
+                'available_stock': str(row.get('available_stock')) if row.get('available_stock') is not None else None, 'valid_incoming': str(incoming) if incoming is not None else None,
                 'submitted_demand': str(submitted) if submitted is not None else None, 'draft_reserved_demand': str(draft_reserved) if draft_reserved is not None else None,
                 'demand_horizon': pipe.get('demand_horizon'),
                 'open_demand_basis': '覆盖期内日期重叠的未转采购需求；未填写需求日期的需求保守计入。',
@@ -594,11 +610,11 @@ class ReplenishmentReferences(ReadAPI):
                     ('可提前备货参考' if suggested and suggested > 0 else '未触发')),
                 'replenishment_gap': str(gap) if gap is not None else None, 'suggested_quantity': suggested,
                 'formula': 'ceil(max(0, target_stock - available_stock - valid_incoming - submitted_demand - draft_reserved_demand))'}
-            value = {**row, 'available_stock': str(stock) if stock is not None else None, 'business_decision': calculated['business_decision'], 'sales_archive_issues': archive_issues, 'country_spu_summary': spu_summaries.get(sku.spu_id), 'recognized_reference': recognized_reference(row, strategy, calculated=calculated, today=today, activity_start=start, activity_end=end, activity_factor=factor), 'sku_code': row['sku'], 'forecast_daily_sales': str(forecast) if forecast is not None else None,
+            value = {**row, 'available_stock': str(row.get('available_stock')) if row.get('available_stock') is not None else None, 'business_decision': calculated['business_decision'], 'stock_balance_quantity': calculated['business_decision'].get('stock_balance_quantity'), 'sales_archive_issues': archive_issues, 'country_spu_summary': spu_summaries.get(sku.spu_id), 'recognized_reference': recognized_reference(row, strategy, calculated=calculated, today=today, activity_start=start, activity_end=end, activity_factor=factor), 'sku_code': row['sku'], 'forecast_daily_sales': str(forecast) if forecast is not None else None,
                 'sales_trend_rate': (str((daily_values[7] - daily_values[30]) / daily_values[30]) if not sales_unknown and 7 in daily_values and daily_values.get(30, 0) > 0 else None),
                 'on_hand_days': str(on_hand_days) if on_hand_days is not None else None,
                 'supply_cover_days': str(cover_days) if cover_days is not None else None,
-                'suggested_quantity': suggested, 'replenishment_gap': str(gap) if gap is not None else None,
+                'suggested_quantity': suggested, 'source_blocked': calculated['source_blocked'], 'replenishment_gap': str(gap) if gap is not None else None,
                 'submitted_demand': str(submitted) if submitted is not None else None,
                 'draft_reserved_demand': str(draft_reserved) if draft_reserved is not None else None,
                 'next_eta': eta_rows[0] if eta_rows else None, 'risk_level': 'manual_review' if non_orderable else risk,
@@ -670,7 +686,7 @@ def _order_strategy_lines(actor, country, strategy, *, sku_ids, sales_end, sourc
         non_orderable = sku.spu.lifecycle_status == 'discontinued' or sku.spu.sales_status in {'paused', 'stopped', 'not_listed'}
         country_risk = classify_country_risk(on_hand_qty=(Decimal(str(row["on_hand_stock"])) if row.get("on_hand_stock") is not None else None),
                 in_transit_qty=Decimal(str(row.get("wms_in_transit_stock") or 0)),
-                available_qty=stock, inventory_known=stock is not None,
+                available_qty=calculated['source_stock'], inventory_known=calculated['inventory_known'],
             inventory_type=sku.inventory_type, listing_states=listing_evidence.get(sku.pk, ()),
             has_mapping=bool(listing_evidence.get(sku.pk)))
         row = {**row, 'country_inventory_status': country_risk}
@@ -690,7 +706,7 @@ def _order_strategy_lines(actor, country, strategy, *, sku_ids, sales_end, sourc
             'target_incoming': str(timeline['target_incoming']) if timeline['target_incoming'] is not None else None,
             'first_shortage_date': timeline['first_shortage_date'], 'supply_action': supply_action,
             'arrival_gap': timeline['arrival_gap'],
-            'available_stock': str(stock) if stock is not None else None,
+            'available_stock': str(row.get('available_stock')) if row.get('available_stock') is not None else None,
             'valid_incoming': str(incoming) if incoming is not None else None,
             'submitted_demand': str(submitted) if submitted is not None else None,
             'draft_reserved_demand': str(draft) if draft is not None else None,
@@ -700,10 +716,10 @@ def _order_strategy_lines(actor, country, strategy, *, sku_ids, sales_end, sourc
             'recommendation_state': ('提醒线已触发' if timeline['needs_replenishment'] else
                 ('可提前备货参考' if quantity and quantity > 0 else '未触发')),
             'suggested_quantity': quantity, 'formula': 'ceil(max(0,目标备货－可售库存－采购未发货－发货在途－已提交需求－草稿预留))，再按采购倍数、装箱数和起订量取整'}
-        line = {'business_decision': calculated['business_decision'], 'sales_archive_issues': archive_issues, 'country_spu_summary': spu_summaries.get(sku.spu_id), 'recognized_reference': recognized_reference(row, strategy, calculated=calculated, today=today, activity_start=event_start, activity_end=event_end, activity_factor=factor), 'country_inventory_status': country_risk, 'sku_id': row['sku_id'], 'sku': row['sku'], 'sku_code': row['sku'],
+        line = {'business_decision': calculated['business_decision'], 'stock_balance_quantity': calculated['business_decision'].get('stock_balance_quantity'), 'sales_archive_issues': archive_issues, 'country_spu_summary': spu_summaries.get(sku.spu_id), 'recognized_reference': recognized_reference(row, strategy, calculated=calculated, today=today, activity_start=event_start, activity_end=event_end, activity_factor=factor), 'country_inventory_status': country_risk, 'sku_id': row['sku_id'], 'sku': row['sku'], 'sku_code': row['sku'],
             'legacy_sku_code': row.get('legacy_sku_code', ''), 'product_name': row.get('product_name', ''),
             'product_details': row.get('product_details', {}), 'image_preview_url': row.get('image_preview_url', ''),
-            'available_stock': str(stock) if stock is not None else None,
+            'available_stock': str(row.get('available_stock')) if row.get('available_stock') is not None else None,
             'forecast_daily_sales': str(daily) if daily is not None else None,
             'sales_windows': row['sales_windows'], 'pipeline': pipe,
             'direct_sales_quantity': row.get('direct_sales_quantity'),
@@ -713,7 +729,7 @@ def _order_strategy_lines(actor, country, strategy, *, sku_ids, sales_end, sourc
             'submitted_demand': str(submitted) if submitted is not None else None,
             'draft_reserved_demand': str(draft) if draft is not None else None,
             'valid_incoming': str(incoming) if incoming is not None else None,
-            'suggested_quantity': quantity, 'replenishment_gap': str(gap) if gap is not None else None,
+            'suggested_quantity': quantity, 'source_blocked': calculated['source_blocked'], 'replenishment_gap': str(gap) if gap is not None else None,
             'needs_replenishment': timeline['needs_replenishment'], 'supply_action': supply_action,
             'recommendation_state': ('提醒线已触发' if timeline['needs_replenishment'] else
                 ('可提前备货参考' if quantity and quantity > 0 else '未触发')),
