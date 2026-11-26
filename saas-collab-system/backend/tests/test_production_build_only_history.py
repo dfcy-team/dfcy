@@ -177,6 +177,15 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
     for path in sorted(controller_backend.glob("apps/*/migrations/*.py")):
         relative = path.relative_to(controller_backend).as_posix()
         if relative in {
+            # V543-V546 new migration files postdate this frozen archive.
+            "apps/finance/migrations/0018_alter_warehousebillformatrule_is_active.py",
+            "apps/finance/migrations/0019_financesummaryautomationcheck.py",
+            "apps/finance/migrations/0020_summary_checkpoint_covering.py",
+            "apps/issue_tracking/migrations/0001_initial.py",
+            "apps/issue_tracking/migrations/0002_configurationaudit.py",
+            "apps/issue_tracking/migrations/0003_menurule_scope.py",
+            "apps/issue_tracking/migrations/__init__.py",
+
             "apps/sales_management/migrations/0013_warehouse_lookup_requested_index.py",
             "apps/influencers/migrations/0052_tiktok_product_performance_vm.py",
             "apps/influencers/migrations/0053_tiktok_video_evidence_oss.py",

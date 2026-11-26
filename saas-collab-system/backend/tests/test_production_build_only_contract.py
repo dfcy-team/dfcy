@@ -72,6 +72,15 @@ def test_archive_migrations_cannot_reuse_registered_release():
     archived_migration_sha = "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838"
     root = Path(__file__).resolve().parents[1]
     unregistered_migrations = {
+        # V543-V546 new migration files postdate this frozen archive.
+        "apps/finance/migrations/0018_alter_warehousebillformatrule_is_active.py",
+        "apps/finance/migrations/0019_financesummaryautomationcheck.py",
+        "apps/finance/migrations/0020_summary_checkpoint_covering.py",
+        "apps/issue_tracking/migrations/0001_initial.py",
+        "apps/issue_tracking/migrations/0002_configurationaudit.py",
+        "apps/issue_tracking/migrations/0003_menurule_scope.py",
+        "apps/issue_tracking/migrations/__init__.py",
+
         "apps/sales_management/migrations/0013_warehouse_lookup_requested_index.py",
         "apps/influencers/migrations/0052_tiktok_product_performance_vm.py",
         "apps/influencers/migrations/0053_tiktok_video_evidence_oss.py",

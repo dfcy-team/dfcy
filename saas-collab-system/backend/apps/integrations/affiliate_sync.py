@@ -486,12 +486,16 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
     def after_page_persist(self, sync_job, page, results):
         self._fence(sync_job)
         plan = self.scope["affiliate_plan"]
-        pending, _ = SyncCursor.objects.select_for_update().get_or_create(tenant_id=sync_job.tenant_id, sync_job=sync_job, cursor_key="affiliate-identity-pending", defaults={"cursor_value": "", "detail_state": {}})
         scope_binding = f"{plan["store_id"]}:{plan["site"]}"
-        if pending.detail_state and pending.cursor_value != scope_binding:
-            raise DatasetError("affiliate_pending_scope_changed")
-        state = dict(pending.detail_state or {})
-        pending.cursor_value = scope_binding
+        pending = SyncCursor.objects.select_for_update().filter(tenant_id=sync_job.tenant_id, sync_job=sync_job, cursor_key="affiliate-identity-pending").first()
+        if pending is None and self.page_quarantine:
+            pending = SyncCursor.objects.create(tenant_id=sync_job.tenant_id, sync_job=sync_job,
+                cursor_key="affiliate-identity-pending", cursor_value=scope_binding, detail_state={})
+        state = dict(pending.detail_state or {}) if pending else {}
+        if pending:
+            if state and pending.cursor_value != scope_binding:
+                raise DatasetError("affiliate_pending_scope_changed")
+            pending.cursor_value = scope_binding
         day_state = dict(state.get(page["day"], {}))
         quarantined = {item["key"]: {**item, "raw_ref": str(getattr(self, "page_raw_ref", "")),
             "raw_envelope_id": getattr(self, "page_raw_envelope_id", None)} for item in self.page_quarantine}
@@ -505,8 +509,9 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
             state.pop(page["day"], None)
         if len(canonical_bytes(state)) > 131072:
             raise DatasetError("affiliate_quarantine_capacity_exceeded")
-        pending.detail_state = state
-        pending.save(update_fields=["cursor_value", "detail_state", "updated_at"])
+        if pending:
+            pending.detail_state = state
+            pending.save(update_fields=["cursor_value", "detail_state", "updated_at"])
         self.has_pending_identity = bool(state)
         self.scope_pending_identity = any(day in state for day in plan["days"])
         self.page_quarantine_audit = list(quarantined.values())

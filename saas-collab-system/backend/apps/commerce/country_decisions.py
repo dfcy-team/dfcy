@@ -619,15 +619,16 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mappe
         direct_unknown = bool((unknown_codes - {'bundle_composition_unverified'}).intersection(issues))
         total_demand = None if total_unknown else units
         daily = Decimal(units) / window_days
-        invalid_sales = any(code in issues for code in ('unmapped_sales_lines',
-            'invalid_store_timezone', 'unfinished_store_day', 'no_authorized_sales_store', 'bundle_composition_unverified'))
+        invalid_sales = any(code in issues for code in ('no_sales_facts', 'collection_coverage_unproven',
+            'unmapped_sales_lines', 'invalid_store_timezone', 'unfinished_store_day',
+            'no_authorized_sales_store', 'bundle_composition_unverified'))
         hard_inventory = any(code in issues for code in ('unmapped_inventory', 'ambiguous_inventory_aliases'))
         hard_supply_issues = {'warehouse_supply_scope_incomplete', 'unassigned_warehouse_supply',
             'wms_receipt_overlap_unresolved', 'dispatch_allocation_overallocated',
             'shipment_receipt_overallocated', 'wms_allocation_requires_review'}
         incomplete_supply = bool(hard_supply_issues & set(pipe.get('issues') or ())) or bool(pipe.get('received_awaiting_wms'))
         quantity = None
-        if ((mapped_only or not relevant_unmapped) and not hard_inventory and not invalid_sales
+        if (complete and (mapped_only or not relevant_unmapped) and not hard_inventory and not invalid_sales
                 and pipe['authorized'] and not incomplete_supply):
             quantity = suggestion_quantity(units, ratio, available if available is not None else Decimal(0),
                 pipe['effective_incoming'] if include_in_transit else 0, pipe['open_operating_demand'],
