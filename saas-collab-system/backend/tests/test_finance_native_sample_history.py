@@ -28,7 +28,8 @@ def test_native_sample_keyset_pages_are_sql_bounded_and_keep_legacy_tie_order(co
     with CaptureQueriesContext(connection) as captured:
         native=collect_classifications(user,{store.pk:store},[order],[],native=True)
     assert native==legacy
-    queries=[q['sql'] for q in captured if 'FROM "influencers_samplefulfillment"' in q['sql']]
+    quoted_table=connection.ops.quote_name(SampleFulfillment._meta.db_table)
+    queries=[q['sql'] for q in captured if ('FROM '+quoted_table) in q['sql']]
     assert len(queries)==3 and all('LIMIT 500' in q and 'OFFSET' not in q for q in queries)
     assert len(native[(store.pk,'page-order')]['evidence']['sample_ids'])==501
 
