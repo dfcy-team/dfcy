@@ -52816,7 +52816,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "f53e696dd7b634d15d0919f61249067fc6be3e9ba1b146f71a3de21213312e1e"
+      "guard_source_sha256": "b0f3a92dceb7b104a5038e584a816978841f4b744a9312dde2e4cbc778c50fc6"
     },
     {
       "route": "api/internal/supply-chain/v2/replenishment-daily/<uuid:pk>/rows/",
@@ -52829,7 +52829,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "f53e696dd7b634d15d0919f61249067fc6be3e9ba1b146f71a3de21213312e1e"
+      "guard_source_sha256": "b0f3a92dceb7b104a5038e584a816978841f4b744a9312dde2e4cbc778c50fc6"
     },
     {
       "route": "api/internal/supply-chain/v2/replenishment-daily/<uuid:pk>/rows/",
@@ -52943,7 +52943,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "f53e696dd7b634d15d0919f61249067fc6be3e9ba1b146f71a3de21213312e1e"
+      "guard_source_sha256": "b0f3a92dceb7b104a5038e584a816978841f4b744a9312dde2e4cbc778c50fc6"
     },
     {
       "route": "api/internal/supply-chain/v2/replenishment-jobs/<uuid:pk>/rows/",
@@ -52956,7 +52956,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "f53e696dd7b634d15d0919f61249067fc6be3e9ba1b146f71a3de21213312e1e"
+      "guard_source_sha256": "b0f3a92dceb7b104a5038e584a816978841f4b744a9312dde2e4cbc778c50fc6"
     },
     {
       "route": "api/internal/supply-chain/v2/replenishment-jobs/<uuid:pk>/rows/",
@@ -58889,5 +58889,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "79d052de47d83fd0ed46e5b3817475efdb68a50e986ae9a1844c6e8ca3e9a214"
+  "catalog_hash": "dcbd028b81c78d48ad17d25e916b5998c5179b4ed3a2de479069958ea8123ea0"
 }

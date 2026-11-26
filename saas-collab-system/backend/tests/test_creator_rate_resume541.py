@@ -31,7 +31,7 @@ class CreatorRateResumeCandidateTests(unittest.TestCase):
     def test_rate_yield_does_not_claim_page_commit_and_normal_yield_does(self):
         class Job:
             status = "running"
-            lock_token = "token"
+            lock_token = "test-only-lease"
             lock_expires_at = object()
             lock_heartbeat_at = None
             def save(self, **kwargs): pass

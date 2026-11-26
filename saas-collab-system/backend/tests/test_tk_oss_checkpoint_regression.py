@@ -20,13 +20,13 @@ def storage_settings(tmp_path):
 def test_external_duplicate_and_failed_get_preserve_cursor(lazada_context,tmp_path):
     _,store,_=lazada_context;batch=running_batch(store);body={'videos':[{'id':'one'}]}
     with storage_settings(tmp_path):
-        first=receipt(batch,1,body,checkpoint={'cursor':'one'},lease_token='valid-token')
+        first=receipt(batch,1,body,checkpoint={'cursor':'one'},lease_token='test-only-lease')
         assert first.payload=={}
-        duplicate=receipt(batch,1,body,checkpoint={'cursor':'two'},lease_token='valid-token')
+        duplicate=receipt(batch,1,body,checkpoint={'cursor':'two'},lease_token='test-only-lease')
         assert duplicate.pk==first.pk
         with patch.object(storages['raw_oss'],'open',side_effect=OSError('injected GET failure')):
             with pytest.raises(Exception):
-                receipt(batch,1,body,checkpoint={'cursor':'bad'},lease_token='valid-token')
+                receipt(batch,1,body,checkpoint={'cursor':'bad'},lease_token='test-only-lease')
         batch.refresh_from_db();assert json.loads(batch.request_cursor)=={'cursor':'two'}
         assert TikTokVideoSyncEvidence.objects.filter(batch=batch).count()==1
 
@@ -44,7 +44,7 @@ def test_cursor_retry_reuses_verified_object(lazada_context,tmp_path,error_code)
     with storage_settings(tmp_path):
         storage=storages['raw_oss']
         with patch.object(storage,'save',wraps=storage.save) as put,patch.object(storage,'open',wraps=storage.open) as get,patch.object(TikTokVideoSyncBatch,'save',save),patch('time.sleep'):
-            receipt(batch,1,{'videos':[1]},checkpoint={'cursor':'ok'},lease_token='valid-token')
+            receipt(batch,1,{'videos':[1]},checkpoint={'cursor':'ok'},lease_token='test-only-lease')
         assert put.call_count==1 and get.call_count==1
     batch.refresh_from_db();assert json.loads(batch.request_cursor)=={'cursor':'ok'}
     assert TikTokVideoSyncEvidence.objects.filter(batch=batch).count()==1
@@ -54,6 +54,6 @@ def test_cursor_retry_reuses_verified_object(lazada_context,tmp_path,error_code)
 def test_cursor_failure_rolls_back_new_evidence(lazada_context,tmp_path):
     _,store,_=lazada_context;batch=running_batch(store)
     with storage_settings(tmp_path),patch.object(TikTokVideoSyncBatch,'save',side_effect=RuntimeError('cursor failure')):
-        with pytest.raises(RuntimeError):receipt(batch,1,{'videos':[1]},checkpoint={'cursor':'bad'},lease_token='valid-token')
+        with pytest.raises(RuntimeError):receipt(batch,1,{'videos':[1]},checkpoint={'cursor':'bad'},lease_token='test-only-lease')
     batch.refresh_from_db();assert batch.request_cursor==''
     assert not TikTokVideoSyncEvidence.objects.filter(batch=batch).exists()

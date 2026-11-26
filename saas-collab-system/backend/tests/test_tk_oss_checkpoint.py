@@ -15,7 +15,7 @@ def running_batch(store):
         tenant=store.tenant, store=store, window_start=date(2026, 11, 6),
         window_end=date(2026, 11, 7), api_version='test',
         idempotency_key='checkpoint-test', status='running', attempt_count=1,
-        lease_token='valid-token', lease_expires_at=timezone.now() + timedelta(minutes=5),
+        lease_token='test-only-lease', lease_expires_at=timezone.now() + timedelta(minutes=5),
         heartbeat_at=timezone.now(),
     )
 
@@ -28,7 +28,7 @@ def test_checkpoint_receipt_requires_live_lease(lazada_context):
     batch.heartbeat_at = timezone.now() - timedelta(minutes=2)
     batch.save(update_fields=['lease_expires_at','heartbeat_at'])
     with pytest.raises(DatasetError, match='video_lease_lost'):
-        receipt(batch, 1, {'videos': []}, checkpoint={'cursor': 'cursor-1'}, lease_token='valid-token')
+        receipt(batch, 1, {'videos': []}, checkpoint={'cursor': 'cursor-1'}, lease_token='test-only-lease')
     batch.refresh_from_db()
     assert batch.request_cursor == ''
     assert not TikTokVideoSyncEvidence.objects.filter(batch=batch).exists()
@@ -39,10 +39,10 @@ def test_existing_and_new_receipts_commit_checkpoint(lazada_context):
     _, store, _ = lazada_context
     batch = running_batch(store)
     payload = {'videos': [{'id': 'v1'}]}
-    first = receipt(batch, 1, payload, checkpoint={'cursor': 'cursor-1'}, lease_token='valid-token')
+    first = receipt(batch, 1, payload, checkpoint={'cursor': 'cursor-1'}, lease_token='test-only-lease')
     batch.refresh_from_db()
     assert json.loads(batch.request_cursor) == {'cursor': 'cursor-1'}
-    again = receipt(batch, 1, payload, checkpoint={'cursor': 'cursor-2'}, lease_token='valid-token')
+    again = receipt(batch, 1, payload, checkpoint={'cursor': 'cursor-2'}, lease_token='test-only-lease')
     batch.refresh_from_db()
     assert again.pk == first.pk
     assert batch.request_cursor == '{"cursor":"cursor-2"}'
@@ -52,9 +52,9 @@ def test_existing_and_new_receipts_commit_checkpoint(lazada_context):
 def test_body_verification_failure_does_not_advance_checkpoint(lazada_context):
     _, store, _ = lazada_context
     batch = running_batch(store)
-    receipt(batch, 1, {'videos': [1]}, checkpoint={'cursor': 'cursor-1'}, lease_token='valid-token')
+    receipt(batch, 1, {'videos': [1]}, checkpoint={'cursor': 'cursor-1'}, lease_token='test-only-lease')
     with pytest.raises(DatasetError):
-        receipt(batch, 1, {'videos': [2]}, checkpoint={'cursor': 'cursor-bad'}, lease_token='valid-token')
+        receipt(batch, 1, {'videos': [2]}, checkpoint={'cursor': 'cursor-bad'}, lease_token='test-only-lease')
     batch.refresh_from_db()
     assert batch.request_cursor == '{"cursor":"cursor-1"}'
 
@@ -74,6 +74,6 @@ def test_changed_representation_is_rejected_without_checkpoint(lazada_context):
 
     with patch.object(QuerySet, 'get_or_create', autospec=True, side_effect=insert_then_change):
         with pytest.raises(DatasetError):
-            receipt(batch, 1, {'videos': [1]}, checkpoint={'cursor': 'cursor-bad'}, lease_token='valid-token')
+            receipt(batch, 1, {'videos': [1]}, checkpoint={'cursor': 'cursor-bad'}, lease_token='test-only-lease')
     batch.refresh_from_db()
     assert batch.request_cursor == ''
