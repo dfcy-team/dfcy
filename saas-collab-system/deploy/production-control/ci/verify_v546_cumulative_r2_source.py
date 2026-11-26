@@ -15,7 +15,7 @@ TREE = "44a2eb5a94c9549da6e330ec57fb132ed5d4d5f1"
 PARENT = "2c1f39c79e08ec6a54d6dff968f4955bc8921405"
 MIGRATION = "c74f93cc49ee050b36d00ab7ec9aca305b6e17bff6d069cc46faea2464b9f0ff"
 IDENTITY = "v546-cumulative-r2-source-identity.json"
-REHEARSAL_SHA = "9f2a5b363d185369673ee848cda3619791299f35da9f714a7162424e810026d5"
+REHEARSAL_SHA = "a89f288fc1aa8cc6cfb3a384c90d7f3afc3fa031d9ad72377b44df736f3f0cef"
 if not __debug__: raise RuntimeError("Optimized Python disables release gates")
 
 
@@ -31,7 +31,7 @@ def validate_phase_summary(summary, source, tree, operation):
     def check(condition, message):
         if not condition:raise RuntimeError('actual MySQL test phase: '+message)
     check(isinstance(summary,dict),'missing summary')
-    check(re.fullmatch(r'saas-v546-rehearsal-r12-'+source[:8]+r'-573415a3-[0-9a-f]{10}',operation) is not None,'operation format')
+    check(re.fullmatch(r'saas-v546-rehearsal-r13-'+source[:8]+r'-d9a85c4c-[0-9a-f]{10}',operation) is not None,'operation format')
     check(summary.get('status')=='PASS' and summary.get('source_sha')==source and summary.get('source_tree')==tree and summary.get('operation')==operation,'source/tree/operation binding')
     check(summary.get('database')=='test_vm546_acceptance' and summary.get('required_modules')==EXPECTED_TEST_MODULES and summary.get('required_mysql_cases')==EXPECTED_MYSQL_CASES,'exact database/test inventory')
     check(summary.get('execution_phase')=='before_restore_on_private_test_schema' and all(summary.get(k) is True for k in ('modules_run_separately','fixture_databases_dropped','clone_db_empty_before_restore')),'phase scope')
@@ -45,7 +45,7 @@ def validate_phase_summary(summary, source, tree, operation):
             totals[key]+=value
         cases=entry.get('mysql_cases');expected=EXPECTED_MYSQL_CASES if module=='test_finance_mysql_concurrency.py' else []
         check(isinstance(cases,list) and sorted(cases)==expected,'four exact unique MySQL cases')
-    check(totals['tests']>=61 and all(type(summary.get(k)) is int and summary[k]==v for k,v in totals.items()),'aggregate counts')
+    check(totals['tests']==256 and all(type(summary.get(k)) is int and summary[k]==v for k,v in totals.items()),'aggregate counts')
     return True
 
 def git(*args: str) -> str:
@@ -105,7 +105,7 @@ require({p for p in added_paths if p.endswith('/__init__.py')}=={'saas-collab-sy
 require(identity['migration']['sha256']==MIGRATION,'migration identity mismatch')
 
 baseline=identity['baseline']
-require(baseline=={'sha256':'33ddb8c54180f26380d852acb5c5b6cd4ba420e864168f634497fd05393936d9','source_sha':PARENT,'version':'2.44.542','tables':423,'migration_nodes':544,'protected_tables':420,'protected_rows':3577537,'custom_permission_rows':473},'actual V542 baseline mismatch')
+require(baseline=={'sha256':'1ade0d3f496f895e13aaad3fc8f6982635712aea35cc831f02a53fd45b9d419d','source_sha':PARENT,'version':'2.44.542','tables':423,'migration_nodes':544,'protected_tables':420,'protected_rows':3577537,'custom_permission_rows':473},'actual V542 baseline mismatch')
 require(os.environ.get('EXPECTED_BASELINE_SHA')==baseline['sha256'],'requested baseline mismatch')
 require(identity['metadata']=={'django_migrations':6,'django_content_type':8,'auth_permission':32},'metadata increment mismatch')
 require(identity['scope']=={'included':[543,544,545,546],'cloud_only_543_sales_included':False,'code_only':True,'business_acceptance':'deferred'},'scope mismatch')
@@ -152,7 +152,7 @@ require(sha(raw) == capture["artifact_sha256"], "rehearsal receipt SHA mismatch"
 receipt = json.loads(raw.decode("utf-8"))
 require(sha(raw)==REHEARSAL_SHA,'independently pinned actual rehearsal receipt mismatch')
 require(receipt.get('status')=='PASS' and receipt.get('source_sha')==SOURCE,'actual rehearsal source mismatch')
-require(receipt['source_archive_sha256']=='f3d44e8d5bb83fb91efeb61ebb4ea79d6bffebc00919ae411ec71bd0a0059821' and receipt['backup_sha256']=='573415a3c63f852363ef3414e3b29143acbcb98690badddd3bbcd4524c0a568a','archive/backup binding mismatch')
+require(receipt['source_archive_sha256']=='f3d44e8d5bb83fb91efeb61ebb4ea79d6bffebc00919ae411ec71bd0a0059821' and receipt['backup_sha256']=='d9a85c4c2936039d4eadf6e0409f1c3cca5f013e69785e21b9662ad9229135b6','archive/backup binding mismatch')
 require(receipt['approved_checkpoint_sha256']==baseline['sha256'],'checkpoint mismatch')
 require(all(receipt.get(k) is True for k in ['cleanup_verified','production_app_unchanged','production_roles_unchanged','protected_state_unchanged','test_artifacts_retained']) and receipt['production_roles_verified']==14,'isolation/production preservation failed')
 require(receipt['isolation_checks']['db_network']=='none' and receipt['isolation_checks']['probe_shares_db_network'] is True,'network isolation failed')
@@ -167,7 +167,7 @@ ct=probe['contention'];require(ct['status']=='PASS' and ct['connections']==2 and
 tests=probe['tests'];require(tests['tests']>0 and all(tests[k]==0 for k in ['failures','errors','skipped']) and 'test_finance_mysql_concurrency.py' in tests['required_modules'],'actual MySQL tests missing')
 require(receipt.get('restore_started') is True and receipt.get('restore_completed') is True and receipt['isolation_checks'].get('tests_completed_before_restore') is True,'actual tests-before-restore stages missing')
 require(tests==receipt.get('test_phase_receipt') and tests.get('execution_phase')=='before_restore_on_private_test_schema' and all(tests.get(k) is True for k in ['modules_run_separately','fixture_databases_dropped','clone_db_empty_before_restore']),'phase-isolated MySQL proof missing')
-require(len(tests.get('module_reports',[]))==len(tests.get('required_modules',[]))==26 and len(tests.get('required_mysql_cases',[]))==4 and tests['tests']>=61,'all26 modules/four MySQL cases missing')
+require(len(tests.get('module_reports',[]))==len(tests.get('required_modules',[]))==26 and len(tests.get('required_mysql_cases',[]))==4 and tests['tests']==256,'all26 modules/four MySQL cases missing')
 validate_phase_summary(tests,SOURCE,TREE,receipt['operation'])
 
 
