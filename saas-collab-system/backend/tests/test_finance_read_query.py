@@ -323,12 +323,14 @@ def test_native_historical_title_keeps_first_item_across_order_read_batches(cont
     store = StoreMaster.objects.get(pk=dataset.metadata['store_ids'][0])
     run = create_run(user.tenant, 'sales_order', 'historical-title-batches')
     stamp = datetime(2026, 8, 1, tzinfo=timezone.utc)
-    orders = SalesOrder.objects.bulk_create([SalesOrder(tenant=user.tenant, platform=store.platform, store=store,
+    SalesOrder.objects.bulk_create([SalesOrder(tenant=user.tenant, platform=store.platform, store=store,
         authorization=run.sync_job.integration_config, source_run=run, external_order_id='title-order-'+str(i),
         raw_status='completed', normalized_status='completed', status_mapping_version='test',
         created_at_utc=stamp, updated_at_utc=stamp, business_date='2026-08-01', currency=store.currency,
         payload_hash='e'*64) for i in range(501)])
-    for order, title in [(orders[-1], 'Earlier source title'), (orders[0], 'Later source title')]:
+    title_orders = SalesOrder.objects.filter(tenant=user.tenant, store=store, source_run=run)
+    for external_id, title in [('title-order-500', 'Earlier source title'), ('title-order-0', 'Later source title')]:
+        order = title_orders.get(external_order_id=external_id)
         SalesOrderItem.objects.create(sales_order=order, external_line_id='title-line', platform_product_id='missing-title-product',
             item_name_snapshot=title, quantity=1, currency=store.currency)
     scope = {'stores': [store.pk], 'from': '2026-09-01', 'to': '2026-09-30'}
