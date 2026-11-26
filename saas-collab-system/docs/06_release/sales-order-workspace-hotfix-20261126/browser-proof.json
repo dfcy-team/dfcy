@@ -1,0 +1,19 @@
+{
+  "status": "PASS",
+  "scope": "actual candidate Vue components with synthetic APIs, not a production login session",
+  "cards": true,
+  "product_expand": true,
+  "detail_error_and_retry": true,
+  "degraded_demo_rejected": true,
+  "close_reopen_stale_response": true,
+  "next_order": true,
+  "warehouse": true,
+  "log_paging_deduplicated": true,
+  "cards_stress": 20,
+  "detail_cycles": 5,
+  "js_heap_after_gc_mib_before_cycles": 15.5,
+  "js_heap_after_gc_mib_after_cycles": 17.75,
+  "memory_scope": "post-GC JavaScript heap only, not full browser process peak",
+  "writes": 0,
+  "pageerrors": []
+}

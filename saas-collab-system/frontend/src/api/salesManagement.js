@@ -65,6 +65,10 @@ export const fetchSalesOrderDetail = (id, params = {}) =>
     'sales_management.orders.detail'
   );
 
+export const fetchOrderWarehouse = id => requestApi({ method: 'get', url: `/api/internal/commerce/orders/${id}/warehouse/` });
+export const fetchOrderEvents = (id, params = {}) => requestApi({ method: 'get', url: `/api/internal/commerce/orders/${id}/events/`, params });
+export const retryOrderWarehouse = id => requestApi({ method: 'post', url: `/api/internal/commerce/orders/${id}/warehouse/`, data: {} });
+
 export const createSalesExport = (payload, idempotencyKey) =>
   salesRequest(
     {
