@@ -1,9 +1,15 @@
 // Calendar arithmetic is UTC civil-date arithmetic; source dates are already localized.
 const DAY=86400000;
-function date(value){
- if(!/^\d{4}-\d{2}-\d{2}$/.test(value||''))return null;
- const d=new Date(value+'T00:00:00Z');return Number.isFinite(+d)&&d.toISOString().slice(0,10)===value?d:null;
+const dateStamps=new Map();
+function timestamp(value){
+ const cached=dateStamps.get(value);if(cached!==undefined)return cached;
+ if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return null;
+ const d=new Date(value+'T00:00:00Z'),stamp=Number.isFinite(+d)&&d.toISOString().slice(0,10)===value?+d:null;
+ if(dateStamps.size>=512)dateStamps.delete(dateStamps.keys().next().value);
+ dateStamps.set(value,stamp);return stamp;
 }
+function validDate(value){return timestamp(value)!==null;}
+function date(value){const stamp=timestamp(value);return stamp==null?null:new Date(stamp);}
 const iso=d=>d.toISOString().slice(0,10);
 function anchor(type,value){
  const d=date(value);if(!d)return null;
@@ -26,12 +32,13 @@ function datedFact(f,first){
  let value=Object.hasOwn(f,'statistics_date')?f.statistics_date:f.date,basis=f.statistics_date_basis||'原财务流水日期';
  if(f.hierarchy_allocation&&!Object.hasOwn(f,'statistics_date')){value=first.get([f.store_id,f.external_order_id,f.currency].join('|'))||null;basis='关联订单本账期首次有效销售结算日（分摊归期）';}
  else if(/^hierarchy-(ad|reclassification):/.test(f.source_id||'')){value=null;basis='月度控制额，无实际日依据';}
- return{...f,period_date:date(value)?value:null,period_date_basis:basis};
+ return{...f,period_date:validDate(value)?value:null,period_date_basis:basis};
 }
-function inPeriod(f,type,value){
- if(type==='month'||!type)return true;
- if(value==='undated')return !date(f.period_date);
- if(!value)return true;
- const r=periodRange(type,value);return !!date(f.period_date)&&f.period_date>=r.from&&f.period_date<=r.to;
+function periodFilter(type,value){
+ if(type==='month'||!type)return()=>true;
+ if(value==='undated')return f=>!validDate(f.period_date);
+ if(!value)return()=>true;
+ const r=periodRange(type,value);return f=>validDate(f.period_date)&&f.period_date>=r.from&&f.period_date<=r.to;
 }
-module.exports={DAY,date,iso,anchor,periodRange,periodOptions,datedFact,inPeriod};
+function inPeriod(f,type,value){return periodFilter(type,value)(f);}
+module.exports={DAY,date,validDate,iso,anchor,periodRange,periodOptions,datedFact,inPeriod,periodFilter};

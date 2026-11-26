@@ -16,13 +16,13 @@ from django.db import transaction
 from django.db.models import Max, Count
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
-from apps.permissions.services import check_user_permission, get_permission_data_scopes
+from .summary_scopes import permission_allowed, permission_scopes
 from .models import FinanceAuditLog
 from .summary_models import FinanceSummaryDataset, FinanceSummaryState
 
 READ_PERMISSIONS = ('finance.view', 'finance.gcash.view', 'finance.warehouse_fees.view',
                     'sales_management.orders.view', 'sales_management.promotion.view', 'products.cost.view')
-STATE_KEYS = {'finance-preview-fee-checkboxes-v1', 'html2-ledger-fees-v1',
+STATE_KEYS = {'saas-finance-source-participation-v1', 'finance-preview-fee-checkboxes-v1', 'html2-ledger-fees-v1',
               'html2-shopee-recharge-v1', 'html2-lazada-tax-rules-v1',
               'html2-lazada-amortization-v1', 'html2-profit-closed-periods-v1'}
 
@@ -53,17 +53,15 @@ def unpack_values(values):
 
 
 def has_full_scope(user, code):
-    return check_user_permission(user, code) and (user.is_superuser or any(
-        s['scope_type'] == 'all' for s in get_permission_data_scopes(user, code)))
+    return permission_allowed(user, code) and (user.is_superuser or any(
+        s['scope_type'] == 'all' for s in permission_scopes(user, code)))
 
 
 def require_access(user, *, write=False):
-    # The accepted batch includes shared national allocations and cost sources.
-    # Never hand a whole-tenant batch to a partially scoped user.
-    if any(not has_full_scope(user, code) for code in READ_PERMISSIONS):
-        raise PermissionDenied('该财务批次含成本及公共费用，需要财务、订单、推广、GCash、仓库费用和商品成本的完整查看范围。')
-    if write and not has_full_scope(user, 'finance.import'):
-        raise PermissionDenied('调整费用或设置需要 finance.import 权限及完整数据范围。')
+    if any(not permission_allowed(user,code) or not permission_scopes(user,code) for code in READ_PERMISSIONS):
+        raise PermissionDenied('平台账单需要财务、订单、推广、GCash、仓库费用和商品成本的查看权限。')
+    if write and (any(not has_full_scope(user,code) for code in READ_PERMISSIONS) or not has_full_scope(user,'finance.import')):
+        raise PermissionDenied('修改共享账务设置或重算需要完整查看范围及 finance.import 权限。')
 
 
 def dataset_for(user, pk=None):
@@ -119,6 +117,30 @@ def _run_engine(dataset, payload, node, worker, heap_mb):
     return result['result']
 
 
+def checkpoint_aggregate(queryset, stamp):
+    """Use the measured covering index only for the MySQL item checkpoint."""
+    from django.db import connections, DatabaseError
+    connection=connections[queryset.db]
+    if connection.vendor=='mysql' and queryset.model._meta.label=='commerce.SalesOrderItem' and stamp:
+        query=queryset.order_by().values('id',stamp)
+        sql,params=query.query.get_compiler(using=queryset.db).as_sql()
+        table=connection.ops.quote_name(queryset.model._meta.db_table)
+        sql=sql.replace('FROM '+table,'FROM '+table+' FORCE INDEX ('+connection.ops.quote_name('idx_items_order_stamp')+')',1)
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT COUNT('+connection.ops.quote_name('id')+'), MAX('+connection.ops.quote_name(stamp)+') FROM ('+sql+') checkpoint_rows',params)
+                count,last=cursor.fetchone()
+            if last is not None and settings.USE_TZ:
+                from django.utils import timezone
+                if timezone.is_naive(last):last=timezone.make_aware(last,connection.timezone)
+            return {'count':count,'last':last}
+        except DatabaseError as error:
+            if not error.args or error.args[0]!=1176:
+                raise
+            # Safe during rolling deployment before the covering-index migration.
+    return queryset.aggregate(count=Count('pk'), **({'last':Max(stamp)} if stamp else {}))
+
+
 def source_checkpoint(store_ids):
     from apps.commerce.models import SalesOrderItem, SalesOrder, RefundReturn, ShipmentRecord
     from apps.sales_management.aftersales_models import AftersalesCase, WarehouseReturnReceipt
@@ -165,33 +187,52 @@ def source_checkpoint(store_ids):
     for name, qs in rows.items():
         fields = {f.name for f in qs.model._meta.fields}
         stamp = next((f for f in ['updated_at', 'updated_at_utc', 'checked_at', 'snapshot_at', 'created_at', 'ingested_at'] if f in fields), None)
-        aggregate = qs.aggregate(count=Count('pk'), **({'last': Max(stamp)} if stamp else {}))
+        aggregate = checkpoint_aggregate(qs,stamp)
         result[name] = {'count': aggregate['count'], 'latest': str(aggregate['last']) if stamp else None}
     return result
 
 
-def metadata(dataset, user, *, checkpoint=True, include_values=True):
-    state = dataset.accounting_state
-    # Manual-only batches read source tables during explicit rebuilds, not page polling.
-    check_sources = checkpoint and dataset.metadata.get('automatic_update_enabled', True)
+def metadata(dataset, user, *, checkpoint=True, include_values=True, lightweight=False):
+    from .summary_scopes import full_reader, store_ids, signature
+    from apps.masterdata.models import StoreMaster
+    full = full_reader(user)
+    visible = store_ids(user) if not full else list(StoreMaster.objects.filter(tenant=user.tenant).values_list('pk',flat=True))
+    access_signature = signature(user,sorted(visible))
+    state = FinanceSummaryState.objects.only('revision').get(dataset=dataset) if lightweight else dataset.accounting_state
+    # Database batches are checked by the scheduler; page polling only reads
+    # accepted versions and job status, never scans all source tables again.
+    check_sources = full and checkpoint and not dataset.metadata.get('database_scope') and dataset.metadata.get('automatic_update_enabled', True)
     try:
         document_path(dataset)
         source_available = True
     except ValidationError:
         source_available = False
     from .summary_models import FinanceSummaryCalculation
-    from apps.masterdata.models import StoreMaster
+    latest = FinanceSummaryCalculation.objects.filter(dataset=dataset, tenant=dataset.tenant, kind='rebuild').only(
+        'id', 'status', 'request', 'error_code').order_by('-pk').first()
+    from .summary_jobs import queue_status
+    refresh_job = ({'id': latest.pk, 'status': latest.status, 'error_code': latest.error_code,
+                    **queue_status(latest.status, latest.request)} if latest else None)
+    from .summary_health import automation_health
+    health = automation_health(dataset)
+    if lightweight:
+        return {'automation_health':health,'access_signature':access_signature, 'lightweight': True, 'tenant_id': str(dataset.tenant_id), 'dataset': dataset.pk,
+                'revision': state.revision, 'source_available': source_available,
+                'can_edit': full and has_full_scope(user, 'finance.import'), 'refresh_job': refresh_job,
+                'automatic_update_enabled': dataset.metadata.get('automatic_update_enabled', True)}
     jobs = list(FinanceSummaryCalculation.objects.filter(tenant=dataset.tenant, kind='rebuild').order_by('-pk').values(
-        'id', 'dataset_id', 'result_dataset_id', 'status', 'error_code', 'created_at', 'finished_at')[:10])
+        'id', 'dataset_id', 'result_dataset_id', 'status', 'error_code', 'created_at', 'finished_at')[:10]) if full else []
     from .summary_recent import recent_scope
-    return {'automation': {'mode': 'server', 'enabled': dataset.metadata.get('automatic_update_enabled', True), 'interval_seconds': 300,
-                          'scope': recent_scope(dataset.metadata.get('store_ids', []))}, 'rebuild_history': jobs,
-            'scope_stores': list(StoreMaster.objects.filter(tenant=dataset.tenant).order_by('code').values('id', 'code')),
+    return {'automation_health':health,'access_signature':access_signature,'can_view_settings':full,'tenant_id': str(dataset.tenant_id), 'refresh_job': refresh_job,
+            'automation': {'mode': 'server', 'enabled': dataset.metadata.get('automatic_update_enabled', True), 'interval_seconds': 300,
+                          'merge_window_seconds': 60,
+                          'scope': recent_scope(dataset.metadata.get('store_ids', []) if full else [pk for pk in dataset.metadata.get('store_ids',[]) if pk in visible])}, 'rebuild_history': jobs,
+            'scope_stores': list(StoreMaster.objects.filter(tenant=dataset.tenant,pk__in=visible).order_by('code').values('id', 'code')),
             'source_available': source_available, 'dataset': dataset.pk, 'label': dataset.label, 'source_hash': dataset.source_hash,
-            'imported_at': dataset.created_at.isoformat(), 'source': dataset.metadata,
+            'imported_at': dataset.created_at.isoformat(), 'source': dataset.metadata if full else {'data_origin':dataset.metadata.get('data_origin'),'database_scope':{**(dataset.metadata.get('database_scope') or {}),'stores':[pk for pk in dataset.metadata.get('store_ids',[]) if pk in visible]}},
             'source_checked': bool(check_sources),
             'source_changed': source_checkpoint(dataset.metadata['store_ids']) != dataset.metadata.get('checkpoint') if check_sources else None,
-            'revision': state.revision, **({'values': unpack_values(state.values)} if include_values else {}), 'can_edit': has_full_scope(user, 'finance.import')}
+            'revision': state.revision, **({'values': unpack_values(state.values)} if include_values and full else {}), 'can_edit': full and has_full_scope(user, 'finance.import')}
 
 
 def save_state(dataset, user, *, revision, key, value, reason):
@@ -213,6 +254,12 @@ def save_state(dataset, user, *, revision, key, value, reason):
             return None
         current = unpack_values(state.values)
         verified = engine(dataset, {'action': 'save', 'state': current, 'key': key, 'value': value, 'reason': reason})
+        for history_key in {'html2-ledger-fees-v1', 'saas-finance-source-participation-v1'} & verified['values'].keys():
+            saved = json.loads(verified['values'][history_key])
+            if saved.get('history'):
+                saved['history'][-1]['actor'] = {'id': str(user.pk), 'name': user.full_name or user.username}
+                saved['history'][-1]['revision'] = state.revision + 1
+                verified['values'][history_key] = json.dumps(saved, ensure_ascii=False)
         before = hashlib.sha256(json.dumps(current, sort_keys=True).encode()).hexdigest()
         updated = {**current, **verified['values']}
         state.values = pack_values(updated)

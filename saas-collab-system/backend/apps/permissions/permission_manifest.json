@@ -2512,6 +2512,22 @@
       "owner": "integrations"
     },
     {
+      "code": "issue_tracking.configure",
+      "name": "配置事项跟踪",
+      "module": "system",
+      "action": "issue_tracking.configure",
+      "permission_type": "action",
+      "description": "配置当前租户的菜单跟踪规则及部门管辖授权。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "issue_tracking.configure",
+      "resource_code": "legacy_resource",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "system"
+    },
+    {
       "code": "listings.mapping.manage",
       "name": "维护平台类目与属性映射",
       "module": "listings",
@@ -4915,6 +4931,22 @@
       "menu_path": "/system/demo-data-sync",
       "menu_code": "menu.system.demo_data_sync.view",
       "resource_code": "system_demo_data_sync",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "system"
+    },
+    {
+      "code": "menu.system.issue_tracking.view",
+      "name": "事件跟踪配置",
+      "module": "system",
+      "action": "issue_tracking.view",
+      "permission_type": "menu",
+      "description": "显示事件跟踪配置入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/system/issue-tracking",
+      "menu_code": "menu.system.issue_tracking.view",
+      "resource_code": "system_issue_tracking",
       "scope_adapter": "existing_business_adapter",
       "allowed_dimensions": [],
       "owner": "system"
@@ -22591,6 +22623,162 @@
       "owner": "finance"
     },
     {
+      "route": "api/finance/summary/query-detail/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/query-detail/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/query-detail/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/query/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/query/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/query/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/source-flows/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/source-flows/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/source-flows/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/source-flows/<str:source>/<int:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/source-flows/<str:source>/<int:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/source-flows/<str:source>/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
       "route": "api/finance/transactions/",
       "method": "GET",
       "action": "read",
@@ -36460,6 +36648,956 @@
         "IsIntegrationViewer"
       ],
       "owner": "integrations"
+    },
+    {
+      "route": "api/internal/issue-tracking/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "public_handler_guard",
+      "permission_classes": [
+        "AllowAny"
+      ],
+      "owner": "routers",
+      "guard_source_sha256": "35fc1273bb651c7bb27ff5253e75f302f2f9d76372a020b5640d0d2fba3dad9b"
+    },
+    {
+      "route": "api/internal/issue-tracking/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "public_handler_guard",
+      "permission_classes": [
+        "AllowAny"
+      ],
+      "owner": "routers",
+      "guard_source_sha256": "35fc1273bb651c7bb27ff5253e75f302f2f9d76372a020b5640d0d2fba3dad9b"
+    },
+    {
+      "route": "api/internal/issue-tracking/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "AllowAny"
+      ],
+      "owner": "routers"
+    },
+    {
+      "route": "api/internal/issue-tracking/<drf_format_suffix:format>",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "public_handler_guard",
+      "permission_classes": [
+        "AllowAny"
+      ],
+      "owner": "routers",
+      "guard_source_sha256": "35fc1273bb651c7bb27ff5253e75f302f2f9d76372a020b5640d0d2fba3dad9b"
+    },
+    {
+      "route": "api/internal/issue-tracking/<drf_format_suffix:format>",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "public_handler_guard",
+      "permission_classes": [
+        "AllowAny"
+      ],
+      "owner": "routers",
+      "guard_source_sha256": "35fc1273bb651c7bb27ff5253e75f302f2f9d76372a020b5640d0d2fba3dad9b"
+    },
+    {
+      "route": "api/internal/issue-tracking/<drf_format_suffix:format>",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "AllowAny"
+      ],
+      "owner": "routers"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants/$",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants/$",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants/$",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants/$",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants/(?P<pk>[^/.]+)/$",
+      "method": "DELETE",
+      "action": "delete",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants/(?P<pk>[^/.]+)/$",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants/(?P<pk>[^/.]+)/$",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants/(?P<pk>[^/.]+)/$",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants/(?P<pk>[^/.]+)/$",
+      "method": "PATCH",
+      "action": "update",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants/(?P<pk>[^/.]+)/$",
+      "method": "PUT",
+      "action": "update",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants/(?P<pk>[^/.]+)\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "DELETE",
+      "action": "delete",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants/(?P<pk>[^/.]+)\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants/(?P<pk>[^/.]+)\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants/(?P<pk>[^/.]+)\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants/(?P<pk>[^/.]+)\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "PATCH",
+      "action": "update",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants/(?P<pk>[^/.]+)\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "PUT",
+      "action": "update",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/^grants\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/$",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/$",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/$",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/$",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/(?P<pk>[^/.]+)/$",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/(?P<pk>[^/.]+)/$",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/(?P<pk>[^/.]+)/$",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/(?P<pk>[^/.]+)/actions/$",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/(?P<pk>[^/.]+)/actions/$",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/(?P<pk>[^/.]+)/actions\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/(?P<pk>[^/.]+)/actions\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/(?P<pk>[^/.]+)/attachments/$",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/(?P<pk>[^/.]+)/attachments/$",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/(?P<pk>[^/.]+)/attachments\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/(?P<pk>[^/.]+)/attachments\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/(?P<pk>[^/.]+)\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/(?P<pk>[^/.]+)\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues/(?P<pk>[^/.]+)\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/^issues\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules/$",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules/$",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules/$",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules/$",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules/(?P<pk>[^/.]+)/$",
+      "method": "DELETE",
+      "action": "delete",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules/(?P<pk>[^/.]+)/$",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules/(?P<pk>[^/.]+)/$",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules/(?P<pk>[^/.]+)/$",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules/(?P<pk>[^/.]+)/$",
+      "method": "PATCH",
+      "action": "update",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules/(?P<pk>[^/.]+)/$",
+      "method": "PUT",
+      "action": "update",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules/(?P<pk>[^/.]+)\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "DELETE",
+      "action": "delete",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules/(?P<pk>[^/.]+)\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules/(?P<pk>[^/.]+)\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules/(?P<pk>[^/.]+)\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules/(?P<pk>[^/.]+)\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "PATCH",
+      "action": "update",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules/(?P<pk>[^/.]+)\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "PUT",
+      "action": "update",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/^rules\\.(?P<format>[a-z0-9]+)/?$",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f93a7f6aaf3219c7d82bf73c0931d3df42303647140e9d1ba069f55c4aa3cb6d"
+    },
+    {
+      "route": "api/internal/issue-tracking/attachments/<int:pk>/download/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "75fa7fd916c329eab9695f07b97a8648ad15857a6abe23d7b43f931c1dd138f0"
+    },
+    {
+      "route": "api/internal/issue-tracking/attachments/<int:pk>/download/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "75fa7fd916c329eab9695f07b97a8648ad15857a6abe23d7b43f931c1dd138f0"
+    },
+    {
+      "route": "api/internal/issue-tracking/attachments/<int:pk>/download/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/candidates/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "744fbd14c9322b4a862cc062464a68126a64c54aa063e289b97b3a315492eb19"
+    },
+    {
+      "route": "api/internal/issue-tracking/candidates/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "744fbd14c9322b4a862cc062464a68126a64c54aa063e289b97b3a315492eb19"
+    },
+    {
+      "route": "api/internal/issue-tracking/candidates/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/notifications/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "dd71b361a596ff07964106fbd8877b3b921939394d0f54d9621f2af9b99def72"
+    },
+    {
+      "route": "api/internal/issue-tracking/notifications/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "dd71b361a596ff07964106fbd8877b3b921939394d0f54d9621f2af9b99def72"
+    },
+    {
+      "route": "api/internal/issue-tracking/notifications/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/notifications/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "3986c9494811172799212b106897b79d787f34de34a30571108ea72a2dca694b"
+    },
+    {
+      "route": "api/internal/issue-tracking/summary/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "209c1f3e53311897c1bb9accebc8ac8d5c7ff5ea90683c8129d093b70449087c"
+    },
+    {
+      "route": "api/internal/issue-tracking/summary/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "209c1f3e53311897c1bb9accebc8ac8d5c7ff5ea90683c8129d093b70449087c"
+    },
+    {
+      "route": "api/internal/issue-tracking/summary/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
     },
     {
       "route": "api/internal/lifecycle/decisions/",
@@ -58889,5 +60027,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "dcbd028b81c78d48ad17d25e916b5998c5179b4ed3a2de479069958ea8123ea0"
+  "catalog_hash": "c0a0ab2021d0e9a3e2196503f10563065ce5209b5bc9adbb8ae31e4256b6d1cf"
 }

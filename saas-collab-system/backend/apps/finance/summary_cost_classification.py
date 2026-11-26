@@ -90,21 +90,36 @@ def classify(order, *, refunds=(), cases=(), shipments=(), samples=(), financial
     return result('pending', '当前订单状态不足以确认已履约，缺少发货／出库依据')
 
 
-def collect_classifications(user, stores, orders, facts):
+def collect_classifications(user, stores, orders, facts, *, native=False):
     from apps.commerce.models import RefundReturn, ShipmentRecord, SalesOrderItem
     from apps.sales_management.aftersales_models import AftersalesCase
     from apps.influencers.models import SampleFulfillment
     refunds, cases, shipments, samples = (defaultdict(list) for _ in range(4))
     item_statuses = defaultdict(list)
-    for order_id, state in SalesOrderItem.objects.filter(sales_order__tenant=user.tenant,
-            sales_order__store_id__in=stores).values_list('sales_order_id', 'raw_line_status'):
+    ids = [order.pk for order in orders]
+    def read(query, field, identities=ids):
+        if not native:
+            yield from query.iterator(chunk_size=500)
+            return
+        for offset in range(0, len(identities), 500):
+            yield from query.filter(**{field+'__in': identities[offset:offset+500]}).order_by().iterator(chunk_size=500)
+    item_query = SalesOrderItem.objects.filter(sales_order__tenant=user.tenant, sales_order__store_id__in=stores)
+    for order_id, state in read(item_query.values_list('sales_order_id', 'raw_line_status'), 'sales_order_id'):
         item_statuses[order_id].append(state)
     for model, target, field in [(RefundReturn, refunds, 'sales_order_id'), (AftersalesCase, cases, 'order_id')]:
-        for row in model.objects.filter(tenant=user.tenant, store_id__in=stores):
+        query = model.objects.filter(tenant=user.tenant, store_id__in=stores)
+        if native:
+            fields = ['id', field, 'normalized_status'] if model is RefundReturn else ['id', field, 'return_status', 'refund_id']
+            query = query.only(*fields)
+        for row in read(query, field):
             target[getattr(row, field)].append(row)
-    for row in ShipmentRecord.objects.filter(tenant=user.tenant, store_id__in=stores, shipped_at_utc__isnull=False):
+    shipment_query = ShipmentRecord.objects.filter(tenant=user.tenant, store_id__in=stores, shipped_at_utc__isnull=False)
+    if native:shipment_query = shipment_query.only('id', 'sales_order_id')
+    for row in read(shipment_query, 'sales_order_id'):
         shipments[row.sales_order_id].append(row)
-    for row in SampleFulfillment.objects.filter(tenant=user.tenant, store_id__in=stores, is_deleted=False).exclude(status='cancelled').exclude(sample_order_no=''):
+    sample_query = SampleFulfillment.objects.filter(tenant=user.tenant, store_id__in=stores, is_deleted=False).exclude(status='cancelled').exclude(sample_order_no='')
+    if native:sample_query = sample_query.only('id', 'store_id', 'sample_order_no')
+    for row in read(sample_query, 'sample_order_no', sorted({order.external_order_id for order in orders})):
         samples[(row.store_id, row.sample_order_no.strip())].append(row)
     amounts = {}
     for f in facts:

@@ -1,9 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
 const require=createRequire(import.meta.url);
-const { periodRange, periodOptions, datedFact, inPeriod }=require('../../backend/apps/finance/summary_periods.cjs');
+const { date,validDate,periodRange, periodOptions, datedFact, inPeriod, periodFilter }=require('../../backend/apps/finance/summary_periods.cjs');
 
 describe('财务账期内周／半月归期',()=>{
+ it('日期缓存不共享可变Date，保留闰年、纪元及无效日期规则',()=>{
+  expect(validDate('2000-02-29')).toBe(true);expect(validDate('1900-02-29')).toBe(false);
+  expect(validDate('2026-02-30')).toBe(false);expect(date('2026-02-30')).toBeNull();
+  expect(validDate(null)).toBe(false);expect(validDate('2026-2-01')).toBe(false);
+  const first=date('1970-01-01');first.setUTCFullYear(2001);
+  expect(date('1970-01-01').getTime()).toBe(0);expect(date('1970-01-01')).not.toBe(first);
+  for(let day=0;day<700;day++)expect(validDate(new Date(Date.UTC(2020,0,1+day)).toISOString().slice(0,10))).toBe(true);
+  expect(date('1970-01-01').getTime()).toBe(0);expect(validDate('1900-02-29')).toBe(false);
+ });
+ it('预计算区间保持跨月、待归期和空筛选语义，拒绝非法区间',()=>{
+  const rows=[{period_date:'2026-08-31'},{period_date:'2026-09-06'},{period_date:'2026-09-07'},{period_date:null},{period_date:'2026-02-30'}];
+  expect(rows.filter(periodFilter('week','2026-08-31'))).toEqual(rows.slice(0,2));
+  expect(rows.filter(periodFilter('half_month','undated'))).toEqual(rows.slice(3));
+  expect(rows.filter(periodFilter('month',''))).toEqual(rows);
+  expect(()=>periodFilter('week','2026-09-01')).toThrow();
+ });
  it('自然周周一到周日，可跨月、跨年，不接受伪造日期',()=>{
   expect(periodRange('week','2026-08-31')).toEqual({from:'2026-08-31',to:'2026-09-06'});
   expect(periodRange('week','2026-12-28').to).toBe('2027-01-03');

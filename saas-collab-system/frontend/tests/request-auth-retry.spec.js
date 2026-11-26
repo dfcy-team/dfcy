@@ -16,7 +16,7 @@ vi.mock('../src/utils/authSession', () => ({
   clearAuthSession: mocks.clear, updateAccessToken: mocks.update,
   readAuthSession: () => ({ channel: mocks.channel }),
 }));
-import { downloadApiFile } from '../src/api/request';
+import { downloadApiFile, normalizeApiError, fetchApiFile } from '../src/api/request';
 
 function failure(code) {
   return { config: { method: 'post', url: '/api/internal/integrations/store-authorizations/oauth/manual-callback/' },
@@ -94,4 +94,13 @@ it.each([undefined, 429, 500, 502, 503, 504, 401])('handles refresh failure %s w
   await expect(mocks.rejected(error)).rejects.toBe(unavailable);
   expect(mocks.clear).toHaveBeenCalledTimes(status === 401 ? 1 : 0);
   expect(mocks.request).not.toHaveBeenCalled();
+});
+
+it('主动取消读取不会归类为网络故障',()=>{
+ expect(normalizeApiError({code:'ERR_CANCELED',message:'canceled'})).toEqual({success:false,code:'REQUEST_CANCELED',message:'请求已取消',data:null,http_status:null});
+ expect(normalizeApiError({code:'ERR_NETWORK',message:'Network Error'}).code).toBe('HTTP_NETWORK_ERROR');
+});
+
+it('文件读取透传取消信号，取消后不续期或重试',async()=>{
+ vi.clearAllMocks();const controller=new AbortController();mocks.file.mockRejectedValueOnce({code:'ERR_CANCELED'});const response=await fetchApiFile('/api/finance/summary/1/document/',{signal:controller.signal});expect(mocks.file.mock.calls[0][1].signal).toBe(controller.signal);expect(response.code).toBe('REQUEST_CANCELED');expect(mocks.file).toHaveBeenCalledTimes(1);expect(mocks.refresh).not.toHaveBeenCalled();
 });

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "dcbd028b81c78d48ad17d25e916b5998c5179b4ed3a2de479069958ea8123ea0",
+  "catalog_hash": "c0a0ab2021d0e9a3e2196503f10563065ce5209b5bc9adbb8ae31e4256b6d1cf",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -401,6 +401,10 @@
     {
       "file": "src/router/menu.js",
       "permission_code": "integrations.warehouse.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "issue_tracking.configure"
     },
     {
       "file": "src/router/menu.js",
@@ -929,6 +933,10 @@
     {
       "file": "src/router/menu.js",
       "permission_code": "menu.system.demo_data_sync.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.system.issue_tracking.view"
     },
     {
       "file": "src/router/menu.js",
@@ -1887,5 +1895,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "034bdee132ea3654ca2d9302e088efdca2086a378ee792506d9a456fc58c4b5a"
+  "surface_hash": "ce39b690703a5d1cba159dcc17e70922c8c8afeb1225a22ec1c30fdf0460bce8"
 }

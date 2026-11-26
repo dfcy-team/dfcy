@@ -1,9 +1,10 @@
 // Single order-level ledger for all native summary levels. No source writes.
 const {micro,fixed,split,allocateAdvertising,allocatePublicFees,allocateItems}=require('./summary_allocation.cjs');
-const {DAY,date,iso,datedFact}=require('./summary_periods.cjs');
+const {DAY,date,validDate,iso,datedFact}=require('./summary_periods.cjs');
 const kinds=['sales','refund','order_fee','adjustment','shop_adjustment','advertising','product_cost','gcash','promotion','warehouse_order','warehouse_other'];
 const bill=f=>String(f.month||f.date||'').slice(0,7);
 const orderKey=f=>[f.store_id,f.external_order_id,f.currency].join('|');
+const emptyItems=Object.freeze([]);
 function orderAttribution(s,f){
  if(!f.store_id)return '国家费用尚未归属具体订单；保留原账单分母，不转嫁给当前店铺';
  if(!f.external_order_id)return f.allocation_reason||'来源未关联订单，尚未确认公共分摊依据';
@@ -30,18 +31,19 @@ function dailyAdvertising(s,parents,mode){
  for(const f of parents.filter(f=>f.kind==='advertising')){
   if(!String(f.source_id).startsWith('hierarchy-ad:')){out.push(datedFact(f,new Map()));continue;}
   const month=bill(f),r=c.HTML2_ADVERTISING_COLUMNS.calculate(f.store_code,month,raw),days=new Map(),proof=new Map();
-  const add=(day,n)=>{if(date(day)&&day.startsWith(month))days.set(day,(days.get(day)||0n)+n);};
+  const add=(day,n)=>{if(validDate(day)&&day.startsWith(month))days.set(day,(days.get(day)||0n)+n);};
   if(mode==='operations')for(const a of r.actualDetails||[])if(a.amount!=null){const day=String(a.date).slice(0,10);add(day,micro(a.amount));if(a.source_id){if(!proof.has(day))proof.set(day,[]);proof.get(day).push(a.source_id);}}
   for(const plan of r.details||[]){
-   const field=mode==='finance'?'debit':'tax',total=plan[field];
+   const outside=mode==='operations'&&plan.channel==='outside',field=mode==='finance'||outside?'debit':'tax',total=plan[field];
    // Operations tax is only included when the accepted report separately adds it.
-   if(mode==='operations'&&(r.operations===r.spend||total==null))continue;
+   if(mode==='operations'&&!outside&&(r.operations===r.spend+(r.outside||0n)||total==null))continue;
    if(plan.duration&&total!=null){
     const start=Date.parse(plan.time.length>10?plan.time.slice(0,19)+'Z':plan.time+'T00:00:00Z'),duration=plan.duration,cents=micro(total)/10000n;
     const cumulative=t=>{const elapsed=Math.max(0,Math.min(duration,t-start));return(cents*BigInt(Math.round(elapsed))*2n+BigInt(duration))/(2n*BigInt(duration));};
     if(!Number.isFinite(start)||duration<=0)continue;
     for(let d=date(month+'-01');iso(d).startsWith(month);d=new Date(+d+DAY))add(iso(d),-(cumulative(+d+DAY)-cumulative(+d))*10000n);
    }else if(mode==='finance'&&r.crossBorder&&plan.monthGross!=null)add(String(plan.date).slice(0,10),-micro(plan.monthGross));
+   else if(mode==='operations'&&r.crossBorder&&total!=null)add(String(plan.date).slice(0,10),-micro(total));
   }
   // A disabled/replaced monthly base must not leave the original daily charges active.
   const zeroBase=r.ledgerBase&&r.ledgerOriginal&&r.ledgerBase[mode]!==r.ledgerOriginal[mode]&&r.ledgerBase[mode]===0n;
@@ -60,12 +62,21 @@ function dailyAdvertising(s,parents,mode){
 function orderLedger(s,type='month',mode='operations'){
  s.c.HTML2_STORE_HIERARCHY.setMode(mode);
  if(!s.orderBases)s.orderBases=new Map();
- if(s.orderBases.has(mode)){const base=s.orderBases.get(mode),orders=type==='month'?base.orders:base.periodOrders.concat(allocatePublicFees(base.publicFees,base.sales,type));return orders.concat(allocateAdvertising(base.ads,base.sales,type)).filter(f=>!ignoredWarehouse(s,f)).map((f,i)=>({...f,allocation_key:[f.source_id,f.store_id||'country',f.external_order_id||'unassigned',f.currency,i].join('|')}));}
- const {c,p}=s,parents=c.HTML2_STORE_HIERARCHY.controls().map(p.localFact),first=new Map();
- for(const f of parents)if(f.kind==='sales'&&s.counted(f)&&f.amount!=null&&micro(f.amount)>0n&&date(f.date)){
-  const key=bill(f)+'|'+orderKey(f);if(!first.has(key)||f.date<first.get(key))first.set(key,f.date);
+ if(s.orderBases.has(mode)){
+  const base=s.orderBases.get(mode),orders=type==='month'?base.orders:base.periodOrders.concat(allocatePublicFees(base.publicFees,base.sales,type));
+  return orders.concat(allocateAdvertising(base.ads,base.sales,type)).filter(f=>!ignoredWarehouse(s,f)).map((f,i)=>{
+   const key=[f.source_id,f.store_id||'country',f.external_order_id||'unassigned',f.currency,i].join('|');
+   // Monthly rows are owned copies; week/half-month results must not modify them.
+   if(type==='month'){f.allocation_key=key;return f;}
+   return {...f,allocation_key:key};
+  });
  }
- const dated=f=>datedFact(f,new Map([[orderKey(f),first.get(bill(f)+'|'+orderKey(f))]]));
+ const {c,p}=s,parents=c.HTML2_STORE_HIERARCHY.controls().map(p.localFact),first=new Map();
+ for(const f of parents)if(f.kind==='sales'&&s.counted(f)&&f.amount!=null&&micro(f.amount)>0n&&validDate(f.date)){
+  const month=bill(f);if(!first.has(month))first.set(month,new Map());
+  const dates=first.get(month),key=orderKey(f);if(!dates.has(key)||f.date<dates.get(key))dates.set(key,f.date);
+ }
+ const missing=new Map(),dated=f=>datedFact(f,first.get(bill(f))||missing);
  const originals=parents.filter(f=>f.kind!=='advertising'),source=new Map(originals.map(f=>[f.source_id,f])),orders=[];
  const generated=c.HTML2_STORE_HIERARCHY.orderAllocation(originals),groups=new Map();
  for(const f of generated){
@@ -73,10 +84,14 @@ function orderLedger(s,type='month',mode='operations'){
   const ids=f.hierarchy_allocation.source_ids,key=JSON.stringify(ids);
   if(!groups.has(key))groups.set(key,{ids,rows:[]});groups.get(key).rows.push(f);
  }
- for(const {ids,rows}of groups.values())for(const id of ids){
+ for(const {ids,rows}of groups.values()){
+  if(!ids.length)continue;
+  const quantity=rows[0].hierarchy_allocation.method==='order_quantity_share',weights=rows.map(r=>[r.external_order_id,micro(quantity?r.hierarchy_allocation.order_quantity:r.hierarchy_allocation.order_sales)]);
+  for(const id of ids){
   const f=source.get(id);if(!f)throw Error('公共费用原始来源缺失，未继续计算。');
-  const quantity=rows[0].hierarchy_allocation.method==='order_quantity_share',weights=rows.map(r=>[r.external_order_id,micro(quantity?r.hierarchy_allocation.order_quantity:r.hierarchy_allocation.order_sales)]),parts=split(micro(f.amount),weights);
+  const parts=split(micro(f.amount),weights);
   for(const r of rows)orders.push(dated({...f,...(!Object.hasOwn(f,'statistics_date')&&date(f.date)&&!/^hierarchy-/.test(f.source_id)?{statistics_date:f.date,statistics_date_basis:'公共费用原流水日期'}:{}),source_id:f.source_id+':order:'+r.external_order_id,source_parent_id:f.source_id,external_order_id:r.external_order_id,amount:fixed(parts.get(r.external_order_id)),allocated:true,allocation_readonly:true,ledger_key:undefined,hierarchy_allocation:{...r.hierarchy_allocation,source_ids:[id],parent_amount:f.amount}}));
+  }
  }
  // Unassociated warehouse fees and country residuals stay in the original source,
  // outside this calculation and its pending queue; associated shares are unchanged.
@@ -88,13 +103,20 @@ function orderLedger(s,type='month',mode='operations'){
  s.orderBases.set(mode,base);
  return orderLedger(s,type,mode);
 }
-function itemMembers(s,facts,fullFacts=facts){
- const {c,p}=s,data=c.HTML2_SKU_ORDER_SALES||{},byOrder=new Map(),members=[];
- for(const f of facts)if(f.external_order_id&&f.kind==='product_cost'&&f.cost_event!=='return'&&f.cost_calculation?.components?.length){const key=orderKey(f);if(!byOrder.has(key))byOrder.set(key,f.cost_calculation.components);}
- for(const f of fullFacts)if(f.external_order_id&&f.kind==='product_cost'&&f.cost_event!=='return'&&f.cost_calculation?.components?.length){const key=orderKey(f);if(!byOrder.has(key))byOrder.set(key,f.cost_calculation.components);}
+function costIndex(s,facts){
+ const cached=s.itemCostIndexes?.get(facts);if(cached)return cached;
+ const index=new Map();
+ for(const f of facts)if(f.external_order_id&&f.kind==='product_cost'&&f.cost_event!=='return'&&f.cost_calculation?.components?.length){const key=orderKey(f);if(!index.has(key))index.set(key,f.cost_calculation.components);}
+ s.itemCostIndexes?.set(facts,index);return index;
+}
+function* eachItemMember(s,facts,fullFacts=facts,gapsOnly=false){
+ const {c,p}=s,data=c.HTML2_SKU_ORDER_SALES||{},byOrder=costIndex(s,facts),fullIndex=facts===fullFacts?byOrder:costIndex(s,fullFacts),itemCache=new Map(),gapChecks=new WeakMap();
  function items(f){
-  const lines=data.orders?.[f.store_id+'|'+f.external_order_id]||[],changes=data.exchanges?.[f.store_id+'|'+f.external_order_id]?.changes||[];
-  let components=byOrder.get(orderKey(f));
+  const cacheKey=orderKey(f);if(itemCache.has(cacheKey))return itemCache.get(cacheKey);
+  const lines=data.orders?.[f.store_id+'|'+f.external_order_id]||emptyItems,changes=data.exchanges?.[f.store_id+'|'+f.external_order_id]?.changes||emptyItems;
+  const source=byOrder.get(cacheKey)||fullIndex.get(cacheKey),cached=s.itemMatches?.get(cacheKey);
+  if(cached&&cached.source===source&&cached.lines===lines&&cached.changes===changes){itemCache.set(cacheKey,cached.result);return cached.result;}
+  let components=source;
   if(!components){
    const quantities=new Map();for(const l of lines){const key=l.internal_sku_id?'id:'+l.internal_sku_id:'code:'+l.seller_sku,part=quantities.get(key)||{sku_id:l.internal_sku_id,source_sku:l.seller_sku,sku_code:l.seller_sku,quantity:0};part.quantity+=Number(l.quantity||0);quantities.set(key,part);}
    for(const change of changes){
@@ -103,7 +125,7 @@ function itemMembers(s,facts,fullFacts=facts){
    }
    components=[...quantities.values()];
   }
-  return components.map((component,i)=>{
+  const result=components.map((component,i)=>{
    let matched=lines.filter(l=>component.sku_id!=null?l.internal_sku_id===component.sku_id:l.seller_sku===component.source_sku);
    // The accepted cost snapshot can identify an SKU before the original item is bound.
    // Only a unique, unbound source line in this same order may supply price/link evidence.
@@ -124,10 +146,11 @@ function itemMembers(s,facts,fullFacts=facts){
    const products=[...new Set(matched.map(l=>String(l.platform_product_id||'')).filter(v=>v&&v!=='0'))];
    return{id:String(i),component,sales_weight:added?0n:value,quantity_weight:quantity,
     product_link_id:products.length===1?products[0]:undefined,product_link_basis:replacement?'换货后SKU沿原成交商品链接归属':'原订单商品行与原成交商品ID'};
-  });
+  });itemCache.set(cacheKey,result);s.itemMatches?.set(cacheKey,{source,lines,changes,result});return result;
  }
  function member(f,item,amount,reason){
   const component=item?.component||{},amounts={[f.kind]:amount==null?null:micro(amount)};
+  if(gapsOnly)return{fact:f,shop:f.store_code||'待归属店铺',sku_id:component.sku_id||null,product_link_id:item?.product_link_id,amounts};
   return{country:f.country,platform:f.platform||'',store:String(f.store_id||''),shop:f.store_code||'待归属店铺',month:bill(f),currency:f.currency,
    sku_id:component.sku_id||null,code:item?component.sku_code||component.source_sku||'待关联SKU':'待分摊（订单内）',legacy:component.legacy_sku_code||'',platform_sku:component.source_sku||'',
    identity:item?(component.sku_id?'internal:'+component.sku_id:'order-item:'+f.store_id+':'+f.external_order_id+':'+item.id):'unallocated:'+f.store_id+':'+(f.external_order_id||'store'),
@@ -138,6 +161,7 @@ function itemMembers(s,facts,fullFacts=facts){
  }
  for(const f of facts){
   if(!s.counted(f))continue;
+  if(gapsOnly&&!f.external_order_id)continue;
   const selected=f.external_order_id?items(f):[];
   if(f.kind==='product_cost'&&f.cost_calculation?.components?.length){
    const components=f.cost_calculation.components,values=components.map(component=>{
@@ -149,12 +173,23 @@ function itemMembers(s,facts,fullFacts=facts){
    });
    const known=values.reduce((n,v)=>n+(v||0n),0n),target=f.amount==null?null:micro(f.amount);
    // Conversion residuals are explicit, never spread onto a different order/SKU.
-   components.forEach((component,i)=>{const item=selected.find(x=>component.sku_id!=null?x.component.sku_id===component.sku_id:x.component.source_sku===component.source_sku);members.push(member(f,item?{...item,component}:null,values[i]==null?null:fixed(values[i]),'原订单逐项成本快照；不按销售额重摊'));});
-   if(target!=null&&target!==known)members.push(member(f,null,fixed(target-known),'成本折算尾差／原成本未细分部分，保留该订单待分摊'));
-  }else for(const part of allocateItems(f,selected))members.push(member(f,part.item,part.amount,part.reason));
+   for(const [i,component]of components.entries()){const item=selected.find(x=>component.sku_id!=null?x.component.sku_id===component.sku_id:x.component.source_sku===component.source_sku);yield member(f,item?{...item,component}:null,values[i]==null?null:fixed(values[i]),'原订单逐项成本快照；不按销售额重摊');}
+   if(target!=null&&target!==known)yield member(f,null,fixed(target-known),'成本折算尾差／原成本未细分部分，保留该订单待分摊');
+  }else{
+   if(gapsOnly){
+    if(f.amount!=null&&micro(f.amount)===0n)continue;
+    let complete=gapChecks.get(selected);
+    if(!complete){
+     const mapped=field=>{const positive=selected.filter(item=>item[field]>0n);return positive.length>0&&!selected.some(item=>item[field]==null)&&positive.every(item=>item.component.sku_id&&item.product_link_id);};
+     complete={sales:mapped('sales_weight'),quantity:mapped('quantity_weight')};gapChecks.set(selected,complete);
+    }
+    if(complete[['warehouse_order','warehouse_other'].includes(f.kind)?'quantity':'sales'])continue;
+   }
+   for(const part of allocateItems(f,selected))yield member(f,part.item,part.amount,part.reason);
+  }
  }
- return members;
 }
+function itemMembers(s,facts,fullFacts=facts){return [...eachItemMember(s,facts,fullFacts)];}
 function normalizeGroups(groups){
  for(const g of groups){
   g.amounts=Object.fromEntries(kinds.map(kind=>[kind,{amount:0n,known:0,missing:0}]));
@@ -171,7 +206,7 @@ function groupLinks(s,sku,facts){
 }
 function itemAttribution(s,facts,fullFacts){
  const groups=new Map();
- for(const m of itemMembers(s,facts,fullFacts)){
+ for(const m of eachItemMember(s,facts,fullFacts,true)){
   if(!m.fact.external_order_id||Object.values(m.amounts).every(n=>n===0n)||m.sku_id&&m.product_link_id)continue;
   if(!groups.has(m.shop))groups.set(m.shop,{orders:new Set(),sku_orders:new Set(),link_orders:new Set()});
   const g=groups.get(m.shop),id=m.fact.external_order_id;g.orders.add(id);if(!m.sku_id)g.sku_orders.add(id);if(!m.product_link_id)g.link_orders.add(id);

@@ -84,7 +84,7 @@ def query(dataset, payload):
     path = document_path(dataset)
     code = Path(__file__).parent
     stamps = [(f.stat().st_mtime_ns, f.stat().st_size) for f in [path, *[
-        code / name for name in ('summary_native.cjs', 'summary_engine.cjs', 'summary_runtime.js', 'summary_composition.js', 'summary_cost_detail.cjs', 'summary_periods.cjs', 'summary_allocation.cjs', 'summary_order_ledger.cjs')]]]
+        code / name for name in ('summary_native.cjs', 'summary_flow_view.cjs', 'summary_engine.cjs', 'summary_participation.js', 'summary_accounting_rules.json', 'summary_runtime.js', 'summary_composition.js', 'summary_cost_detail.cjs', 'summary_periods.cjs', 'summary_allocation.cjs', 'summary_order_ledger.cjs')]]]
     key = hashlib.sha256(json.dumps([dataset.tenant_id, dataset.pk, dataset.source_hash,
         state.revision, state.values, stamps], sort_keys=True).encode()).hexdigest()
     request = {'key': key, 'path': str(path), 'input': {
@@ -106,7 +106,7 @@ def query(dataset, payload):
                 node = getattr(settings, 'FINANCE_SUMMARY_NODE', None) or shutil.which('node')
                 if not node:
                     raise OSError()
-                heap_mb = node_heap_mb()
+                heap_mb = node_heap_mb(1024) if dataset.metadata.get('direct_query') else node_heap_mb()
                 _process = subprocess.Popen([node, f'--max-old-space-size={heap_mb}', str(code / 'summary_native.cjs')],
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                     text=True, encoding='utf-8', creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))

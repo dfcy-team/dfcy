@@ -223,3 +223,205 @@ def test_resource_failure_keeps_active_bytes_values_and_audit(context,monkeypatc
     dataset.refresh_from_db();state.refresh_from_db();result=FinanceSummaryCalculation.objects.get(pk=job)
     assert dataset.active and state.revision==0 and result.status=='failed' and result.error_code==code
     assert (document_path(dataset).read_bytes(),dataset.source_hash,state.values,FinanceAuditLog.objects.count())==original
+
+
+def test_dispatch_cooldown_and_persisted_cache_key(context, broker, monkeypatch):
+    from apps.finance.summary_jobs import request_calculation, enqueue, current_dataset
+    _, actor, dataset, _ = context
+    start = timezone.now()
+    monkeypatch.setattr('apps.finance.summary_jobs.timezone.now', lambda: start)
+    job = request_calculation(dataset, actor, {'action': 'history'})
+    enqueue(job)
+    job.refresh_from_db()
+    assert broker.call_count == 1 and current_dataset(job)
+    monkeypatch.setattr('apps.finance.summary_jobs.timezone.now', lambda: start + timedelta(seconds=61))
+    enqueue(job)
+    assert broker.call_count == 2
+
+
+def test_merge_window_survives_dispatch_and_early_delivery(context, broker, monkeypatch):
+    from apps.finance.summary_jobs import request_calculation, enqueue, job_data
+    _, actor, dataset, _ = context
+    grant(actor, 'finance.import')
+    start = timezone.now()
+    monkeypatch.setattr('apps.finance.summary_jobs.timezone.now', lambda: start)
+    payload = {'revision': 0, 'automatic_scope': {'stores': dataset.metadata['store_ids']}}
+    job = request_calculation(dataset, actor, payload, kind='rebuild', debounce_seconds=60)
+    assert request_calculation(dataset, actor, payload, kind='rebuild', debounce_seconds=60).pk == job.pk
+    enqueue(job)
+    assert not broker.called
+    assert job_data(job, actor)['job']['phase'] == 'merging'
+    assert run_calculation(job.pk)['status'] == 'deferred'
+    monkeypatch.setattr('apps.finance.summary_jobs.timezone.now', lambda: start + timedelta(seconds=61))
+    enqueue(job)
+    enqueue(job)
+    assert broker.call_count == 1
+
+
+def test_database_metadata_does_not_scan_source_tables(context, monkeypatch):
+    from apps.finance.summary_service import metadata
+    _, actor, dataset, _ = context
+    dataset.metadata['database_scope'] = {'stores': dataset.metadata['store_ids']}
+    dataset.save()
+    monkeypatch.setattr('apps.finance.summary_service.source_checkpoint', lambda *args, **kwargs: pytest.fail('page polling scanned sources'))
+    data = metadata(dataset, actor, include_values=False)
+    assert data['tenant_id'] == str(actor.tenant_id)
+
+
+@pytest.mark.parametrize('waiting_key', ['not_before', 'dispatch_after'])
+def test_waiting_jobs_do_not_block_later_due_work(context, broker, monkeypatch, waiting_key):
+    _, actor, dataset, _ = context
+    monkeypatch.setattr('apps.finance.summary_maintenance.schedule_changed_summaries', lambda: None)
+    future = (timezone.now() + timedelta(minutes=5)).isoformat()
+    jobs = [FinanceSummaryCalculation(tenant=actor.tenant, dataset=dataset, actor=actor,
+        kind='query', revision=0, cache_key=f'{index:064x}',
+        request={'_summary_queue': {waiting_key: future}} if index < 100 else {}) for index in range(101)]
+    FinanceSummaryCalculation.objects.bulk_create(jobs)
+    dispatch_calculations()
+    assert broker.call_count == 1
+    assert broker.call_args.kwargs['args'] == [FinanceSummaryCalculation.objects.order_by('-pk').first().pk]
+
+
+def test_rule_fingerprint_reuses_reads_and_invalidates_changed_file(tmp_path):
+    import hashlib
+    from unittest.mock import patch
+    from pathlib import Path
+    from apps.finance.summary_jobs import rules_fingerprint
+    file=tmp_path/'synthetic-rule.js'
+    file.write_bytes(b'first')
+    def stamps():
+        stat=file.stat()
+        return ((str(file),stat.st_mtime_ns,stat.st_ctime_ns,stat.st_size),)
+    rules_fingerprint.cache_clear()
+    original=Path.read_bytes
+    with patch.object(Path,'read_bytes',autospec=True,side_effect=original) as read:
+        assert rules_fingerprint(stamps()) == hashlib.sha256(b'first').hexdigest()
+        assert rules_fingerprint(stamps()) == hashlib.sha256(b'first').hexdigest()
+        assert read.call_count == 1
+        file.write_bytes(b'changed')
+        assert rules_fingerprint(stamps()) == hashlib.sha256(b'changed').hexdigest()
+        assert read.call_count == 2
+    rules_fingerprint.cache_clear()
+
+
+def test_cleanup_expires_only_old_obsolete_query_blobs(context,monkeypatch,caplog):
+    from apps.finance.summary_jobs import prune_expired_results
+    from django.utils import timezone
+    _,actor,dataset,state=context
+    now=timezone.now();old=now-timedelta(days=31)
+    state.revision=1;state.save(update_fields=['revision'])
+    def create(key,kind='query',revision=0,status='ready',finished=old):
+        return FinanceSummaryCalculation.objects.create(tenant=actor.tenant,dataset=dataset,actor=actor,
+            kind=kind,revision=revision,cache_key=key*64,request={},status=status,result=b'cached',result_hash='hash',finished_at=finished)
+    obsolete=create('a');current=create('b',revision=1);history=create('c',kind='rebuild');running=create('d',status='running');recent=create('e',finished=now)
+    with caplog.at_level('INFO',logger='apps.finance.summary_jobs'):
+        assert prune_expired_results(now)==1
+    assert 'expired_query_rows=1 selected_query_bytes=6' in caplog.text
+    obsolete.refresh_from_db();assert obsolete.status=='expired' and obsolete.result is None
+    assert FinanceSummaryCalculation.objects.count()==5
+    for row in (current,history,running,recent):row.refresh_from_db();assert bytes(row.result)==b'cached'
+    dataset.refresh_from_db();assert dataset.active
+
+
+def test_expired_cache_is_requeued_when_requested(context,broker):
+    from apps.finance.summary_jobs import request_calculation
+    _,actor,dataset,_=context
+    job=request_calculation(dataset,actor,{'action':'history'})
+    FinanceSummaryCalculation.objects.filter(pk=job.pk).update(status='expired',result=None,result_hash='',error_code='CACHE_EXPIRED')
+    broker.reset_mock()
+    restarted=request_calculation(dataset,actor,{'action':'history'})
+    assert restarted.pk==job.pk and restarted.status=='queued'
+    assert broker.call_count==1
+
+
+def test_cleanup_drains_large_backlog_in_bounded_batches(context):
+    from apps.finance.summary_jobs import prune_expired_results
+    _,actor,dataset,state=context
+    state.revision=1;state.save(update_fields=['revision'])
+    old=timezone.now()-timedelta(days=31)
+    FinanceSummaryCalculation.objects.bulk_create([
+        FinanceSummaryCalculation(tenant=actor.tenant,dataset=dataset,actor=actor,
+            kind='query',revision=0,cache_key=f'{index:064x}',request={},status='ready',result=b'cached',finished_at=old)
+        for index in range(501)])
+    assert prune_expired_results()==500
+    assert prune_expired_results()==1
+    assert prune_expired_results()==0
+    assert FinanceSummaryCalculation.objects.filter(status='expired').count()==501
+
+
+def test_dispatch_recovers_work_even_when_maintenance_stages_fail(context,monkeypatch,broker,caplog):
+    from apps.finance.summary_jobs import request_calculation
+    _,actor,dataset,_=context
+    job=request_calculation(dataset,actor,{'action':'history'})
+    FinanceSummaryCalculation.objects.filter(pk=job.pk).update(status='running',running_until=timezone.now()-timedelta(seconds=1),request={})
+    monkeypatch.setattr('apps.finance.summary_maintenance.schedule_changed_summaries',Mock(side_effect=RuntimeError('PRIVATE_DETAILS')))
+    monkeypatch.setattr('apps.finance.summary_jobs.prune_expired_results',Mock(side_effect=RuntimeError('PRIVATE_DETAILS')))
+    monkeypatch.setattr('apps.finance.summary_jobs.cache.add',lambda *a:True)
+    broker.reset_mock();dispatch_calculations()
+    job.refresh_from_db();assert job.status=='queued' and broker.call_count==1
+    assert 'automatic_check' in caplog.text and 'cache_cleanup' in caplog.text
+    assert 'PRIVATE_DETAILS' not in caplog.text
+
+
+def test_due_queries_are_dispatched_before_maintenance(context,monkeypatch,broker):
+    from apps.finance.summary_jobs import request_calculation
+    _,actor,dataset,_=context
+    job=request_calculation(dataset,actor,{'action':'history'})
+    FinanceSummaryCalculation.objects.filter(pk=job.pk).update(request={'action':'history'})
+    stages=[];broker.side_effect=lambda **kwargs:stages.append('dispatch')
+    monkeypatch.setattr('apps.finance.summary_maintenance.schedule_changed_summaries',lambda:stages.append('automatic_check'))
+    monkeypatch.setattr('apps.finance.summary_jobs.cache.add',lambda *args:True)
+    monkeypatch.setattr('apps.finance.summary_jobs.prune_expired_results',lambda *args:stages.append('cache_cleanup'))
+    dispatch_calculations()
+    assert stages==['dispatch','automatic_check','cache_cleanup']
+
+
+def test_authorized_reader_recovers_query_from_revoked_queued_actor(context,monkeypatch):
+    from apps.finance.summary_jobs import request_calculation
+    _,actor,dataset,_=context
+    second=user_for(dataset.tenant,'second-reader')
+    for code in READ_PERMISSIONS:grant(second,code)
+    job=request_calculation(dataset,actor,{'action':'history'})
+    actor.is_active=False;actor.save(update_fields=['is_active'])
+    same=request_calculation(dataset,second,{'action':'history'})
+    assert same.pk==job.pk and same.actor_id==second.pk
+    monkeypatch.setattr('apps.finance.summary_native.query',Mock(return_value={'rows':[]}))
+    assert run_calculation(job.pk)['status']=='ready'
+    assert FinanceSummaryCalculation.objects.count()==1
+
+
+def test_busy_query_is_deferred_and_timeout_is_distinct(context,monkeypatch,broker):
+    from apps.finance.summary_jobs import request_calculation,deadline
+    from apps.finance.summary_native import CalculationBusy,CalculationTimeout
+    _,actor,dataset,_=context
+    job=request_calculation(dataset,actor,{'action':'history'})
+    calculate=Mock(side_effect=CalculationBusy());monkeypatch.setattr('apps.finance.summary_native.query',calculate)
+    assert run_calculation(job.pk)['status']=='queued'
+    job.refresh_from_db();assert job.error_code=='CALCULATOR_BUSY' and job.lease is None
+    assert deadline(job.request,'not_before')>timezone.now()
+    assert run_calculation(job.pk)['status']=='deferred'
+    job.request={'action':'history'};job.save(update_fields=['request'])
+    calculate.side_effect=CalculationTimeout()
+    assert run_calculation(job.pk)['status']=='failed'
+    job.refresh_from_db();assert job.error_code=='CALCULATOR_TIMEOUT'
+
+
+def test_shared_query_recovery_never_bypasses_scope_or_running_lease(context):
+    from apps.finance.summary_jobs import request_calculation
+    from rest_framework.exceptions import PermissionDenied
+    _,actor,dataset,_=context
+    second=user_for(dataset.tenant,'safe-reader')
+    limited=user_for(dataset.tenant,'limited-reader')
+    for code in READ_PERMISSIONS:
+        grant(second,code)
+        grant(limited,code,scope_type='self' if code=='finance.view' else 'all')
+    job=request_calculation(dataset,actor,{'action':'history'})
+    actor.is_active=False;actor.save(update_fields=['is_active'])
+    with pytest.raises(PermissionDenied):request_calculation(dataset,limited,{'action':'history'})
+    job.refresh_from_db();assert job.actor_id==actor.pk
+    due=timezone.now()+timedelta(minutes=1)
+    FinanceSummaryCalculation.objects.filter(pk=job.pk).update(status='running',running_until=due)
+    request_calculation(dataset,second,{'action':'history'})
+    job.refresh_from_db();assert job.actor_id==actor.pk and job.running_until==due
+    FinanceSummaryCalculation.objects.filter(pk=job.pk).update(status='blocked',running_until=None,error_code='PERMISSION_CHANGED')
+    assert request_calculation(dataset,second,{'action':'history'}).actor_id==second.pk

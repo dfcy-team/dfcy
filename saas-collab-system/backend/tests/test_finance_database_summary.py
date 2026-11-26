@@ -178,6 +178,18 @@ def test_database_collection_reflects_source_changes_and_excludes_other_tenant(t
     assert all(f.get('store_id') == store.pk for f in after['facts'])
 
 
+@pytest.mark.django_db
+def test_unregistered_optional_fees_do_not_create_missing_amount_placeholders():
+    tenant,_,store,_=create_scope('optional-summary-source')
+    store.code='SP6TH';store.save(update_fields=['code'])
+    user=user_for(tenant,'optional-summary-source')
+    FinanceSummaryInput.objects.create(tenant=tenant,store=store,kind='adjustment',source_key='known-adjustment',
+        period='2026-09',payload={'amount':'-20'},source_hash='b'*64,source_description='synthetic',created_by=user)
+    result=collect(user,{'stores':[store.pk],'from':'2026-09-01','to':'2026-09-30'},allow_legacy_zero=False)
+    assert not any(f['kind'] in {'gcash','promotion'} for f in result['facts'])
+    assert any(f['kind']=='adjustment' and f['amount']=='-20.000000' for f in result['facts'])
+
+
 def test_rebuild_enforces_write_access_before_collecting(context, monkeypatch):
     client, _, dataset, _ = context
     monkeypatch.setattr('apps.finance.summary_rebuild.collect', lambda *args: pytest.fail('Unauthorized source read'))

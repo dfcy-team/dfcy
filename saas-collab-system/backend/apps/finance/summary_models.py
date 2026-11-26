@@ -66,3 +66,10 @@ class FinanceSummaryCalculation(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=['status', 'running_until'], name='idx_summary_calc_dispatch')]
+
+
+class FinanceSummaryAutomationCheck(models.Model):
+    """Latest scheduler diagnostic, separate from immutable accounting inputs."""
+    dataset = models.OneToOneField(FinanceSummaryDataset, on_delete=models.CASCADE, primary_key=True)
+    checked_at = models.DateTimeField()
+    code = models.CharField(max_length=32)

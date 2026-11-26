@@ -6,7 +6,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
-from .summary_models import FinanceSummaryDataset, FinanceSummaryCalculation
+from .summary_models import FinanceSummaryDataset, FinanceSummaryCalculation, FinanceSummaryState
 from .summary_service import require_access, source_checkpoint, document_path
 
 
@@ -35,31 +35,58 @@ def schedule_changed_summaries():
     """Refresh the current/previous month only, preserving historical inputs."""
     from .summary_jobs import request_calculation
     from .summary_recent import recent_scope
+    from .summary_health import record_check
     for dataset in FinanceSummaryDataset.objects.filter(active=True).select_related('accounting_state__updated_by'):
-        if dataset.metadata.get('automatic_update_enabled') is False:
-            continue
         scope = dataset.metadata.get('database_scope')
         if not scope or not cache.add(f'finance-summary-check:{dataset.pk}', True, 300):
             continue
+        if dataset.metadata.get('automatic_update_enabled') is False:
+            record_check(dataset, 'disabled')
+            continue
         actor = dataset.accounting_state.updated_by
+        validation_code = 'validation_failed'
         try:
             if not actor.is_active or actor.tenant_id != dataset.tenant_id:
+                record_check(dataset, 'executor_inactive')
                 continue
             require_access(actor, write=True)
+            validation_code = 'source_unavailable'
             document_path(dataset)
+            validation_code = 'validation_failed'
+            jobs = FinanceSummaryCalculation.objects.filter(dataset=dataset, kind='rebuild')
+            if jobs.filter(status__in=['queued', 'running']).exists():
+                record_check(dataset, 'task_pending')
+                continue
+            if jobs.filter(status='failed', finished_at__gte=timezone.now()-timedelta(minutes=5)).exists():
+                record_check(dataset, 'retry_cooldown')
+                continue
+            checkpoint = source_checkpoint(scope['stores'])
+            recent = recent_scope(scope['stores'])
+            if checkpoint == dataset.metadata.get('checkpoint') and dataset.metadata.get('automatic_scope') == recent:
+                record_check(dataset, 'unchanged')
+                continue
             with transaction.atomic():
                 locked = FinanceSummaryDataset.objects.select_for_update().get(pk=dataset.pk)
-                if not locked.active:
+                if not locked.active or locked.metadata != dataset.metadata:
+                    record_check(dataset, 'version_changed')
+                    continue
+                state = FinanceSummaryState.objects.select_for_update().get(dataset=locked)
+                if state.revision != dataset.accounting_state.revision or state.updated_by_id != actor.pk:
+                    record_check(dataset, 'version_changed')
                     continue
                 jobs = FinanceSummaryCalculation.objects.filter(dataset=dataset, kind='rebuild')
-                if jobs.filter(status__in=['queued', 'running']).exists() or jobs.filter(
-                    status='failed', finished_at__gte=timezone.now()-timedelta(minutes=5)).exists():
+                if jobs.filter(status__in=['queued', 'running']).exists():
+                    record_check(dataset, 'task_pending')
                     continue
-                checkpoint = source_checkpoint(scope['stores'])
-                recent = recent_scope(scope['stores'])
-                if checkpoint != dataset.metadata.get('checkpoint') or dataset.metadata.get('automatic_scope') != recent:
-                    request_calculation(dataset, actor, {'revision': dataset.accounting_state.revision,
-                        'automatic_scope': recent}, kind='rebuild')
-        except (PermissionDenied, ValidationError):
+                if jobs.filter(status='failed', finished_at__gte=timezone.now()-timedelta(minutes=5)).exists():
+                    record_check(dataset, 'retry_cooldown')
+                    continue
+                request_calculation(dataset, actor, {'revision': state.revision,
+                    'automatic_scope': recent}, kind='rebuild', debounce_seconds=60)
+                record_check(dataset, 'queued')
+        except PermissionDenied:
+            record_check(dataset, 'permission_denied')
+        except ValidationError:
+            record_check(dataset, validation_code)
             # Invalid authorization/files must not switch the accepted batch.
             continue

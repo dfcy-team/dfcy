@@ -55,6 +55,21 @@ def test_missing_runtime_cannot_queue_a_calculation(setup_initialization, monkey
     assert not FinanceSummaryCalculation.objects.exists()
 
 
+@pytest.mark.django_db
+def test_metadata_restores_previous_scope_without_foreign_stores(setup_initialization):
+    user, store, client = setup_initialization
+    body = {'scope': {'from': '2026-10-01', 'to': '2026-10-31', 'stores': [store.pk]}}
+    response = client.post('/api/finance/summary/initialize/', body, format='json')
+    job = FinanceSummaryCalculation.objects.get(pk=response.data['data']['job']['id'])
+    job.status = 'superseded'
+    job.request['scope']['stores'].append(999999)
+    job.save(update_fields=['status', 'request'])
+    data = client.get('/api/finance/summary/', {'native': 1}).data['data']
+    assert data['initialization_job']['status'] == 'superseded'
+    assert data['initialization_job']['scope'] == body['scope']
+    assert not FinanceSummaryDataset.objects.filter(active=True).exists()
+
+
 def test_template_contains_no_business_rows_and_runs_with_empty_settings(settings, tmp_path):
     settings.FINANCE_SUMMARY_ROOT = tmp_path
     raw, manifest = template_bytes()
@@ -113,7 +128,8 @@ def test_candidate_publication_rechecks_tenant_sources_and_preserves_other_activ
         document_file=path.name, source_hash=manifest['sha256'], metadata={
             'bootstrap_candidate': True, 'automatic_update_enabled': False,
             'store_ids': [store.pk], 'database_scope': {'stores': [store.pk], 'from':'2026-10-01','to':'2026-10-31'},
-            'checkpoint': {}, 'reconciliation': {'conservation_passed':True,'attribution_complete':False}})
+            'checkpoint': {}, 'reconciliation': {'conservation_passed':True,'attribution_complete':True},
+            'source_checks': {'coverage_complete':True}})
     FinanceSummaryState.objects.create(dataset=candidate, updated_by=user)
     FinanceSummaryCalculation.objects.create(tenant=user.tenant, dataset=candidate, actor=user,
         cache_key='b'*64, kind='rebuild', revision=0, request={'bootstrap': True},
@@ -126,6 +142,15 @@ def test_candidate_publication_rechecks_tenant_sources_and_preserves_other_activ
         grant(other, code)
     assert client_for(other).post(url, {'confirm':True}, format='json').status_code == 404
     assert client.post(url, {'confirm':False}, format='json').status_code == 400
+    candidate.metadata['reconciliation']['attribution_complete'] = False
+    candidate.save()
+    assert client.post(url, {'confirm':True}, format='json').status_code == 400
+    candidate.metadata['reconciliation']['attribution_complete'] = True
+    candidate.metadata['source_checks']['coverage_complete'] = False
+    candidate.save()
+    assert client.post(url, {'confirm':True}, format='json').status_code == 400
+    candidate.metadata['source_checks']['coverage_complete'] = True
+    candidate.save()
     monkeypatch.setattr('apps.finance.summary_initialization.source_checkpoint', lambda ids: {'changed':True})
     assert client.post(url, {'confirm':True}, format='json').status_code == 400
     assert not FinanceSummaryDataset.objects.filter(active=True).exists()

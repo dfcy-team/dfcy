@@ -42,5 +42,5 @@ test('bundled attributed snapshot template opens in native query',()=>{
 test('ignores unrelated optional script attributes as the accepted engine did',()=>{
  const html=fixture(false)+'<script id="optional" src=\'optional.js\'></script>';
  const parsed=prepareSource(Buffer.from(html),false,{retainJSON:false});
- assert.equal(parsed.snapshot.label,'中文😀');assert.equal(Object.keys(parsed.scripts).length,15);
+ assert.equal(parsed.snapshot.label,'中文😀');assert.equal(parsed.modules.size,15);
 });
