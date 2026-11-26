@@ -1,3 +1,5 @@
+from django.conf import settings
+from zoneinfo import ZoneInfo
 """Atomic month-average valuation and immutable finalization."""
 from decimal import Decimal, ROUND_HALF_UP
 from django.core.exceptions import ValidationError
@@ -72,7 +74,7 @@ def finalize_month(record, watermark):
     record=MonthlyProductCost.objects.select_for_update().get(pk=record.pk)
     if record.status==MonthlyProductCost.Status.FINALIZED:
         return record
-    if record.month>=timezone.localdate().replace(day=1):
+    if record.month>=timezone.localdate(timezone=ZoneInfo(getattr(settings,"MONTHLY_PRODUCT_COST_TIMEZONE","Asia/Shanghai"))).replace(day=1):
         raise ValidationError("Only a completed month can be finalized")
     record=recalculate_month(record)
     if not record.is_complete or record.unit_cost is None:

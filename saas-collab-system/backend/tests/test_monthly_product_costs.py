@@ -144,3 +144,14 @@ def test_negative_adjustment_reduces_cost_without_negative_total(monthly_record)
     monthly_record.adjustment_amount=Decimal("-20");monthly_record.save()
     row=recalculate_month(monthly_record)
     assert row.unit_cost==Decimal("3")
+
+
+@pytest.mark.django_db
+def test_shanghai_month_boundary_allows_prior_month_finalization(monthly_record):
+    from unittest.mock import patch
+    from datetime import datetime, timezone as tz
+    # UTC is still April, while the cost business calendar has entered May.
+    with patch("django.utils.timezone.now",return_value=datetime(2025,4,30,18,0,tzinfo=tz.utc)):
+        row=recalculate_month(monthly_record)
+        closed=finalize_month(row,{"source_complete":True,"inventory_reconciled":True,"opening_verified":True})
+        assert closed.status=="finalized"

@@ -1,0 +1,10 @@
+{
+  "source_sha": "2238ee5a00ee290370c9f8a3c1137c01385f1f40",
+  "base_sha": "cac372045a694c9f301a3a1bb983c36ea2ce9e09",
+  "other_head": "cac372045a694c9f301a3a1bb983c36ea2ce9e09",
+  "feature_changed_files": 59,
+  "cumulative_uncommitted_files": 37,
+  "overlap_paths": [],
+  "scope": "read-only compatibility check; no changes to cumulative worktree",
+  "status": "disjoint_paths_at_observation"
+}

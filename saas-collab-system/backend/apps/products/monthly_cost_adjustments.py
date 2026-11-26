@@ -146,7 +146,7 @@ def sync_late_adjustments(tenant_id,effective_month):
             target=effective_month
             if MonthlyProductCost.objects.filter(tenant_id=tenant_id,sku_id=receipt.sku_id,
                 warehouse_id=receipt.receipt.warehouse_id,month=target,status="finalized").exists():
-                target=timezone.localdate().replace(day=1)
+                target=timezone.localdate(timezone=ZoneInfo(getattr(settings,"MONTHLY_PRODUCT_COST_TIMEZONE","Asia/Shanghai"))).replace(day=1)
             record=register_adjustment(tenant_id=tenant_id,sku_id=receipt.sku_id,
                 warehouse_id=receipt.receipt.warehouse_id,receipt_line_id=receipt_id,
                 original_month=original_month,effective_month=target,source_key=source_key,delta_amount=delta,

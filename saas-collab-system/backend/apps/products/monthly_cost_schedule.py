@@ -1,3 +1,4 @@
+from zoneinfo import ZoneInfo
 """Opt-in daily orchestration; deployment supplies tenant-bound service actors."""
 from celery import shared_task
 from django.conf import settings
@@ -41,7 +42,7 @@ def prepare_actor(actor_id, after_id=0):
     from .tasks import aggregate_monthly_product_cost_sources
     from datetime import date
     from .monthly_cost_adjustments import next_month
-    today=timezone.localdate().replace(day=1)
+    today=timezone.localdate(timezone=ZoneInfo(getattr(settings,"MONTHLY_PRODUCT_COST_TIMEZONE","Asia/Shanghai"))).replace(day=1)
     try:
         start=date.fromisoformat(getattr(settings,"MONTHLY_PRODUCT_COST_CUTOVER_MONTH","")+"-01")
     except ValueError:
@@ -69,7 +70,7 @@ def finalize_ready_months(tenant_id, limit=100, after_id=0):
     from django.core.exceptions import ValidationError
     finalized,pending=0,[]
     batch_size=min(500,max(1,int(limit)))
-    rows=list(MonthlyProductCost.objects.filter(tenant_id=tenant_id,pk__gt=after_id,month__lt=timezone.localdate().replace(day=1)).exclude(status="finalized").order_by("pk")[:batch_size+1])
+    rows=list(MonthlyProductCost.objects.filter(tenant_id=tenant_id,pk__gt=after_id,month__lt=timezone.localdate(timezone=ZoneInfo(getattr(settings,"MONTHLY_PRODUCT_COST_TIMEZONE","Asia/Shanghai"))).replace(day=1)).exclude(status="finalized").order_by("pk")[:batch_size+1])
     has_more=len(rows)>batch_size
     rows=rows[:batch_size]
     for row in rows:
