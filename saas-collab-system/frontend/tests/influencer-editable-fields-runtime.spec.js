@@ -57,6 +57,33 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('copies task details into an unsaved new draft without keeping execution state', async () => {
+    const source = { ...task, status: 'completed', started_at: '2026-11-20T08:00:00Z',
+      finalized_at: '2026-11-20T10:00:00Z', external_product_id: '1738716941795558935', sku_prefix: 'SKU' };
+    permissions.check = () => false;
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    await wrapper.vm.openReuse(source);
+    expect(wrapper.vm.createVisible).toBe(false);
+    wrapper.unmount();
+    permissions.check = () => true;
+    const authorized = render(OutreachTaskList);
+    await flushPromises();
+    await authorized.vm.openReuse({ ...source, is_deleted: true });
+    expect(authorized.vm.createVisible).toBe(false);
+    await authorized.vm.openReuse(source);
+    expect(authorized.vm.createVisible).toBe(true);
+    expect(authorized.vm.editingTask).toBeNull();
+    expect(authorized.vm.form).toMatchObject({
+      task_no: '', task_name: source.task_name, store: 3, external_product_id: source.external_product_id,
+      sku_prefix: 'SKU', owners: [9], target_count: 1, status: 'pending', started_at: null, finalized_at: null,
+    });
+    authorized.vm.form.owners.push(10);
+    expect(source.owners).toEqual([9]);
+    expect(request.mock.calls.some(([config]) => ['post', 'patch'].includes(config.method))).toBe(false);
+    authorized.unmount();
+  });
+
   it.each(['task', 'standalone'])('passes the selected store for country-scoped nickname creation (%s)', async (kind) => {
     const wrapper = render(kind === 'task' ? OutreachTaskList : SampleFulfillmentList);
     await flushPromises();

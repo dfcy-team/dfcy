@@ -47,7 +47,7 @@
         <el-checkbox v-model="filters.deletedOnly" @change="applyFilters">只显示删除的</el-checkbox>
         <el-button type="primary" @click="applyFilters">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
-        <el-button type="primary" :disabled="!canManage" @click="openCreate">新建任务</el-button>
+        <el-button type="primary" :disabled="!canManage" @click="openCreate()">新建任务</el-button>
       </div>
 
       <el-table
@@ -116,10 +116,11 @@
         <el-table-column prop="finalized_at" label="任务完成时间" min-width="165">
           <template #default="{ row }">{{ formatTaskTime(row.finalized_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" min-width="205" fixed="right">
+        <el-table-column label="操作" min-width="240" fixed="right">
           <template #default="{ row }">
             <el-button link @click.stop="openDetail(row)">查看详情</el-button>
             <el-button v-if="!row.is_deleted" link :disabled="!canManage" @click.stop="openEdit(row)">修改</el-button>
+              <el-button v-if="!row.is_deleted" link :disabled="!canManage" @click.stop="openReuse(row)">复制</el-button>
             <el-button v-if="!row.is_deleted" link type="danger" :disabled="!canManage" @click.stop="removeTask(row)">删除</el-button>
             <el-button v-else link type="primary" :disabled="!canManage" @click.stop="restoreTask(row)">恢复</el-button>
           </template>
@@ -678,24 +679,29 @@ function clearProductMatch() {
   productMatchType.value = 'info';
 }
 
-async function openCreate() {
+async function openCreate(source = null) {
+  if (!canManage.value || !await loadTaskOptions(true)) return;
   editingTask.value = null;
   Object.assign(form, {
     task_no: '',
-    task_name: '',
+    task_name: source?.task_name || '',
     priority: 'normal',
-    store: null,
-    external_product_id: '',
-    sku_prefix: '',
+    store: source?.store ?? null,
+    external_product_id: source?.external_product_id || '',
+    sku_prefix: source?.sku_prefix || '',
     target_count: 1,
-    owners: [],
+    owners: source?.owners?.length ? [...source.owners] : (hasValue(source?.owner) ? [source.owner] : []),
     status: 'pending',
     started_at: null,
     finalized_at: null
   });
   clearProductMatch();
-  if (!await loadTaskOptions(true)) return;
   createVisible.value = true;
+}
+
+function openReuse(row) {
+  if (!row || row.is_deleted) return;
+  return openCreate(row);
 }
 
 async function openEdit(row) {
