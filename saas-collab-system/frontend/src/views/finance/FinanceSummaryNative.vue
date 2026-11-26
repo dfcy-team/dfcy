@@ -102,7 +102,7 @@
 </template>
 
 <script setup>
-import MonthlyCostAdjustments from '@/components/finance/MonthlyCostAdjustments.vue'
+import MonthlyCostAdjustments from '../../components/finance/MonthlyCostAdjustments.vue'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { fetchFinanceSummary, fetchFinanceSummaryJob, rebuildFinanceSummary, fetchFinanceSummaryTable, fetchFinanceSummaryDetail, saveFinanceSummaryFee, fetchFinanceSummaryHistory, fetchFinanceSourceFlows, fetchFinanceSourceFlowDetail } from '../../api/financeReconciliation';
 import FinanceCostDetail from './FinanceCostDetail.vue';

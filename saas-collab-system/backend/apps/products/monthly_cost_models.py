@@ -158,6 +158,8 @@ class MonthlyCostMovement(models.Model):
     def save(self, *args, **kwargs):
         if self.pk:
             raise ValidationError("Stock movement facts are immutable")
+        if MonthlyProductCost.objects.filter(tenant_id=self.tenant_id, sku_id=self.sku_id, warehouse_id=self.warehouse_id, month=self.month, status="finalized").exists():
+            raise ValidationError("Post late stock changes into an open month; finalized stock periods are immutable")
         if self.quantity <= 0 or self.month.day != 1 or not self.evidence:
             raise ValidationError("Movement requires positive quantity, month boundary and source evidence")
         if self.sku.tenant_id != self.tenant_id or self.warehouse.tenant_id != self.tenant_id:

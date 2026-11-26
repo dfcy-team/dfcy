@@ -120,6 +120,17 @@ def sync_late_adjustments(tenant_id,effective_month):
             before=previous.get(key)
             if current is not None:
                 previous[key]=Decimal(str(current))
+            if version_month==effective_month and original_month<effective_month and before is None and current is not None:
+                closed=MonthlyProductCost.objects.filter(tenant_id=tenant_id,sku_id=receipt.sku_id,
+                    warehouse_id=receipt.receipt.warehouse_id,month=original_month,status="finalized").exists()
+                if closed:
+                    record=register_adjustment(tenant_id=tenant_id,sku_id=receipt.sku_id,
+                        warehouse_id=receipt.receipt.warehouse_id,receipt_line_id=receipt_id,
+                        original_month=original_month,effective_month=effective_month,
+                        source_key=f"missing-baseline:{version.pk}:receipt:{receipt_id}",delta_amount=0,
+                        evidence={"cost_version_id":version.pk,"observed_amount":str(current),"baseline_unknown":True})
+                    record.reason="历史已核定，但原批次金额基线缺失，须补充来源差额依据";record.save()
+                    pending+=1
             if version_month!=effective_month or original_month>=effective_month or before is None or current is None:
                 continue
             delta=Decimal(str(current))-before
