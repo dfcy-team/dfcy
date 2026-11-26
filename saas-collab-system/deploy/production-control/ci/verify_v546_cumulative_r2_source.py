@@ -15,7 +15,7 @@ TREE = "44a2eb5a94c9549da6e330ec57fb132ed5d4d5f1"
 PARENT = "2c1f39c79e08ec6a54d6dff968f4955bc8921405"
 MIGRATION = "c74f93cc49ee050b36d00ab7ec9aca305b6e17bff6d069cc46faea2464b9f0ff"
 IDENTITY = "v546-cumulative-r2-source-identity.json"
-REHEARSAL_SHA = "78e5feca352a238e2a4e017a59ab646f3c78d7fe0ae6c0bf3447b72123d5fb98"
+REHEARSAL_SHA = "9f2a5b363d185369673ee848cda3619791299f35da9f714a7162424e810026d5"
 if not __debug__: raise RuntimeError("Optimized Python disables release gates")
 
 
@@ -31,7 +31,7 @@ def validate_phase_summary(summary, source, tree, operation):
     def check(condition, message):
         if not condition:raise RuntimeError('actual MySQL test phase: '+message)
     check(isinstance(summary,dict),'missing summary')
-    check(re.fullmatch(r'saas-v546-rehearsal-r11-'+source[:8]+r'-f323c449-[0-9a-f]{10}',operation) is not None,'operation format')
+    check(re.fullmatch(r'saas-v546-rehearsal-r12-'+source[:8]+r'-573415a3-[0-9a-f]{10}',operation) is not None,'operation format')
     check(summary.get('status')=='PASS' and summary.get('source_sha')==source and summary.get('source_tree')==tree and summary.get('operation')==operation,'source/tree/operation binding')
     check(summary.get('database')=='test_vm546_acceptance' and summary.get('required_modules')==EXPECTED_TEST_MODULES and summary.get('required_mysql_cases')==EXPECTED_MYSQL_CASES,'exact database/test inventory')
     check(summary.get('execution_phase')=='before_restore_on_private_test_schema' and all(summary.get(k) is True for k in ('modules_run_separately','fixture_databases_dropped','clone_db_empty_before_restore')),'phase scope')
@@ -105,7 +105,7 @@ require({p for p in added_paths if p.endswith('/__init__.py')}=={'saas-collab-sy
 require(identity['migration']['sha256']==MIGRATION,'migration identity mismatch')
 
 baseline=identity['baseline']
-require(baseline=={'sha256':'636e643593faea18999d5642b27eafc74ca8e320e356f27c7913e308781bdcca','source_sha':PARENT,'version':'2.44.542','tables':423,'migration_nodes':544,'protected_tables':420,'protected_rows':3565003,'custom_permission_rows':473},'actual V542 baseline mismatch')
+require(baseline=={'sha256':'33ddb8c54180f26380d852acb5c5b6cd4ba420e864168f634497fd05393936d9','source_sha':PARENT,'version':'2.44.542','tables':423,'migration_nodes':544,'protected_tables':420,'protected_rows':3577537,'custom_permission_rows':473},'actual V542 baseline mismatch')
 require(os.environ.get('EXPECTED_BASELINE_SHA')==baseline['sha256'],'requested baseline mismatch')
 require(identity['metadata']=={'django_migrations':6,'django_content_type':8,'auth_permission':32},'metadata increment mismatch')
 require(identity['scope']=={'included':[543,544,545,546],'cloud_only_543_sales_included':False,'code_only':True,'business_acceptance':'deferred'},'scope mismatch')
@@ -152,15 +152,15 @@ require(sha(raw) == capture["artifact_sha256"], "rehearsal receipt SHA mismatch"
 receipt = json.loads(raw.decode("utf-8"))
 require(sha(raw)==REHEARSAL_SHA,'independently pinned actual rehearsal receipt mismatch')
 require(receipt.get('status')=='PASS' and receipt.get('source_sha')==SOURCE,'actual rehearsal source mismatch')
-require(receipt['source_archive_sha256']=='f3d44e8d5bb83fb91efeb61ebb4ea79d6bffebc00919ae411ec71bd0a0059821' and receipt['backup_sha256']=='f323c44920cca6049fa89b2010b0421ee16aa5bf362c1a37aa71dc370421154c','archive/backup binding mismatch')
+require(receipt['source_archive_sha256']=='f3d44e8d5bb83fb91efeb61ebb4ea79d6bffebc00919ae411ec71bd0a0059821' and receipt['backup_sha256']=='573415a3c63f852363ef3414e3b29143acbcb98690badddd3bbcd4524c0a568a','archive/backup binding mismatch')
 require(receipt['approved_checkpoint_sha256']==baseline['sha256'],'checkpoint mismatch')
 require(all(receipt.get(k) is True for k in ['cleanup_verified','production_app_unchanged','production_roles_unchanged','protected_state_unchanged','test_artifacts_retained']) and receipt['production_roles_verified']==14,'isolation/production preservation failed')
 require(receipt['isolation_checks']['db_network']=='none' and receipt['isolation_checks']['probe_shares_db_network'] is True,'network isolation failed')
 probe=receipt['probe_receipt']
 require(probe['status']=='PASS' and probe['source_sha']==SOURCE and probe['source_tree']==TREE and probe['migration_digest']==MIGRATION,'probe source/tree/migration mismatch')
-require(probe['checkpoint_sha256']==baseline['sha256'] and probe['checkpoint_tables_verified']==420 and probe['checkpoint_rows_verified']==3565003 and probe['checkpoint_metadata_tables_verified']==3,'checkpoint proof mismatch')
+require(probe['checkpoint_sha256']==baseline['sha256'] and probe['checkpoint_tables_verified']==420 and probe['checkpoint_rows_verified']==3577537 and probe['checkpoint_metadata_tables_verified']==3,'checkpoint proof mismatch')
 require(probe['before']=={'tables':423,'nodes':544},'before schema mismatch')
-after=probe['after'];require((after['tables'],after['nodes'],after['new_tables'],after['old_data_tables_hashed'],after['old_data_rows_verified'],after['schema_delta'])==(433,550,10,420,3565003,1),'after schema mismatch')
+after=probe['after'];require((after['tables'],after['nodes'],after['new_tables'],after['old_data_tables_hashed'],after['old_data_rows_verified'],after['schema_delta'])==(433,550,10,420,3577537,1),'after schema mismatch')
 require(all(after.get(k) is True for k in ['new_tables_empty','finance_is_active_default_preserved','old_fields_unchanged','old_indexes_unchanged_except_allowlisted_covering_index','role_permission_hash_unchanged','second_plan_empty']),'migration preservation proof missing')
 require(probe['metadata_increments']==identity['metadata'] and probe['external_business_calls']==0,'metadata/external-call mismatch')
 ct=probe['contention'];require(ct['status']=='PASS' and ct['connections']==2 and ct['mysql_code']==3572 and ct['conflict_status_code']==409 and ct['rollback_usable'] is True and ct['after_release_acquired'] is True and ct['elapsed_seconds']<5,'actual NOWAIT proof mismatch')
