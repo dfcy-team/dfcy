@@ -21,6 +21,17 @@ from .management.commands.export_tiktok_shop_dataset import resolve_export_scope
 from .models import TikTokShopVideo, TikTokVideoProduct, TikTokVideoDailyMetric, TikTokVideoSyncBatch, TikTokVideoSyncEvidence
 from .tiktok_shop_dataset import TikTokDatasetClient, DatasetError, canonical_bytes, _published_time
 
+import gzip
+
+import re
+
+from django.conf import settings
+
+from django.core.files.base import ContentFile
+
+from django.core.files.storage import storages
+
+
 PATH = '/analytics/202605/shop_videos/performance'
 VERSION = '202605-videos-v1'
 COUNTS = ('views', 'likes', 'comments', 'shares', 'new_followers', 'v_to_l_clicks',
@@ -166,25 +177,132 @@ def fingerprint(auth):
         'currency':auth.store.currency,'runtime':get_runtime_platform_config('tiktok')})
 
 
-def receipt(batch, page, payload):
+def _persist_receipt(fields, defaults, payload):
+    """Preserve production deadlock retries without replaying a provider request."""
     import time
-    # Never replay a provider request merely because its immutable receipt is blocked.
-    # A caller-owned transaction must be rolled back by that caller, not retried here.
+    lookup = {key: value for key, value in fields.items() if key != 'payload_hash'}
+    defaults = dict(defaults, payload_hash=fields['payload_hash'])
     attempts = 1 if connection.in_atomic_block else 4
-    hashed = digest(payload)
     for attempt in range(attempts):
         try:
             with transaction.atomic():
-                saved, _ = TikTokVideoSyncEvidence.objects.get_or_create(
-                    tenant_id=batch.tenant_id, batch=batch, attempt=batch.attempt_count,
-                    page=page, defaults={'payload': payload, 'payload_hash': hashed})
-                require(saved.payload_hash == hashed and saved.payload == payload,
-                        'video_receipt_conflict')
+                saved, _ = TikTokVideoSyncEvidence.objects.get_or_create(**lookup, defaults=defaults)
+                require(saved.payload_hash == fields['payload_hash'], 'video_receipt_conflict')
+            require(saved.read_payload() == payload, 'video_receipt_conflict')
             return saved
         except DatabaseError as exc:
             if not exc.args or exc.args[0] not in (1205, 1213) or attempt + 1 == attempts:
                 raise
             time.sleep(2 ** attempt)
+
+
+def _persist_checkpoint_receipt(fields, defaults, payload, batch, cursor, lease_token):
+    """Verify receipt bytes outside locks, then commit evidence and cursor together."""
+    import time
+
+    class RepresentationChanged(Exception):
+        pass
+
+    lookup = {key: value for key, value in fields.items() if key != 'payload_hash'}
+    may_create = defaults is not None
+    defaults = dict(defaults or {}, payload_hash=fields['payload_hash'])
+    attempts = 1 if connection.in_atomic_block else 4
+    for attempt in range(attempts):
+        # All object reads happen before opening the checkpoint transaction.
+        current = TikTokVideoSyncEvidence.objects.filter(**lookup).first()
+        if current is not None:
+            require(current.read_payload() == payload, 'video_receipt_conflict')
+            verified = (current.pk, current.payload_hash, current.payload,
+                        current.payload_storage_alias, current.payload_object_key)
+        else:
+            require(may_create, 'video_receipt_missing_during_checkpoint')
+            verified = None
+            expected_defaults = (None, defaults.get('payload_hash'), defaults.get('payload'),
+                                 defaults.get('payload_storage_alias'), defaults.get('payload_object_key'))
+        try:
+            with transaction.atomic():
+                locked = TikTokVideoSyncBatch.objects.select_for_update().get(
+                    pk=batch.pk, tenant_id=batch.tenant_id)
+                now = timezone.now()
+                require(locked.status == 'running' and lease_token and
+                        locked.lease_token == lease_token and locked.lease_expires_at is not None and
+                        locked.lease_expires_at > now, 'video_lease_lost')
+                saved, created = TikTokVideoSyncEvidence.objects.select_for_update().get_or_create(
+                    **lookup, defaults=defaults)
+                snapshot = (saved.pk, saved.payload_hash, saved.payload,
+                            saved.payload_storage_alias, saved.payload_object_key)
+                if verified is not None and snapshot != verified:
+                    raise RepresentationChanged()
+                if verified is None and not created:
+                    raise RepresentationChanged()
+                if verified is None and snapshot[1:] != expected_defaults[1:]:
+                    raise DatasetError('video_receipt_conflict')
+                if snapshot[1] != fields['payload_hash']:
+                    raise DatasetError('video_receipt_conflict')
+                locked.request_cursor = json.dumps(cursor, sort_keys=True, separators=(',', ':'))
+                locked.save(update_fields=['request_cursor', 'updated_at'])
+            return saved
+        except RepresentationChanged:
+            if attempt + 1 == attempts:
+                raise DatasetError('video_receipt_representation_changed')
+            # Re-read and verify the newly observed representation on the next pass.
+            continue
+        except DatabaseError as exc:
+            if not exc.args or exc.args[0] not in (1205, 1213) or attempt + 1 == attempts:
+                raise
+            time.sleep(2 ** attempt)
+
+
+def receipt(batch, page, payload, *, checkpoint=None, lease_token=None):
+    alias = getattr(settings, 'TIKTOK_VIDEO_EVIDENCE_STORAGE_ALIAS', '').strip()
+    fields = {'tenant_id':batch.tenant_id, 'batch':batch, 'attempt':batch.attempt_count,
+        'page':page, 'payload_hash':digest(payload)}
+    if not alias:
+        defaults = {'payload':payload}
+        if checkpoint is not None:
+            return _persist_checkpoint_receipt(fields, defaults, payload, batch, checkpoint, lease_token)
+        return _persist_receipt(fields, defaults, payload)
+    namespace = getattr(settings, 'RAW_PAYLOAD_STORAGE_NAMESPACE', '').strip()
+    if len(alias) > 80 or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}', namespace):
+        raise DatasetError('video_evidence_storage_configuration_invalid')
+    existing = TikTokVideoSyncEvidence.objects.filter(tenant_id=batch.tenant_id, batch=batch,
+        attempt=batch.attempt_count, page=page).first()
+    if existing:
+        if existing.payload_hash != fields['payload_hash']:
+            raise DatasetError('video_evidence_receipt_conflict')
+        if checkpoint is None:
+            require(existing.read_payload() == payload, 'video_receipt_conflict')
+            return existing
+        return _persist_checkpoint_receipt(fields, None, payload, batch, checkpoint, lease_token)
+    raw = canonical_bytes(payload)
+    if len(raw) > 32 * 1024 * 1024:
+        raise DatasetError('video_evidence_payload_too_large')
+    compressed = gzip.compress(raw, mtime=0)
+    if len(compressed) > 32 * 1024 * 1024:
+        raise DatasetError('video_evidence_compressed_payload_too_large')
+    stable_id = hashlib.sha256(
+        f'{batch.tenant_id}:{batch.pk}:{batch.attempt_count}:{page}:{fields["payload_hash"]}'.encode()
+    ).hexdigest()[:32]
+    key = f'raw/{namespace}/tenant-{batch.tenant_id}/{stable_id}.json.gz'
+    try:
+        storage = storages[alias]
+        try:
+            saved = storage.save(key, ContentFile(compressed))
+        except Exception:
+            # Immutable PUT can report a conflict or time out after success.
+            # The following GET verifies the exact bytes before recording the key.
+            saved = key
+        if saved != key:
+            raise ValueError('storage renamed evidence key')
+        with storage.open(saved, 'rb') as source:
+            if source.read(32 * 1024 * 1024 + 1) != compressed:
+                raise ValueError('evidence read-back mismatch')
+    except Exception as exc:
+        raise DatasetError('video_evidence_storage_failed') from exc
+    defaults = {'payload':{}, 'payload_storage_alias':alias, 'payload_object_key':saved}
+    if checkpoint is not None:
+        return _persist_checkpoint_receipt(fields, defaults, payload, batch, checkpoint, lease_token)
+    return _persist_receipt(fields, defaults, payload)
 
 
 def lock_sources(auth):

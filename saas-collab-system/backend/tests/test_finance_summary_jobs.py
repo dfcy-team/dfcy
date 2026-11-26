@@ -205,3 +205,21 @@ def test_rebuild_publication_guards_keep_previous_batch(context, monkeypatch, fa
     dataset.refresh_from_db()
     assert dataset.active and FinanceSummaryCalculation.objects.get(pk=job).status in {'failed', 'blocked'}
     assert months == ['2026-08', '2026-09']
+
+
+@pytest.mark.parametrize('failure,code',[('CalculationMemoryLimit','CALCULATOR_MEMORY_BUDGET'),('CalculationTimeout','CALCULATOR_TIMEOUT')])
+def test_resource_failure_keeps_active_bytes_values_and_audit(context,monkeypatch,failure,code):
+    from apps.finance import summary_native
+    from apps.finance.summary_service import document_path
+    from apps.finance.models import FinanceAuditLog
+    client,actor,dataset,state=context
+    grant(actor,'finance.import')
+    dataset.metadata['database_scope']={'stores':[],'from':'2026-09-01','to':'2026-09-30'};dataset.save()
+    original=(document_path(dataset).read_bytes(),dataset.source_hash,state.values,FinanceAuditLog.objects.count())
+    monkeypatch.setattr('apps.finance.summary_rebuild.rebuild',Mock(side_effect=getattr(summary_native,failure)()))
+    response=client.post(URL+f'{dataset.pk}/rebuild/',{'revision':0},format='json')
+    assert response.status_code==202
+    job=response.data['data']['job']['id'];run_calculation(job)
+    dataset.refresh_from_db();state.refresh_from_db();result=FinanceSummaryCalculation.objects.get(pk=job)
+    assert dataset.active and state.revision==0 and result.status=='failed' and result.error_code==code
+    assert (document_path(dataset).read_bytes(),dataset.source_hash,state.values,FinanceAuditLog.objects.count())==original

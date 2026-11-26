@@ -1,3 +1,4 @@
+import hashlib
 import pytest
 from rest_framework.test import APIClient
 from tests.test_supply_chain_v2_costs import pilot
@@ -16,7 +17,7 @@ def test_payment_classification_split_pending_replay_and_immutable_cash(world):
     # Seed the existing immutable ledger directly; classification API must not depend on bank accounts.
     with domain_write():
         payment=PaymentRecord.objects.create(tenant=actor.tenant,created_by=actor,shipment=shipment,amount='10',date='2026-10-01',idempotency_key='historic-payment')
-        PaymentVoucher.objects.create(tenant=actor.tenant,created_by=actor,payment=payment,file_name='proof.pdf',media_type='application/pdf',byte_size=1,sha256='0'*64,idempotency_key='proof',content=b'x')
+        PaymentVoucher.objects.create(tenant=actor.tenant,created_by=actor,payment=payment,file_name='proof.pdf',media_type='application/pdf',byte_size=1,sha256=hashlib.sha256(b'x').hexdigest(),idempotency_key='proof',content=b'x')
     path=BASE+f'costs/shipment/{shipment.pk}/classifications/payment/{payment.pk}/'
     before=(payment.amount,payment.date,payment.vouchers.count())
     assert client.get(path).data['data']['nature']=='unclassified'

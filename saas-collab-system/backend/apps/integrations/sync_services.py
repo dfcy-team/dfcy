@@ -2,7 +2,7 @@ import hashlib
 import json
 import uuid
 from contextlib import contextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta
 from threading import Event, Thread
 from time import sleep as default_retry_wait
 from time import monotonic, perf_counter
@@ -65,6 +65,28 @@ def _database_page_retry_allowed(resource_type, cached_page, cursor_value, retri
     # replaying it would refetch already archived provider pages.
     return resource_type != "video_metrics" or (
         cached_page is not None and cached_page[0] == cursor_value)
+
+
+def _creator_rate_wait(first_seen_at, now, retry_after):
+    """Return (delay, first_seen) or None after the durable 24h wait expires."""
+    first_seen = first_seen_at or now.isoformat()
+    try:
+        started = datetime.fromisoformat(first_seen)
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=now.tzinfo)
+        if started > now:
+            started, first_seen = now, now.isoformat()
+        remaining = int((started + timedelta(hours=24) - now).total_seconds())
+    except (TypeError, ValueError, OverflowError):
+        started, first_seen = now, now.isoformat()
+        remaining = 86400
+    if remaining < 60:
+        return None
+    try:
+        requested = int(retry_after) if retry_after is not None else 300
+    except (TypeError, ValueError, OverflowError):
+        requested = 300
+    return max(60, min(max(60, requested), remaining)), first_seen
 def _run_id():
     return uuid.uuid4().hex
 def _lease_duration():
@@ -315,16 +337,41 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             if locked_dispatch.status != "running":
                 raise ValidationError("派发已终止或已创建执行，不能重复执行。")
 
-        checkpoint = None if history_segment else SyncCheckpoint.objects.filter(tenant=locked_job.tenant, sync_job=locked_job).first()
+        creator_job = locked_job.resource_type == "creator_profile"
+        if creator_job and not idempotency_key:
+            idempotency_key = uuid.uuid4().hex
+        creator_existing = None
+        if creator_job:
+            creator_existing = SyncRun.objects.select_for_update().filter(
+                tenant=locked_job.tenant, sync_job=locked_job, idempotency_key=idempotency_key).first()
+            if creator_existing and creator_existing.history_segment_id != (history_segment.pk if history_segment else None):
+                raise ValidationError("历史补采运行关联不一致。")
+            if creator_existing and creator_existing.status != SyncRun.Status.QUEUED:
+                return creator_existing, False
+            creator_continuation = ((creator_existing.masked_log or {}).get("runtime_budget") or {}) if creator_existing else {}
+            if resume_sequence and creator_existing is None:
+                raise ValidationError("续跑对应的运行记录不存在，不能创建新执行。")
+            if int(creator_continuation.get("sequence", 0)) != resume_sequence:
+                return creator_existing, False
+        creator_cursor_key = "creator:" + hashlib.sha256(idempotency_key.encode()).hexdigest() if creator_job else None
+        # Preserve legacy queued slices before creating any new cursor. Stale
+        # deliveries must not leave an empty versioned cursor behind.
+        if (creator_job and not history_segment and resume_sequence and creator_existing
+                and not SyncCursor.objects.filter(tenant=locked_job.tenant, sync_job=locked_job,
+                    cursor_key=creator_cursor_key).exists()
+                and SyncCursor.objects.filter(tenant=locked_job.tenant, sync_job=locked_job, cursor_key="default").exists()):
+            creator_cursor_key = "default"
+        checkpoint = None if history_segment or creator_job else SyncCheckpoint.objects.filter(tenant=locked_job.tenant, sync_job=locked_job).first()
         checkpoint_cursor = (checkpoint.cursor_json or {}).get("default", "") if checkpoint else ""
         cursor, _created = SyncCursor.objects.get_or_create(
             tenant=locked_job.tenant,
             sync_job=locked_job,
-            cursor_key=f"history:{history_segment.pk}" if history_segment else "default",
+            cursor_key=(f"history:{history_segment.pk}" if history_segment else
+                        creator_cursor_key if creator_job else "default"),
             defaults={"cursor_value": str(checkpoint_cursor or "")},
         )
         idempotency_key = idempotency_key or f"{locked_job.id}:{cursor.cursor_value or 'initial'}"
-        existing = SyncRun.objects.select_for_update().filter(
+        existing = creator_existing if creator_job else SyncRun.objects.select_for_update().filter(
             tenant=locked_job.tenant,
             sync_job=locked_job,
             idempotency_key=idempotency_key,
@@ -668,6 +715,45 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                         raise ValidationError("Sync job run lease was lost.") from exc
                     _yield_sync_slice(locked_job, run, video_data_wait=True)
                 return run, True
+            # A TikTok shared app/search cooldown is a durable pause, not a
+            # failed page attempt. Keep the current cursor and receipts intact
+            # and let the scheduler resume after the provider's cooldown.
+            from .oauth_errors import OAUTH_RATE_LIMITED, OAuthFlowError
+            if (sync_job.resource_type == "creator_profile" and isinstance(exc, OAuthFlowError)
+                    and exc.controlled_code == OAUTH_RATE_LIMITED):
+                existing_budget = (run.masked_log or {}).get("runtime_budget") or {}
+                wait_state = _creator_rate_wait(
+                    existing_budget.get("creator_rate_limit_first_seen_at"), timezone.now(),
+                    getattr(exc, "retry_after", None),
+                )
+                with transaction.atomic():
+                    locked_job = SyncJob.objects.select_for_update().get(pk=sync_job.pk, tenant_id=sync_job.tenant_id)
+                    if not _owns_lease(locked_job, run):
+                        raise ValidationError("Sync job run lease was lost.") from exc
+                    if wait_state is None:
+                        run.error_code = "CREATOR_SHARED_RATE_LIMIT_TIMEOUT"
+                        run.masked_error_message = "TikTok Creator shared rate limit persisted beyond 24 hours."
+                        run.status = SyncRun.Status.FAILED
+                        run.failed_count += 1
+                        run.finished_at = timezone.now()
+                        run.masked_log = sanitize_payload({**(run.masked_log or {}), "creator_shared_cooldown": {
+                            "expired": True, "max_wait_seconds": 86400,
+                        }})
+                        locked_job.status = SyncJob.Status.FAILED
+                        locked_job.lock_token = ""
+                        locked_job.lock_expires_at = None
+                        locked_job.lock_heartbeat_at = timezone.now()
+                        locked_job.save(update_fields=["status", "lock_token", "lock_expires_at", "lock_heartbeat_at", "updated_at"])
+                        _save_run(run)
+                        upsert_sync_failure_alert(locked_job, sync_run=run)
+                        return run, True
+                    retry_after, first_seen_at = wait_state
+                    run.masked_log = sanitize_payload({
+                        **(run.masked_log or {}),
+                        "creator_shared_cooldown": {"retry_after_seconds": retry_after, "max_wait_seconds": 86400},
+                    })
+                    _yield_sync_slice(locked_job, run, retry_after=retry_after, creator_rate_first_seen_at=first_seen_at)
+                return run, True
             ads_contention = False
             ads_stopped = False
             if sync_job.ads_mapping_id:
@@ -767,7 +853,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                 _save_run(run)
                 upsert_sync_failure_alert(sync_job, sync_run=run)
             return run, True
-def _yield_sync_slice(sync_job, run, *, credential_wait=False, history_wait=None, ads_lease_wait=False, video_data_wait=False):
+def _yield_sync_slice(sync_job, run, *, credential_wait=False, history_wait=None, ads_lease_wait=False, video_data_wait=False, retry_after=None, creator_rate_first_seen_at=None):
     """Called inside the page transaction; completion watermark stays unchanged."""
     if not _owns_lease(sync_job, run):
         raise ValidationError("Sync job run lease was lost.")
@@ -775,9 +861,9 @@ def _yield_sync_slice(sync_job, run, *, credential_wait=False, history_wait=None
     budget = dict((run.masked_log or {}).get("runtime_budget") or {})
     budget.update({
         "sequence": int(budget.get("sequence", 0)) + 1,
-        "pending": True, "ready_at": (now + timedelta(seconds=3600 if video_data_wait else 60)).isoformat(),
+        "pending": True, "ready_at": (now + timedelta(seconds=retry_after if retry_after is not None else 3600 if video_data_wait else 60)).isoformat(),
         "submitted_at": None,
-        **({} if ads_lease_wait or video_data_wait else {"last_page_committed_at": now.isoformat()}),
+        **({} if ads_lease_wait or video_data_wait or creator_rate_first_seen_at is not None else {"last_page_committed_at": now.isoformat()}),
     })
     if history_wait:
         budget["wait_reason"] = history_wait["state"]
@@ -795,6 +881,11 @@ def _yield_sync_slice(sync_job, run, *, credential_wait=False, history_wait=None
         budget["wait_reason"] = "video_data_not_yet_available"
         run.error_code = "VIDEO_DATA_WAIT"
         run.masked_error_message = "Video metrics are not available yet; waiting one hour before continuing the frozen scope."
+    if retry_after is not None:
+        budget["wait_reason"] = "creator_shared_rate_limit"
+        budget["creator_rate_limit_first_seen_at"] = creator_rate_first_seen_at
+        run.error_code = "CREATOR_SHARED_RATE_LIMIT_WAIT"
+        run.masked_error_message = "TikTok Creator search is under a shared rate limit; the current cursor will resume after cooldown."
     run.masked_log = sanitize_payload({**(run.masked_log or {}), "runtime_budget": budget})
     _save_run(run)
     sync_job.status = SyncJob.Status.IDLE
@@ -804,7 +895,7 @@ def _yield_sync_slice(sync_job, run, *, credential_wait=False, history_wait=None
     sync_job.save(update_fields=["status", "lock_token", "lock_expires_at", "lock_heartbeat_at", "updated_at"])
     if hasattr(run, "schedule_dispatch"):
         SyncScheduleDispatch.objects.filter(sync_run=run).update(
-            status="queued", finished_at=None, reason=run.masked_error_message if credential_wait or ads_lease_wait or video_data_wait else "本段时间预算已用完，分页进度已保存，等待续跑。",
+            status="queued", finished_at=None, reason=run.masked_error_message if credential_wait or ads_lease_wait or video_data_wait or retry_after is not None else "本段时间预算已用完，分页进度已保存，等待续跑。",
         )
 def record_retry_failure(sync_job, error_message, retry_count):
     run = SyncRun.objects.create(

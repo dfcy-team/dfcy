@@ -89,3 +89,17 @@ def test_spu_detail_positive_filter_and_tenant_isolation(world, configured):
     assert foreign.status_code==400
     assert all_rows.data['data']['rows'][0]['available_stock'] is None
     assert all_rows.data['data']['rows'][1]['available_stock']==0
+
+
+def test_group_count_excludes_inconsistent_foreign_spu_link(world,configured):
+    from apps.tenants.models import Tenant
+    actor,_,_=configured
+    foreign=Tenant.objects.create(name='foreign group count',code='foreign-group-count')
+    foreign_spu=ProductSPU.objects.create(tenant=foreign,spu_code='FOREIGN-COUNT',product_name='foreign')
+    local,broken=world['sku'],world['sku_b']
+    ProductSKU.objects.filter(pk=broken.pk).update(spu=foreign_spu)
+    job=make_job(world,configured,actor,[[(local.pk,{'suggested_quantity':4}),(broken.pk,{'suggested_quantity':2})]])
+    response=client(actor).get(ROWS.format(job.pk),{'group_by':'spu','quantity_filter':'all'})
+    assert response.status_code==200
+    data=response.data['data'];assert data['count']==len(data['rows'])==1
+    assert data['rows'][0]['spu_id']==local.spu_id

@@ -393,7 +393,8 @@ class ShipmentWithdrawInput(VersionInput):
 class ShipmentWithdraw(ShipmentAction):
     def post(self, request, pk):
         value = validated(ShipmentWithdrawInput, request)
-        obj = shipments.withdraw(request.user, pk, value, key(request))
+        from .withdraw_lock import withdrawal_result
+        obj = withdrawal_result(lambda: shipments.withdraw(request.user, pk, value, key(request)))
         return Response({"data": self.data(obj)})
 
 

@@ -2436,9 +2436,47 @@ class TikTokVideoSyncEvidence(TenantValidatedModel):
     attempt = models.PositiveIntegerField()
     page = models.PositiveIntegerField()
     payload_hash = models.CharField(max_length=64)
-    payload = models.JSONField()
+    payload = models.JSONField(blank=True)
+    payload_storage_alias = models.CharField(max_length=80, null=True, blank=True)
+    payload_object_key = models.CharField(max_length=500, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     tenant_relation_fields = ("batch",)
+
+    def read_payload(self):
+        """Return inline legacy data or integrity-checked external evidence."""
+        alias, key = self.payload_storage_alias, self.payload_object_key
+        if alias is None and key is None:
+            return self.payload
+        import gzip
+        import hashlib
+        import io
+        import json
+        import re
+        from django.conf import settings
+        from django.core.files.storage import storages
+        from django.core.exceptions import ValidationError
+
+        namespace = getattr(settings, "RAW_PAYLOAD_STORAGE_NAMESPACE", "").strip()
+        prefix = f"raw/{namespace}/tenant-{self.tenant_id}/" if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", namespace) else ""
+        if (not alias or not key or self.payload != {} or not prefix or
+                not re.fullmatch(re.escape(prefix) + r"[0-9a-f]{32}\.json\.gz", key)):
+            raise ValidationError("Video evidence storage metadata is inconsistent.")
+        try:
+            with storages[alias].open(key, "rb") as source:
+                compressed = source.read(32 * 1024 * 1024 + 1)
+            if len(compressed) > 32 * 1024 * 1024:
+                raise ValueError("compressed payload exceeds limit")
+            with gzip.GzipFile(fileobj=io.BytesIO(compressed), mode="rb") as source:
+                raw = source.read(32 * 1024 * 1024 + 1)
+            if len(raw) > 32 * 1024 * 1024:
+                raise ValueError("payload exceeds limit")
+            payload = json.loads(raw.decode("utf-8"))
+            from .tiktok_shop_dataset import canonical_bytes
+            if not isinstance(payload, dict) or hashlib.sha256(canonical_bytes(payload)).hexdigest() != self.payload_hash:
+                raise ValueError("payload digest mismatch")
+            return payload
+        except Exception as exc:
+            raise ValidationError("External video evidence is unavailable or failed integrity validation.") from exc
 
     def save(self, *args, **kwargs):
         if self.pk and type(self).objects.filter(pk=self.pk).exists():

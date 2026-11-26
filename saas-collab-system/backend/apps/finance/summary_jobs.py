@@ -13,6 +13,7 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from .summary_models import FinanceSummaryCalculation, FinanceSummaryDataset
+from .summary_native import CalculationBusy, CalculationMemoryLimit, CalculationTimeout
 from .summary_service import require_access, document_path, metadata
 
 QUEUE = getattr(settings, 'FINANCE_SUMMARY_QUEUE', 'finance-summary')
@@ -165,6 +166,12 @@ def run_calculation(pk):
             locked.status, locked.error_code = status, error
             locked.finished_at, locked.lease, locked.running_until = timezone.now(), None, None
             locked.save()
+    except CalculationBusy:
+        status, error = 'queued', 'CALCULATION_BUSY'
+    except CalculationMemoryLimit:
+        status, error = 'failed', 'CALCULATOR_MEMORY_BUDGET'
+    except CalculationTimeout:
+        status, error = 'failed', 'CALCULATOR_TIMEOUT'
     except PermissionDenied:
         status, error = 'blocked', 'PERMISSION_CHANGED'
     except Exception:

@@ -7,7 +7,7 @@ from PIL import Image, UnidentifiedImageError
 from django.db import IntegrityError, transaction
 from django.http import FileResponse
 from django.utils.http import content_disposition_header
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import APIException, NotFound, ValidationError
 from rest_framework.response import Response
 
 from . import costs, services
@@ -15,6 +15,29 @@ from .models import PaymentVoucher, SettlementRevision, domain_write
 from .permissions import MANAGE, VIEW
 from .views import InternalAPI
 from .api import key
+
+from .payment_voucher_storage import VoucherStorageError, store_content
+
+
+class VoucherContentUnavailable(APIException):
+    status_code = 503
+    default_detail = "凭证内容暂不可用，请重试或联系管理员。"
+    default_code = "voucher_content_unavailable"
+
+
+def _store_content(**kwargs):
+    try:
+        return store_content(**kwargs)
+    except VoucherStorageError as exc:
+        raise VoucherContentUnavailable() from exc
+
+
+def _read_content(voucher):
+    try:
+        return voucher.read_content()
+    except VoucherStorageError as exc:
+        raise VoucherContentUnavailable() from exc
+
 
 MAX_BYTES = 10 * 1024 * 1024
 MAX_PER_REVISION = 20
@@ -113,12 +136,15 @@ class PaymentVouchers(InternalAPI):
                 return Response({"data": _metadata(existing)})
             if PaymentVoucher.objects.filter(tenant_id=request.user.tenant_id, settlement_revision=revision).count() >= MAX_PER_REVISION:
                 raise ValidationError("每条结算历史最多上传20个凭证。")
+            content_fields = _store_content(body=body, tenant_id=request.user.tenant_id,
+                parent_kind="settlement_revision", parent_id=revision.pk,
+                idempotency_key=idem_key, sha256=digest)
             try:
                 with domain_write():
                     voucher = PaymentVoucher.objects.create(
                         tenant=request.user.tenant, created_by=request.user,
                         settlement_revision=revision, file_name=name, media_type=media_type,
-                        byte_size=len(body), sha256=digest, idempotency_key=idem_key, content=body,
+                        byte_size=len(body), sha256=digest, idempotency_key=idem_key, **content_fields,
                     )
                     services._event(request.user, target, "settlement_voucher_uploaded", idem_key, payload,
                                     audit={"payment_voucher_id": voucher.pk, "settlement_revision_id": revision.pk})
@@ -137,9 +163,7 @@ class PaymentVoucherDownload(InternalAPI):
         ).first()
         if voucher is None:
             raise NotFound("结算凭证不存在或无权访问。")
-        if hashlib.sha256(bytes(voucher.content)).hexdigest() != voucher.sha256:
-            raise ValidationError("凭证完整性校验失败，请联系采购。")
-        response = FileResponse(BytesIO(bytes(voucher.content)), as_attachment=True,
+        response = FileResponse(BytesIO(_read_content(voucher)), as_attachment=True,
                                 filename=voucher.file_name, content_type=voucher.media_type)
         response["Content-Disposition"] = content_disposition_header(True, voucher.file_name)
         response["Cache-Control"] = "private, no-store"
@@ -186,10 +210,13 @@ class PaymentRecordVouchers(InternalAPI):
                 return Response({'data': _metadata(voucher)})
             if PaymentVoucher.objects.filter(tenant_id=request.user.tenant_id, payment=record).count() >= MAX_PER_REVISION:
                 raise ValidationError('每笔付款最多上传20个凭证。')
+            content_fields = _store_content(body=body, tenant_id=request.user.tenant_id,
+                parent_kind="payment", parent_id=record.pk,
+                idempotency_key=idem_key, sha256=digest)
             with domain_write():
                 voucher = PaymentVoucher.objects.create(tenant=request.user.tenant, created_by=request.user,
                     payment=record, file_name=name, media_type=media_type, byte_size=len(body), sha256=digest,
-                    idempotency_key=idem_key, content=body)
+                    idempotency_key=idem_key, **content_fields)
                 services._event(request.user, record, 'payment_voucher_uploaded', idem_key, payload,
                     audit={'payment_voucher_id': voucher.pk})
         return Response({'data': _metadata(voucher)}, status=201)
@@ -203,9 +230,7 @@ class PaymentRecordVoucherDownload(InternalAPI):
         voucher = PaymentVoucher.objects.filter(tenant_id=request.user.tenant_id, payment_id=payment_id, pk=voucher_id).first()
         if voucher is None:
             raise NotFound('付款凭证不存在或无权访问。')
-        if hashlib.sha256(bytes(voucher.content)).hexdigest() != voucher.sha256:
-            raise ValidationError('凭证完整性校验失败。')
-        response = FileResponse(BytesIO(bytes(voucher.content)), as_attachment=True, filename=voucher.file_name, content_type=voucher.media_type)
+        response = FileResponse(BytesIO(_read_content(voucher)), as_attachment=True, filename=voucher.file_name, content_type=voucher.media_type)
         response['Content-Disposition'] = content_disposition_header(True, voucher.file_name)
         response['Cache-Control'] = 'private, no-store'
         response['X-Content-Type-Options'] = 'nosniff'
