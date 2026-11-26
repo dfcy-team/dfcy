@@ -21,10 +21,11 @@ def setup(monkeypatch, effects, atomic=False):
 
 def test_lock_retry_only_replays_receipt(monkeypatch):
     payload = {'rows': 10}
-    saved = SimpleNamespace(payload=payload, payload_hash=module.digest(payload))
+    saved = SimpleNamespace(payload=payload, payload_hash=module.digest(payload), read_payload=MagicMock(return_value=payload))
     manager, sleep = setup(monkeypatch, [OperationalError(1205, 'locked'), (saved, True)])
     assert module.receipt(SimpleNamespace(tenant_id=1, attempt_count=1), 2, payload) is saved
     assert manager.get_or_create.call_count == 2
+    saved.read_payload.assert_called_once_with()
     sleep.assert_called_once_with(1)
 
 
