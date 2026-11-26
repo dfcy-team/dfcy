@@ -41,7 +41,7 @@ def shipped_items(lookup, zone):
                 reasons.append('实际出库数量无效')
                 continue
             result.append({'source_sku': str(item.get('sku') or '').strip(),
-                           'quantity': int(quantity), 'shipped_date': day,
+                           'quantity': int(quantity), 'shipped_date': day, 'shipped_at_utc': shipped.isoformat(),
                            'warehouse_order_no': str(key)})
     if not result:
         reasons.append('缺少可核算的实际出库商品')

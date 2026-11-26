@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 from rest_framework.test import APIRequestFactory, force_authenticate
 from apps.products.monthly_cost_views import monthly_cost_collection, monthly_cost_missing
-from apps.products.monthly_cost_models import MonthlyProductCost
+from apps.products.monthly_cost_models import MonthlyProductCost, MonthlyCostAdjustment
 from apps.accounts.models import CustomUser
 from apps.tenants.models import Tenant
 from apps.products.models import ProductSPU, ProductSKU
@@ -35,6 +35,25 @@ def test_valid_zero_not_missing():
     user,r=setup_rows();r.opening_amount=Decimal("0");r.receipt_amount=Decimal("0");r.adjustment_amount=Decimal("0");r.is_complete=True;r.unit_cost=Decimal("0");r.missing_reason="";r.save()
     assert invoke(monthly_cost_missing,user,{"month":"2026-11"}).data["data"]["rows"]==0
     assert invoke(monthly_cost_collection,user,{"month":"2026-11"}).data["data"]["items"][0]["unit_cost"] is not None
+
+def test_ledger_exposes_sales_cost_adjustment_and_unknown_as_null():
+    user,r=setup_rows()
+    r.sales_cost_amount=Decimal("0");r.historical_sold_adjustment=Decimal("2.5000");r.save()
+    row=invoke(monthly_cost_collection,user,{"month":"2026-11"}).data["data"]["items"][0]
+    assert row["sales_cost_amount"]=="0.0000"
+    assert row["historical_sold_adjustment"]=="2.5000"
+    assert row["receipt_amount"] is None
+    assert row["status_label"]=="暂估"
+
+def test_adjustment_summary_is_warehouse_scoped_not_store_allocated():
+    user,r=setup_rows()
+    MonthlyCostAdjustment.objects.create(tenant=user.tenant,sku=r.sku,warehouse=r.warehouse,
+        original_month=date(2026,10,1),effective_month=date(2026,11,1),receipt_line_id=7,
+        source_key="late-7",delta_amount=Decimal("5"),inventory_amount=Decimal("2"),
+        sold_amount=Decimal("3"),status="allocated",evidence={"ref":"fixture"})
+    data=invoke(monthly_cost_collection,user,{"month":"2026-11"}).data["data"]
+    assert data["historical_adjustments"]["sold_amount"]=="3"
+    assert "no store allocation" in data["historical_adjustments"]["warehouse_scope"]
 
 def test_invalid_month():
     user,_=setup_rows();assert invoke(monthly_cost_collection,user,{"month":"invalid"}).status_code==400

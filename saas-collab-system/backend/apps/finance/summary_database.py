@@ -600,7 +600,11 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                     candidates[wh] = version
             matched = {lookup.warehouse_id} if lookup and lookup.warehouse_id else set()
             version = candidates.get(next(iter(matched))) if len(matched) == 1 else None
-            version = select_monthly_cost(monthly_costs, sku.pk if sku else None, lookup.warehouse_id if lookup else None, line["shipped_date"], version)
+            cost_day = line["shipped_date"]
+            if line.get("shipped_at_utc"):
+                from apps.products.monthly_cost_reconciliation import business_zone
+                cost_day = parse_datetime(line["shipped_at_utc"]).astimezone(business_zone()).date().isoformat()
+            version = select_monthly_cost(monthly_costs, sku.pk if sku else None, lookup.warehouse_id if lookup else None, cost_day, version)
             quantity = int(line.get('quantity') or 0);reason = ''
             if not sku:reason = 'SKU尚未唯一关联'
             elif not version:reason = '缺出库日有效的对应仓库已确认成本'
@@ -630,7 +634,7 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                 'store_id': store.pk, 'store_code': store.code, 'external_order_id': external,
                 'scope': 'order', 'status': 'pending' if component['reasons'] else 'estimated' if component.get('monthly_cost_status') in ('estimated', 'pending_review') else 'confirmed',
                 'source': 'SaaS仓库实际出库商品成本', 'raw_cost_flow': True,
-                'description': f"出库单 {component['warehouse_order_no']}；SKU {component['source_sku']}；数量 {component['quantity']}；成本版本 {component['cost_version_id'] or '待核'}" + ('；' + '；'.join(component['reasons']) if component['reasons'] else ''),
+                'description': f"出库单 {component['warehouse_order_no']}；SKU {component['source_sku']}；数量 {component['quantity']}；成本版本 {('月度 ' + str(component['monthly_cost_id'])) if component.get('monthly_cost_id') else component['cost_version_id'] or '待核'}" + ('；' + '；'.join(component['reasons']) if component['reasons'] else ''),
                 'source_proof': {'order_id': order.pk, 'warehouse_lookup_id': lookup.pk,
                     'warehouse_id': lookup.warehouse_id, 'warehouse_order_no': component['warehouse_order_no'],
                     'cost_version_id': component['cost_version_id'],
@@ -640,11 +644,11 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
         if order:outbound_components[order.pk] = components
         if day is None or (store_id, external) in prior_keys:continue
         f = add(store, 'product_cost', -cost if components and any(not c['reasons'] for c in components) else None, day, external, 'database:cost:'+str(store_id)+':'+external,
-            currency='CNY', source='SaaS仓库实际出库商品成本', status='pending' if reasons else 'confirmed',
+            currency='CNY', source='SaaS仓库实际出库商品成本', status='pending' if reasons else 'estimated' if any(c.get('monthly_cost_status') in ('estimated','pending_review') for c in components) else 'confirmed',
             cost_calculation={'components': components, 'state': 'pending' if reasons else 'calculated',
                 'business_classification': classifications.get((store_id, external)) or classify(None),
                 'time_basis': 'warehouse_shipped_date', 'cost_at': None, 'settlement_date': day, 'cost_timezone': store.timezone,
-                'read_at': stamp, 'cost_field': 'ProductCostVersion.confirmed_cost',
+                'read_at': stamp, 'cost_field': 'MonthlyProductCost.unit_cost' if any(c.get('monthly_cost_id') for c in components) else 'ProductCostVersion.confirmed_cost',
                 'gross_cost': text(cost), 'net_cost': text(cost), 'return_credit': '0', 'reasons': sorted(set(reasons)),
                 'items_basis': '仓库已匹配订单的实际出库商品；换货登记不参与成本', 'ledger_writes': 0})
 

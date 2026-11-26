@@ -1,0 +1,23 @@
+{
+  "status": "candidate_summary_only",
+  "source": "D:/Users/Administrator/Downloads/商品成本库存销售核对表.xlsx",
+  "selection_rule": "first worksheet, column F numeric value > 0",
+  "candidate_count": 19,
+  "zero_cost_rows": [
+    {"sheet": "商品成本库存销售核对表", "row": 17, "warehouse_id": 6, "sku_code": "XUNI001", "unit_cost": "0", "rule": "real zero cost"}
+  ],
+  "xuni001_zero_rule": "Verified directly from first worksheet row 17, warehouse 6, SKU XUNI001, column F = 0; preserve as a real cost.",
+  "unmapped_candidate_count": 1,
+  "unmapped_note": "First worksheet row 13 has F=0, product code HY341-Black-70-70, and column E says no SKU; exclude from cost import until mapped.",
+  "warehouse_6_positive_candidate_count": 5,
+  "positive_candidates": [
+    {"row":2,"warehouse_id":3,"sku_code":"HYYL119-L-150","unit_cost":"8.01"},{"row":3,"warehouse_id":3,"sku_code":"HYYL119-C-150","unit_cost":"8.01"},{"row":4,"warehouse_id":3,"sku_code":"HYYL118-248-150","unit_cost":"8.01"},{"row":5,"warehouse_id":3,"sku_code":"HYYL118-247-150","unit_cost":"8.01"},{"row":6,"warehouse_id":3,"sku_code":"HYYL118-246-150","unit_cost":"8.01"},{"row":7,"warehouse_id":3,"sku_code":"HYYL118-243-150","unit_cost":"8.01"},{"row":8,"warehouse_id":3,"sku_code":"HYYL163-Coffee-90-150","unit_cost":"94.99"},{"row":9,"warehouse_id":3,"sku_code":"HYYL164-Green-90-150","unit_cost":"89.76"},{"row":10,"warehouse_id":3,"sku_code":"HYYL164-Black-90-150","unit_cost":"35.36"},{"row":11,"warehouse_id":3,"sku_code":"HYYL163-Black-90-150","unit_cost":"115.76"},{"row":12,"warehouse_id":3,"sku_code":"HY341-Black-70-70","unit_cost":"54.6"},{"row":14,"warehouse_id":3,"sku_code":"HY002-PinkDouble","unit_cost":"1.26"},{"row":15,"warehouse_id":3,"sku_code":"HY002-PurpleDouble","unit_cost":"1.26"},{"row":16,"warehouse_id":3,"sku_code":"HY002-GreyDouble","unit_cost":"1.26"},{"row":18,"warehouse_id":6,"sku_code":"HYYL146-LCOFFEE-SINGLE","unit_cost":"19.62"},{"row":19,"warehouse_id":6,"sku_code":"HYYL146-LCOFFEE-P","unit_cost":"11.54"},{"row":20,"warehouse_id":6,"sku_code":"HYYL146-LCOFFEE-DOUBLE","unit_cost":"21.89"},{"row":21,"warehouse_id":6,"sku_code":"HYYL146-LCOFFEE-QUEEN","unit_cost":"24.16"},{"row":22,"warehouse_id":6,"sku_code":"HYYL146-LCOFFEE-KING","unit_cost":"27.43"}
+  ],
+  "monthly_source_files": [
+    {"file":"cost/product_costs6.xlsx","preferred_month":"YYYY-06"},{"file":"cost/product_costs7.xlsx","preferred_month":"YYYY-07"},{"file":"cost/product_costs8.xlsx","preferred_month":"YYYY-08"},{"file":"cost/product_costs9.xlsx","preferred_month":"YYYY-09"},{"file":"cost/product_costs10.xlsx","preferred_month":"YYYY-10"}
+  ],
+  "interval_source_files": ["cost/product_costs0901-0927.xlsx","cost/product_costs0928-1004.xlsx","cost/product_costs1019-1025.xlsx","cost/product_costs1026-1031.xlsx","cost/product_costs1109-1115.xlsx","cost/product_costs1116-1122.xlsx"],
+  "period_resolution": "Use full-month 6/7/8/9/10 workbooks as preferred candidates. Resolve interval workbook conflicts only with explicit period-map; do not merge or average. No period-map was supplied, so no interval rows were auto-selected.",
+  "raw_zip": {"xlsx_count":11,"compressed_bytes":3330187},
+  "application": "Not applied; candidates require SKU mapping, period-map, tenant and warehouse authorization."
+}

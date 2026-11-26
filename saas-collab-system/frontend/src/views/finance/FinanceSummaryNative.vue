@@ -1,5 +1,6 @@
 <template>
   <section class="finance-native" aria-label="平台账单财务汇总">
+    <MonthlyCostAdjustments />
     <header class="page-heading">
       <div class="heading-copy"><h1>平台账单</h1><p>直接查看汇总，沿金额核对到原始记录</p></div>
       <button v-if="initialization || (batch && batch.can_view_settings !== false)" :disabled="!batch || saving || sourceBlocked || showingPrevious" @click="openSettings()">广告及账务设置</button>
@@ -101,6 +102,7 @@
 </template>
 
 <script setup>
+import MonthlyCostAdjustments from '@/components/finance/MonthlyCostAdjustments.vue'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { fetchFinanceSummary, fetchFinanceSummaryJob, rebuildFinanceSummary, fetchFinanceSummaryTable, fetchFinanceSummaryDetail, saveFinanceSummaryFee, fetchFinanceSummaryHistory, fetchFinanceSourceFlows, fetchFinanceSourceFlowDetail } from '../../api/financeReconciliation';
 import FinanceCostDetail from './FinanceCostDetail.vue';

@@ -33,8 +33,10 @@ from .summary_views import summary_table, summary_table_detail, summary_fee, sum
 from .summary_views import summary_initialize, summary_publish, summary_direct_table, summary_direct_detail
 
 from .source_flow_views import source_flow_page, source_flow_detail
+from .monthly_adjustment_views import historical_sold_adjustments
 
 urlpatterns = [
+    path("monthly-adjustments/", historical_sold_adjustments, name="finance-monthly-adjustments"),
     path('summary/query/', summary_direct_table, name='finance-summary-direct-table'),
     path('summary/query-detail/', summary_direct_detail, name='finance-summary-direct-detail'),
     path('summary/source-flows/', source_flow_page, name='finance-source-flow-page'),

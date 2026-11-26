@@ -47,8 +47,47 @@ def test_daily_job_creates_estimate_without_publishing_received_cost(world):
     with patch('apps.supply_chain.product_cost_sync.publish_received_costs') as publish:
         result = run_daily_batch_costs(actor, limit=1)
 
-    version = CostVersion.objects.get(batch=batch)
+    version = CostVersion.objects.filter(batch=batch).order_by("-sequence").first()
     assert result['processed'] == 1
     assert version.state == 'estimated'
-    assert any('不发布正式产品成本' in issue for issue in version.issues)
+    assert version.summary['payment_audit']['snapshot']['ready'] is False
     publish.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(SUPPLY_MONTHLY_COST_JOBS_ENABLED=True)
+def test_payment_change_appends_audit_version_without_repricing(world):
+    from unittest.mock import patch
+    actor, api, batch, line = setup_batch(world)
+    receipt(world, actor, batch, line, 4, 4, 'payment-audit')
+    with patch('apps.supply_chain.monthly_cost_jobs.payment_state', return_value={
+            'goods': {'state': 'paid'}, 'recorded_fees': [], 'recorded_fees_state': 'paid',
+            'coverage_incomplete': False, 'ready': True}):
+        run_daily_batch_costs(actor, limit=1)
+        original = CostVersion.objects.filter(batch=batch).order_by("sequence").first()
+        second = run_daily_batch_costs(actor, limit=1)
+        assert second['errors'] == []
+        audit = CostVersion.objects.filter(batch=batch).order_by('-sequence').first()
+        assert audit.pk != original.pk
+        assert audit.summary['payment_audit']['snapshot']['goods']['state'] == 'paid'
+        original.refresh_from_db()
+        assert 'payment_audit' not in original.summary
+        assert audit.state == 'confirmed'
+        assert list(original.entries.values_list('received_total', flat=True)) == list(
+            audit.entries.values_list('received_total', flat=True))
+
+
+@pytest.mark.django_db
+@override_settings(SUPPLY_MONTHLY_COST_JOBS_ENABLED=True)
+def test_unchanged_payment_snapshot_is_idempotent(world):
+    from unittest.mock import patch
+    actor, api, batch, line = setup_batch(world)
+    receipt(world, actor, batch, line, 4, 4, 'payment-idempotent')
+    payment = {'goods': {'state': 'paid'}, 'recorded_fees': [],
+               'recorded_fees_state': 'paid', 'coverage_incomplete': False, 'ready': True}
+    with patch('apps.supply_chain.monthly_cost_jobs.payment_state', return_value=payment):
+        run_daily_batch_costs(actor, limit=1)
+        run_daily_batch_costs(actor, limit=1)
+        count = CostVersion.objects.filter(batch=batch).count()
+        run_daily_batch_costs(actor, limit=1)
+    assert CostVersion.objects.filter(batch=batch).count() == count

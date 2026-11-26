@@ -27,7 +27,7 @@ class MonthlyCostSourceEntryTests(SimpleTestCase):
     @override_settings(MONTHLY_PRODUCT_COST_ENABLED=True)
     def test_task_returns_pending_aggregation(self):
         expected = {"items": [], "enabled": True}
-        with patch("apps.products.monthly_cost_sources.aggregate_month", return_value=expected) as aggregate:
+        with patch("apps.products.monthly_cost_sources.aggregate_month", return_value=expected) as aggregate, patch("apps.products.monthly_cost_adjustments.sync_late_adjustments", return_value={}):
             result = aggregate_monthly_product_cost_sources.run(4, "2026-10-01")
         self.assertEqual(result["status"], "pending_review")
         aggregate.assert_called_once_with(4, date(2026, 10, 1))
