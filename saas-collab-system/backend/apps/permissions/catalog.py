@@ -2,6 +2,7 @@ from functools import lru_cache
 
 
 PERMISSION_DEFINITIONS = (
+    {"code": "issue_tracking.configure", "name": "配置事项跟踪", "module": "system", "action": "issue_tracking.configure", "description": "配置当前租户的菜单跟踪规则及部门管辖授权。"},
     *({"code": f"marketing.flash_sales.{action}", "name": f"{label}店内闪购", "module": "marketing",
        "action": f"flash_sales.{action}", "description": "仅当前租户授权店铺；查看不授予平台写入权限。"}
       for action, label in (("view", "查看"), ("configure", "配置"), ("execute", "执行"),

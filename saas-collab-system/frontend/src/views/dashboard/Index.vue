@@ -12,22 +12,13 @@
       </div>
     </section>
 
-    <section class="workspace-section">
-      <header><h2>我的待办与异常</h2><p>查看当前账号的待办、异常与审批汇总。</p></header>
-      <AppState
-        status="empty"
-        title="待办汇总暂未接入"
-        detail="您可以通过常用入口查看各业务页面的当前进度。"
-        action-label="查看可用入口"
-        @action="scrollToShortcuts"
-      />
-    </section>
+    <section class="workspace-section"><TrackingSummary /></section>
   </section>
 </template>
 
 <script setup>
 import { computed } from 'vue';
-import AppState from '../../components/AppState.vue';
+import TrackingSummary from '../../components/issueTracking/TrackingSummary.vue';
 import MonthlySalesProgress from './MonthlySalesProgress.vue';
 import { useAuthStore } from '../../stores/auth';
 import { filterMenuItems, flattenMenuItems } from '../../router/menu';

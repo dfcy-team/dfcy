@@ -137,6 +137,7 @@
 </template>
 
 <script setup>
+import { useTrackingContext } from '../../composables/useTrackingContext';
 import { allocatedQty, shippedQty, collectionStateText } from './collectionState.js';
 import '../../styles/supplyTypography.css';
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
@@ -474,6 +475,10 @@ function openLinkedShipment(){shipmentDetailSequence++;const id=route?.query?.sh
 watch(()=>route?.query?.shipment_id,openLinkedShipment);
 onUnmounted(()=>{shipmentDetailSequence++;});
 onMounted(()=>{load();openLinkedShipment();});
+
+useTrackingContext(() => !props.supplier && (open.value ? current.value : selectedProgress.value)?.id ? {record_type:'supplier_shipment',record_id:String((open.value ? current.value : selectedProgress.value).id),record_number:(open.value ? current.value : selectedProgress.value).number} : null);
+
+
 </script>
 
 <style scoped>

@@ -111,6 +111,7 @@
 </template>
 
 <script setup>
+import { useTrackingContext } from '../../composables/useTrackingContext';
 import { fetchInboundNotificationStatuses } from '../../api/supplySettingsV2';
 import '../../styles/supplyTypography.css';
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
@@ -391,6 +392,8 @@ async function exportInbound(){
 }
 const exportingBigSeller=ref(false),bigSellerSkuMode=ref('legacy');
 async function exportBigSeller(){if(!currentInbound.value || currentInbound.value.status!=='confirmed' || exportingBigSeller.value)return;exportingBigSeller.value=true;try{const r=await api.downloadInboundBigSeller(currentInbound.value.id,currentInbound.value.number,bigSellerSkuMode.value);if(!r?.success)throw new Error(r?.message||'导出失败');}catch(e){formError.value=e.message||'导出失败';}finally{exportingBigSeller.value=false;}}
+
+useTrackingContext(() => inboundOpen.value && currentInbound.value ? {record_type:'inbound_order',record_id:String(currentInbound.value.id),record_number:currentInbound.value.number} : batchOpen.value && currentBatch.value ? {record_type:'dispatch_batch',record_id:String(currentBatch.value.id),record_number:currentBatch.value.number} : null);
 </script>
 
 <style scoped>

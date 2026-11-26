@@ -2215,6 +2215,25 @@
       }
     },
     {
+      "code": "menu.system.issue_tracking.view",
+      "name": "事件跟踪配置",
+      "module": "system",
+      "action": "issue_tracking.view",
+      "description": "显示事件跟踪配置入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/system/issue-tracking",
+        "route": "/system/issue-tracking",
+        "resource": "system_issue_tracking",
+        "parent": "系统管理",
+        "action_codes": [
+          "issue_tracking.configure"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.system.tenants.view",
       "name": "租户管理",
       "module": "system",
@@ -4397,6 +4416,24 @@
       ],
       "userTypes": [
         "internal"
+      ]
+    },
+    {
+      "path": "/issue-tracking",
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/system/issue-tracking",
+      "permissions": [
+        "issue_tracking.configure"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.system.issue_tracking.view"
       ]
     },
     {

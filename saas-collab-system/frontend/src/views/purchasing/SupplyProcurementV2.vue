@@ -228,6 +228,7 @@
 </template>
 
 <script setup>
+import { useTrackingContext } from '../../composables/useTrackingContext';
 import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 const linkedRoute=useRoute();
@@ -719,6 +720,8 @@ async function openLinkedOrder(){detailSequence++;const id=linkedRoute?.query?.o
 watch(()=>linkedRoute?.query?.order_id,openLinkedOrder);
 onBeforeUnmount(()=>{detailSequence++;});
 onMounted(()=>{load();openLinkedOrder();});
+
+useTrackingContext(() => orderOpen.value && selectedOrder.value?.id ? {record_type:'purchase_order',record_id:String(selectedOrder.value.id),record_number:selectedOrder.value.number} : null);
 </script>
 
 <style scoped>

@@ -6,6 +6,7 @@ from apps.integrations.developer_gateway import invoke as developer_invoke
 
 
 urlpatterns = [
+    path("api/internal/issue-tracking/", include("apps.issue_tracking.urls")),
     path("api/internal/marketing/flash-sales/", include("apps.flash_sales.urls")),
     path('api/developer-gateway/v1/<int:app_id>/<slug:endpoint_code>/', developer_invoke, name='developer-gateway'),
     path("api/internal/demo-data-sync/", include("apps.demo_sync.urls")),

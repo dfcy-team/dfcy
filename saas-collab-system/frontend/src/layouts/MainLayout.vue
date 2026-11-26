@@ -120,12 +120,14 @@
       </div>
     </el-drawer>
 
+    <TrackingFloat v-if="auth.currentUser?.user_type === 'internal'" />
     <UserSettingsDrawer
       v-model="userSettingsOpen"
       :current-user="auth.currentUser"
       :tab-limit="tabLimit"
       :open-tab-count="openTabs.length"
       :initial-tab="settingsInitialTab"
+      :tracking-issue-id="trackingIssueId"
       :callback-marker="bindingCallbackMarker"
       :callback-error="bindingCallbackError"
       @profile-updated="handleProfileUpdated"
@@ -157,6 +159,7 @@ import { useMock } from '../api/request';
 import { fetchAuthorizationVersion } from '../api/authorization';
 import { filterMenuItems, findMenuLabel, flattenMenuItems } from '../router/menu';
 import UserSettingsDrawer from '../components/UserSettingsDrawer.vue';
+import TrackingFloat from '../components/issueTracking/TrackingFloat.vue';
 import ReleaseNotes from '../components/ReleaseNotes.vue';
 import { buildIntegrationSidebar } from '../router/integrationNavigation';
 
@@ -167,6 +170,13 @@ const desktopMenuHidden = ref(false);
 const mobileMenuOpen = ref(false);
 const userSettingsOpen = ref(false);
 const settingsInitialTab = ref('');
+const trackingIssueId = ref('');
+function openEventTracking(event) {
+  if (auth.currentUser?.user_type !== 'internal') return;
+  trackingIssueId.value = event.detail?.issueId || '';
+  settingsInitialTab.value = 'tracking';
+  userSettingsOpen.value = true;
+}
 const bindingCallbackMarker = ref('');
 const bindingCallbackError = ref('');
 const mainScrollContainer = ref(null);
@@ -375,6 +385,7 @@ function scrollMainTo(direction) {
 }
 
 onMounted(() => {
+  window.addEventListener('open-event-tracking', openEventTracking);
   const savedMembership = sessionStorage.getItem('saas-collab.active-membership.v1');
   const initialMembership = savedMembership ?? auth.currentUser?.active_membership_id ?? '';
   activeMembershipId.value = initialMembership === null ? '' : String(initialMembership);
@@ -444,6 +455,7 @@ async function checkAuthorizationVersion() {
 }
 
 onBeforeUnmount(() => {
+  window.removeEventListener('open-event-tracking', openEventTracking);
   removeTabLimitGuard?.();
   window.removeEventListener('resize', updateScrollControls);
   contentObserver?.disconnect();

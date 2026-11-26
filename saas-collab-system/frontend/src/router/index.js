@@ -26,6 +26,8 @@ const SupplierShipmentList = () => import('../views/suppliers/SupplierShipmentLi
 const SupplierShipmentDetail = () => import('../views/suppliers/SupplierShipmentDetail.vue');
 const SsoAuthorize = () => import('../views/auth/SsoAuthorize.vue');
 const Forbidden = () => import('../views/auth/Forbidden.vue');
+const IssueTracking = () => import('../views/issueTracking/Index.vue');
+const IssueTrackingSettings = () => import('../views/issueTracking/Settings.vue');
 const Dashboard = () => import('../views/dashboard/Index.vue');
 const BusinessOverview = () => import('../views/analytics/BusinessOverview.vue');
 const SalesAnalysis = () => import('../views/analytics/SalesAnalysis.vue');
@@ -362,6 +364,8 @@ const routes = [
       { path: 'settings/config-center', component: ConfigCenterList },
       { path: 'settings/config-versions', component: ConfigVersionHistory },
       { path: 'system/departments', component: DepartmentDirectory },
+      { path: 'issue-tracking', component: IssueTracking },
+      { path: 'system/issue-tracking', component: IssueTrackingSettings },
       { path: 'system/users', component: UserDirectory },
       { path: 'system/roles', component: RolePermissionMatrix },
       { path: 'system/tenants', component: TenantManagement },

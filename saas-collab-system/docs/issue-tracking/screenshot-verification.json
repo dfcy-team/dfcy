@@ -1,0 +1,11 @@
+{
+  "format": "PNG",
+  "size": [
+    1920,
+    945
+  ],
+  "stored_bytes": 140196,
+  "redacted_pixels": 47215,
+  "original_same_color_pixels": 0,
+  "passed": true
+}

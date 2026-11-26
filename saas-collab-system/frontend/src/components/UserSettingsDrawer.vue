@@ -2,14 +2,14 @@
   <el-drawer
     v-model="drawerVisible"
     title="个人设置"
-    size="min(480px, 100%)"
+    :size="activeTab === 'tracking' ? 'min(1120px, 100%)' : 'min(480px, 100%)'"
     append-to-body
     destroy-on-close
     :close-on-click-modal="!busy"
     :close-on-press-escape="!busy"
     @opened="loadProfile"
   >
-    <p class="settings-intro">管理您的个人资料、使用偏好、登录密码与飞书绑定。</p>
+    <p class="settings-intro">管理您的个人资料、使用偏好、登录密码、飞书绑定与事件跟踪。</p>
 
     <el-alert v-if="errorMessage" :title="errorMessage" type="error" :closable="false" show-icon />
 
@@ -116,15 +116,19 @@
           @callback-consumed="emit('binding-callback-consumed', $event)"
         />
       </el-tab-pane>
+      <el-tab-pane v-if="currentUser?.user_type === 'internal'" label="事件跟踪" name="tracking">
+        <EventTracking v-if="drawerVisible && activeTab === 'tracking'" :initial-issue-id="trackingIssueId" />
+      </el-tab-pane>
     </el-tabs>
   </el-drawer>
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { changeMyPassword, getMyProfile, updateMyProfile } from '../api/auth';
 import FeishuBindingPanel from './FeishuBindingPanel.vue';
+const EventTracking = defineAsyncComponent(() => import('../views/issueTracking/Index.vue'));
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -132,12 +136,13 @@ const props = defineProps({
   tabLimit: { type: Number, default: 15 },
   openTabCount: { type: Number, default: 1 },
   initialTab: { type: String, default: '' },
+  trackingIssueId: { type: [String, Number], default: '' },
   callbackMarker: { type: String, default: '' },
   callbackError: { type: String, default: '' },
 });
 
 const emit = defineEmits(['update:modelValue', 'profile-updated', 'password-changed', 'tab-limit-changed', 'binding-callback-consumed']);
-const activeTab = ref(['profile', 'preferences', 'password', 'binding'].includes(props.initialTab) ? props.initialTab : 'profile');
+const activeTab = ref(['profile', 'preferences', 'password', 'binding', 'tracking'].includes(props.initialTab) ? props.initialTab : 'profile');
 const loadingProfile = ref(false);
 const savingProfile = ref(false);
 const savingPassword = ref(false);
@@ -265,7 +270,7 @@ watch(drawerVisible, (visible) => {
 });
 
 watch(() => props.initialTab, (tab) => {
-  if (drawerVisible.value && ['profile', 'preferences', 'password', 'binding'].includes(tab)) activeTab.value = tab;
+  if (drawerVisible.value && ['profile', 'preferences', 'password', 'binding', 'tracking'].includes(tab)) activeTab.value = tab;
 });
 
 watch(() => props.tabLimit, (limit) => {

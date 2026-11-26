@@ -257,6 +257,7 @@ export const menuItems = [
     label: '系统管理',
     internal: true,
     children: [
+      { path: '/system/issue-tracking', label: '事件跟踪配置', permissions: ['issue_tracking.configure'], menuPermissions: ['menu.system.issue_tracking.view'] },
       {
         path: '/system/tenants', label: '租户管理', superuserOnly: true,
         menuPermissions: ['menu.system.tenants.view']
@@ -516,6 +517,8 @@ export const routeCapabilities = [
   { path: '/governance/assistants', permissions: ['governance.assistants.view'], userTypes: ['internal'] },
   { path: '/pilot/validation', permissions: ['pilot.security_review.view', 'pilot.verification.view', 'pilot.performance.view'], userTypes: ['internal'] },
   { path: '/pilot/readiness', permissions: ['pilot.readiness.view'], userTypes: ['internal'] },
+  { path: '/issue-tracking', userTypes: ['internal'] },
+  { path: '/system/issue-tracking', permissions: ['issue_tracking.configure'], userTypes: ['internal'] },
   { path: '/pilot/topology', permissions: ['pilot.topology.view'], userTypes: ['internal'] },
   { path: '/pilot/recovery', permissions: ['pilot.recovery.view'], userTypes: ['internal'] },
   { path: '/pilot/releases', permissions: ['pilot.release.view', 'pilot.recovery.view'], userTypes: ['internal'] },

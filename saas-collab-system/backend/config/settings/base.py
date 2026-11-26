@@ -325,6 +325,7 @@ INSTALLED_APPS = [
     "apps.masterdata",
     "apps.influencers",
     "apps.workflows",
+    "apps.issue_tracking",
     "apps.governance",
     "apps.pilot",
     "apps.releases",
