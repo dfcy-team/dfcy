@@ -1,0 +1,48 @@
+{
+  "results": [
+    {
+      "case": "list_20",
+      "http": 200,
+      "seconds": 2.093,
+      "queries": 24,
+      "rows": 20,
+      "workspace_summary": false
+    },
+    {
+      "case": "list_50",
+      "http": 200,
+      "seconds": 0.154,
+      "queries": 23,
+      "rows": 50,
+      "workspace_summary": false
+    },
+    {
+      "case": "detail",
+      "http": 200,
+      "seconds": 0.042,
+      "queries": 8
+    },
+    {
+      "case": "warehouse",
+      "http": 200,
+      "seconds": 0.031,
+      "queries": 9
+    },
+    {
+      "case": "events",
+      "http": 200,
+      "seconds": 0.026,
+      "queries": 8
+    },
+    {
+      "case": "unauthenticated",
+      "http": 401
+    }
+  ],
+  "counts": {
+    "queries": 73,
+    "blocked_writes": 0
+  },
+  "child_peak_rss_mib": 144.7,
+  "platform_requests": "not requested; existing SaaS GET routes only"
+}

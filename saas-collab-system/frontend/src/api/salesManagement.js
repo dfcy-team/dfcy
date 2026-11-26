@@ -80,3 +80,8 @@ export const createSalesExport = (payload, idempotencyKey) =>
     salesManagementMocks.createExport ? () => salesManagementMocks.createExport(payload) : undefined,
     'sales_management.exports.create'
   );
+
+export const fetchOrderWorkspaceSummary = (params, signal) => requestApi({
+  method: 'get', url: endpointByMode.orders,
+  params: { ...params, workspace_summary: 'only', include_summary: 'false' }, signal
+});

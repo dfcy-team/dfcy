@@ -1,7 +1,7 @@
 import { mount, flushPromises } from '@vue/test-utils';
 import { computed } from 'vue';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const api = vi.hoisted(() => ({ fetchSalesPage: vi.fn(), fetchSalesFilters: vi.fn(), fetchSalesOrderDetail: vi.fn(), createSalesExport: vi.fn() }));
+const api = vi.hoisted(() => ({ fetchSalesPage: vi.fn(), fetchOrderWorkspaceSummary: vi.fn(), fetchSalesFilters: vi.fn(), fetchSalesOrderDetail: vi.fn(), createSalesExport: vi.fn() }));
 const testRoute = vi.hoisted(() => ({ query: {} }));
 vi.mock('../src/api/feishuReminders', () => ({ reminderOptions: vi.fn().mockResolvedValue({ success: true, data: { can_send: false, sources: [] } }) }));
 const priceApi = vi.hoisted(() => ({ fetchPrices: vi.fn() }));
@@ -406,11 +406,37 @@ it('uses server status counts and keeps warehouse/search filters when switching 
   statuses: [{ normalized_status: 'completed', count: 80 }, { normalized_status: 'cancelled', count: 20 }],
   warehouse_counts: { matched: 50, not_found: 20, not_requested: 30 }, warehouses: [{ value: 7, label: 'WH-7' }]
  } } });
+ api.fetchOrderWorkspaceSummary.mockImplementation(() => api.fetchSalesPage());
  const wrapper = render('orders'); await flushPromises();
+ await wrapper.vm.loadOrderSummary(); await flushPromises();
  expect(wrapper.find('[aria-label="订单状态"]').text()).toContain('全部订单 100');
  wrapper.vm.query.search = 'TRACK'; wrapper.vm.query.warehouse_id = 7; wrapper.vm.query.warehouse_status = 'matched';
  await wrapper.find('[aria-label="订单状态"]').findAll('button')[1].trigger('click'); await flushPromises();
  expect(api.fetchSalesPage.mock.lastCall[1]).toMatchObject({ page: 1, status: 'completed', search: 'TRACK', warehouse_id: 7, warehouse_status: 'matched' });
  expect(wrapper.vm.optionsFor('order_warehouses')).toEqual([{ value: 7, label: 'WH-7' }]);
  wrapper.unmount();
+});
+
+it('loads order summary only on request and discards it when list conditions change', async () => {
+  api.fetchSalesPage.mockResolvedValue({ success: true, data: { results: [], workspace_warehouses: [{value: 7, label: 'WH'}] } });
+  const wrapper = render('orders'); await flushPromises();
+  expect(api.fetchSalesPage.mock.lastCall[1].workspace_summary).toBe('false');
+  expect(api.fetchOrderWorkspaceSummary).not.toHaveBeenCalled();
+  expect(wrapper.vm.optionsFor('order_warehouses')).toEqual([{value: 7, label: 'WH'}]);
+  let resolve;
+  api.fetchOrderWorkspaceSummary.mockImplementation(() => new Promise(done => { resolve = done; }));
+  const button = wrapper.findAll('button').find(b => b.text() === '加载订单及仓库状态汇总');
+  await button.trigger('click');
+  const signal = api.fetchOrderWorkspaceSummary.mock.lastCall[1];
+  await button.trigger('click');
+  expect(api.fetchOrderWorkspaceSummary).toHaveBeenCalledTimes(1);
+  wrapper.vm.query.search = 'NEW'; wrapper.vm.applyFilters(); await flushPromises();
+  expect(signal.aborted).toBe(true);
+  resolve({ success: true, data: {workspace_summary: {statuses: [{normalized_status: 'old', count: 99}]}} });
+  await flushPromises();
+  expect(wrapper.find('[aria-label="订单状态"]').exists()).toBe(false);
+  api.fetchOrderWorkspaceSummary.mockRejectedValue(new Error('timeout'));
+  await button.trigger('click'); await flushPromises();
+  expect(wrapper.text()).toContain('订单列表仍可使用');
+  wrapper.unmount();
 });

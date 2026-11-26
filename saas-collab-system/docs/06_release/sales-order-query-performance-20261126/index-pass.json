@@ -1,0 +1,29 @@
+{
+  "status": "PASS",
+  "index": "idx_sales_tenant_created_id",
+  "columns": [
+    "tenant_id",
+    "created_at_utc",
+    "id"
+  ],
+  "ddl_seconds": 8.059,
+  "algorithm": "INPLACE",
+  "lock": "NONE",
+  "metadata_lock_wait_cap_seconds": 5,
+  "migration": [
+    "commerce",
+    "0017_salesorder_tenant_created_id"
+  ],
+  "only_own_migration_recorded": true,
+  "page_id_seconds": 0.0013,
+  "page_rows": 20,
+  "explain": [
+    {
+      "table": "sales_order",
+      "type": "range",
+      "key": "idx_sales_tenant_created_id",
+      "rows": 761357,
+      "Extra": "Using where; Backward index scan; Using index"
+    }
+  ]
+}

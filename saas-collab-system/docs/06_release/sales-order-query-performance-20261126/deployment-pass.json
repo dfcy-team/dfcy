@@ -1,0 +1,76 @@
+{
+  "status": "PASS",
+  "version": "2.44.543",
+  "batch": "sales-order-query-performance-20261126",
+  "images": {
+    "frontend": {
+      "tag": "sales-order-query-performance-20261126:frontend",
+      "id": "sha256:7f2715fbca8dd7b24bb56c969951f6b8e538bf99e20ed175fe0f4c8584a23852"
+    },
+    "backend": {
+      "tag": "sales-order-query-performance-20261126:backend",
+      "id": "sha256:0adf6a5a941b2a49eeafb7b060c16456f89cee75ff605ff27f9f1db39f742ae9"
+    }
+  },
+  "previous_images": {
+    "frontend": "sha256:6cbe706b8c20d062853d30c5bde23d55e870cae814b09ccfc167647fb87189c2",
+    "backend": "sha256:dfcc2fb80f5db80f16c4fc5472820193bf76bc6271c07dd7d09f55b8a8d52969"
+  },
+  "backup_containers": {
+    "frontend": "production-frontend-1-before-sales-query-1795667857",
+    "backend": "production-backend-1-before-sales-query-1795667857"
+  },
+  "public_assets_verified": 64,
+  "backend_source_hashes_verified": {
+    "apps/sales_management/views.py": {
+      "sha256": "e4c1f98d0b0b28a2dda1ef044112f1239a099023f7655750ce5030f181c35901",
+      "bytes": 119344
+    },
+    "apps/commerce/models.py": {
+      "sha256": "b0af7a7ce12a0881872d8ea0a125e78b76913b5e43bc12e02ec9c25f0e91e73f",
+      "bytes": 34044
+    },
+    "apps/commerce/migrations/0017_salesorder_tenant_created_id.py": {
+      "sha256": "90356882ca2ee025c69b0430faab94a4f4b350625fb285e7a2ba3c35b06186da",
+      "bytes": 372
+    }
+  },
+  "preserved_runtime_files": {
+    "frontend": 10,
+    "backend": 5
+  },
+  "container_configuration_preserved": true,
+  "mount_sources_preserved": true,
+  "other_running_services_unchanged": true,
+  "index": {
+    "status": "PASS",
+    "index": "idx_sales_tenant_created_id",
+    "columns": [
+      "tenant_id",
+      "created_at_utc",
+      "id"
+    ],
+    "ddl_seconds": 8.059,
+    "algorithm": "INPLACE",
+    "lock": "NONE",
+    "metadata_lock_wait_cap_seconds": 5,
+    "migration": [
+      "commerce",
+      "0017_salesorder_tenant_created_id"
+    ],
+    "only_own_migration_recorded": true,
+    "page_id_seconds": 0.0013,
+    "page_rows": 20,
+    "explain": [
+      {
+        "table": "sales_order",
+        "type": "range",
+        "key": "idx_sales_tenant_created_id",
+        "rows": 761357,
+        "Extra": "Using where; Backward index scan; Using index"
+      }
+    ]
+  },
+  "user_acceptance": "pending",
+  "formal_registration": false
+}

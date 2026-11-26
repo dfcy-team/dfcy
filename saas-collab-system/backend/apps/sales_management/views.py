@@ -1191,7 +1191,14 @@ class SalesOrderCollectionView(APIView):
     read_permission_code = "sales_management.orders.view"
 
     def get(self, request):
-        scoped_orders = _scoped_orders(request, self.read_permission_code)
+        scoped_orders = _scoped_order_facts(request, self.read_permission_code)
+        summary_mode = request.query_params.get("workspace_summary", "true")
+        if summary_mode not in {"true", "false", "only"}:
+            raise ValidationError({"workspace_summary": "无效的汇总读取方式。"})
+        if summary_mode == "only":
+            from .order_workspace_filters import workspace_summary
+            return success_response({"workspace_summary": workspace_summary(
+                request, filtered_order_records(request, scoped_orders, ignore_status=True))})
         scoped_refunds = _scoped_refunds(request, self.read_permission_code)
         item_totals = (
             SalesOrderItem.objects.filter(sales_order_id=OuterRef("pk"))
@@ -1204,7 +1211,7 @@ class SalesOrderCollectionView(APIView):
             item_count=Coalesce(Subquery(item_totals.values("quantity_sum")[:1]), 0, output_field=BigIntegerField()),
             line_count=Coalesce(Subquery(item_totals.values("line_total")[:1]), 0, output_field=BigIntegerField()),
         )
-        queryset = filtered_order_records(request, queryset)
+        selection = filtered_order_records(request, scoped_orders)
         page, page_size = _pagination(request)
         sort_fields = {
             "platform": "platform__platform_type", "store.name": "store__name",
@@ -1220,18 +1227,36 @@ class SalesOrderCollectionView(APIView):
             if field not in sort_fields:
                 raise ValidationError({"ordering": "请选择销售订单中支持排序的列。"})
             order_fields = (("-" if ordering.startswith("-") else "") + sort_fields[field], "-id")
-        queryset = queryset.prefetch_related(
+        if ordering.removeprefix("-") == "item_count":
+            selection = selection.annotate(item_count=Coalesce(
+                Subquery(item_totals.values("quantity_sum")[:1]), 0, output_field=BigIntegerField()))
+        selection = selection.order_by(*order_fields)
+        queryset = queryset.select_related(
+            "platform", "store", "authorization", "internal_sync_batch__source",
+        ).prefetch_related(
             Prefetch("refund_returns", queryset=_order_linked_refunds(request.user.tenant_id))
         ).order_by(*order_fields)
         workspace = request.query_params.get('presentation') == 'workspace'
         if workspace:
             queryset = queryset.prefetch_related(Prefetch('items', queryset=_sales_item_images(
                 SalesOrderItem.objects.select_related('internal_spu', 'internal_sku'), 'sales_order')))
-        data = paginated_data(request, queryset, SalesOrderWorkspaceSerializer if workspace else SalesOrderSerializer,
+        def serialize_page(page_orders, **kwargs):
+            # Resolve only this page's authorized IDs before any presentation joins.
+            ids = list(page_orders.values_list("pk", flat=True))
+            serializer = SalesOrderWorkspaceSerializer if workspace else SalesOrderSerializer
+            return serializer(queryset.filter(pk__in=ids), **kwargs)
+
+        data = paginated_data(request, selection, serialize_page,
                               page=page, page_size=page_size)
         if workspace:
             from .order_workspace_filters import workspace_summary
-            data['workspace_summary'] = workspace_summary(request, filtered_order_records(request, scoped_orders, ignore_status=True))
+            if summary_mode == 'true':
+                data['workspace_summary'] = workspace_summary(request, filtered_order_records(request, scoped_orders, ignore_status=True))
+            else:
+                from .order_workspace_filters import visible_authorizations
+                data['workspace_warehouses'] = list({auth.warehouse_id: {
+                    'value': auth.warehouse_id, 'label': f'{auth.warehouse.code} · {auth.warehouse.name}',
+                } for auth in visible_authorizations(request.user)}.values())
             from .order_warehouse_summary import attach_warehouse_summaries
             attach_warehouse_summaries(request.user, data['results'])
             from .order_presentation import attach_event_milestones

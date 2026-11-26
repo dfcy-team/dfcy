@@ -1,0 +1,114 @@
+{
+  "results": [
+    {
+      "case": "all_20",
+      "repeat": 1,
+      "http": 200,
+      "seconds": 2.62,
+      "process_cpu_seconds": 2.279,
+      "sql_seconds": 0.309,
+      "max_sql_seconds": 0.279,
+      "queries": 22,
+      "rows": 20,
+      "response_bytes": 74024,
+      "ids_sha256": "af0896530d1f12b6b3e2982f75e4149c14198f88adb59c79261cc3de87d0f130",
+      "rss_peak_mib": 143.0
+    },
+    {
+      "case": "all_50",
+      "repeat": 1,
+      "http": 200,
+      "seconds": 0.658,
+      "process_cpu_seconds": 0.075,
+      "sql_seconds": 0.591,
+      "max_sql_seconds": 0.544,
+      "queries": 21,
+      "rows": 50,
+      "response_bytes": 170407,
+      "ids_sha256": "550cce973f7e379fa504130b45dbf27e3b3bcde4592cb713ba8e5748555d444c",
+      "rss_peak_mib": 144.5
+    },
+    {
+      "case": "store_7days",
+      "repeat": 1,
+      "http": 200,
+      "seconds": 0.078,
+      "process_cpu_seconds": 0.049,
+      "sql_seconds": 0.032,
+      "max_sql_seconds": 0.007,
+      "queries": 23,
+      "rows": 20,
+      "response_bytes": 57012,
+      "ids_sha256": "da1992b48edd12d12bbed6c54003ba4c519a214776bcee864b5199dc5622c9be",
+      "rss_peak_mib": 145.1
+    },
+    {
+      "case": "all_20",
+      "repeat": 2,
+      "http": 200,
+      "seconds": 0.436,
+      "process_cpu_seconds": 0.058,
+      "sql_seconds": 0.384,
+      "max_sql_seconds": 0.356,
+      "queries": 21,
+      "rows": 20,
+      "response_bytes": 74024,
+      "ids_sha256": "af0896530d1f12b6b3e2982f75e4149c14198f88adb59c79261cc3de87d0f130",
+      "rss_peak_mib": 145.9
+    },
+    {
+      "case": "all_50",
+      "repeat": 2,
+      "http": 200,
+      "seconds": 0.723,
+      "process_cpu_seconds": 0.187,
+      "sql_seconds": 0.544,
+      "max_sql_seconds": 0.509,
+      "queries": 21,
+      "rows": 50,
+      "response_bytes": 170407,
+      "ids_sha256": "550cce973f7e379fa504130b45dbf27e3b3bcde4592cb713ba8e5748555d444c",
+      "rss_peak_mib": 146.9
+    },
+    {
+      "case": "store_7days",
+      "repeat": 2,
+      "http": 200,
+      "seconds": 0.068,
+      "process_cpu_seconds": 0.044,
+      "sql_seconds": 0.028,
+      "max_sql_seconds": 0.003,
+      "queries": 23,
+      "rows": 20,
+      "response_bytes": 57012,
+      "ids_sha256": "da1992b48edd12d12bbed6c54003ba4c519a214776bcee864b5199dc5622c9be",
+      "rss_peak_mib": 146.9
+    },
+    {
+      "case": "page_2",
+      "http": 200,
+      "seconds": 0.367,
+      "process_cpu_seconds": 0.048,
+      "sql_seconds": 0.323,
+      "queries": 21,
+      "max_sql_seconds": 0.297
+    },
+    {
+      "case": "store_summary",
+      "http": 200,
+      "seconds": 0.117,
+      "process_cpu_seconds": 0.03,
+      "sql_seconds": 0.09,
+      "queries": 29,
+      "max_sql_seconds": 0.043
+    }
+  ],
+  "counts": {
+    "queries": 181,
+    "blocked_writes": 0,
+    "sql_seconds": 2.300461181148421,
+    "max_sql_seconds": 0.04269157600356266
+  },
+  "child_peak_rss_mib": 147.1,
+  "platform_requests": "not requested; existing SaaS GET routes only"
+}
