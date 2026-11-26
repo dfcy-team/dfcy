@@ -21,10 +21,15 @@ COPY backend/apps/finance/summary_composition.js /backend/apps/finance/summary_c
 COPY backend/apps/finance/summary_cost_detail.cjs /backend/apps/finance/summary_cost_detail.cjs
 COPY backend/apps/finance/summary_database_document.py /backend/apps/finance/summary_database_document.py
 COPY backend/apps/finance/summary_engine.cjs /backend/apps/finance/summary_engine.cjs
+COPY backend/apps/finance/summary_accounting_rules.json /backend/apps/finance/summary_accounting_rules.json
+COPY backend/apps/finance/summary_native.cjs /backend/apps/finance/summary_native.cjs
+COPY backend/apps/finance/summary_flow_view.cjs /backend/apps/finance/summary_flow_view.cjs
 COPY backend/apps/finance/summary_order_ledger.cjs /backend/apps/finance/summary_order_ledger.cjs
 COPY backend/apps/finance/summary_periods.cjs /backend/apps/finance/summary_periods.cjs
 COPY backend/apps/finance/summary_runtime.js /backend/apps/finance/summary_runtime.js
+COPY backend/apps/finance/summary_participation.js /backend/apps/finance/summary_participation.js
 COPY backend/apps/finance/summary_tools.js /backend/apps/finance/summary_tools.js
+COPY backend/apps/finance/templates/database-v1.html.gz /backend/apps/finance/templates/database-v1.html.gz
 COPY backend/apps/permissions/permission_manifest.json /backend/apps/permissions/permission_manifest.json
 COPY backend/apps/influencers/requirement_feedback.py /backend/apps/influencers/requirement_feedback.py
 COPY backend/apps/influencers/views.py /backend/apps/influencers/views.py
