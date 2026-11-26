@@ -63,7 +63,12 @@ from .cost_views import (
 )
 
 
+from .monthly_cost_views import monthly_cost_collection, monthly_cost_missing, monthly_cost_warehouses
+
 urlpatterns = [
+    path("costs/monthly/", monthly_cost_collection),
+    path("costs/monthly/missing/", monthly_cost_missing),
+    path("costs/monthly/warehouses/", monthly_cost_warehouses),
     path("costs/", product_cost_collection, name="product-cost-collection"),
     path("costs/warehouses/", product_cost_warehouses, name="product-cost-warehouses"),
     path("costs/versions/", product_cost_create, name="product-cost-create"),

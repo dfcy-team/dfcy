@@ -28,3 +28,15 @@ def recover_replenishment_calculation_jobs():
     return recover_replenishment_jobs()
 
 from .inbound_notification_tasks import dispatch as dispatch_inbound_notifications
+
+
+@shared_task(name='apps.supply_chain.tasks.refresh_daily_batch_costs', ignore_result=True)
+def refresh_daily_batch_costs(actor_id, limit=100, after_id=0):
+    if getattr(settings, 'SUPPLY_MONTHLY_COST_JOBS_ENABLED', False) is not True:
+        return {'status': 'disabled', 'processed': 0}
+    from django.contrib.auth import get_user_model
+    actor = get_user_model().objects.filter(pk=actor_id, user_type='internal', is_active=True).first()
+    if actor is None or actor.tenant_id is None:
+        return {'status': 'missing_actor', 'processed': 0}
+    from .monthly_cost_jobs import run_daily_batch_costs
+    return run_daily_batch_costs(actor, limit=limit, after_id=after_id)

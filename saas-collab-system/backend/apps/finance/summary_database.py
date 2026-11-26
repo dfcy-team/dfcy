@@ -573,6 +573,8 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
     for sku in skus.values():
         for code in [sku.sku_code, sku.legacy_sku_code]:
             if code:aliases[code.strip().casefold()].add(sku.pk)
+    from .monthly_cost_adapter import monthly_cost_index, select_monthly_cost
+    monthly_costs = monthly_cost_index(user.tenant)
     cost_versions = list(ProductCostVersion.objects.filter(tenant=user.tenant).select_related('warehouse'))
     costs_by_sku = defaultdict(lambda: defaultdict(list))
     for version in cost_versions:
@@ -598,6 +600,7 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                     candidates[wh] = version
             matched = {lookup.warehouse_id} if lookup and lookup.warehouse_id else set()
             version = candidates.get(next(iter(matched))) if len(matched) == 1 else None
+            version = select_monthly_cost(monthly_costs, sku.pk if sku else None, lookup.warehouse_id if lookup else None, line["shipped_date"], version)
             quantity = int(line.get('quantity') or 0);reason = ''
             if not sku:reason = 'SKU尚未唯一关联'
             elif not version:reason = '缺出库日有效的对应仓库已确认成本'
@@ -610,6 +613,9 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                 'unit_cost': text(version.confirmed_cost) if version and not reason else None, 'net_cost': text(net),
                 'gross_cost': text(net), 'return_credit': '0', 'currency': version.currency if version else 'CNY',
                 'cost_version_id': version.pk if version else None, 'cost_version_no': version.version_no if version else None,
+                'monthly_cost_id': getattr(version, 'monthly_cost_id', None),
+                'monthly_cost_status': getattr(version, 'monthly_cost_status', None),
+                'monthly_cost_month': getattr(version, 'monthly_cost_month', None),
                 'cost_effective_from': version.effective_from.isoformat() if version else None,
                 'cost_effective_to': version.effective_to.isoformat() if version and version.effective_to else None,
                 'warehouse_id': lookup.warehouse_id if lookup else None, 'shipped_date': line['shipped_date'], 'warehouse_order_no': line['warehouse_order_no'], 'reasons': [reason] if reason else []})
@@ -622,12 +628,13 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                 'amount': text(-Decimal(component['net_cost'])) if not component['reasons'] else None,
                 'country': store.country_code, 'platform': store.platform.platform_type,
                 'store_id': store.pk, 'store_code': store.code, 'external_order_id': external,
-                'scope': 'order', 'status': 'pending' if component['reasons'] else 'confirmed',
+                'scope': 'order', 'status': 'pending' if component['reasons'] else 'estimated' if component.get('monthly_cost_status') in ('estimated', 'pending_review') else 'confirmed',
                 'source': 'SaaS仓库实际出库商品成本', 'raw_cost_flow': True,
                 'description': f"出库单 {component['warehouse_order_no']}；SKU {component['source_sku']}；数量 {component['quantity']}；成本版本 {component['cost_version_id'] or '待核'}" + ('；' + '；'.join(component['reasons']) if component['reasons'] else ''),
                 'source_proof': {'order_id': order.pk, 'warehouse_lookup_id': lookup.pk,
                     'warehouse_id': lookup.warehouse_id, 'warehouse_order_no': component['warehouse_order_no'],
-                    'cost_version_id': component['cost_version_id']},
+                    'cost_version_id': component['cost_version_id'],
+                    'monthly_cost_id': component.get('monthly_cost_id'), 'monthly_cost_status': component.get('monthly_cost_status')},
                 'cost_calculation': {'components': [component], 'state': 'pending' if component['reasons'] else 'calculated',
                     'reasons': component['reasons'], 'time_basis': 'warehouse_shipped_date'}})
         if order:outbound_components[order.pk] = components

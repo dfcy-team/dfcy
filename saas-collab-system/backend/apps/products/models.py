@@ -918,3 +918,6 @@ class ProductLifecycleDecision(models.Model):
             super().save(*args, **kwargs)
         finally:
             self._decision_service_write = False
+
+
+from .monthly_cost_models import MonthlyProductCost, MonthlyProductCostEvent, MonthlyProductCostVersion  # noqa: E402,F401

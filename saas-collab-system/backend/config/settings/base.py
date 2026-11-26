@@ -698,3 +698,18 @@ if BOARD_PREWARM_ENABLED:
 # V538 code-only compatibility: external content writes remain opt-in per environment.
 TIKTOK_VIDEO_EVIDENCE_STORAGE_ALIAS = os.getenv("TIKTOK_VIDEO_EVIDENCE_STORAGE_ALIAS", "").strip()
 PAYMENT_VOUCHER_STORAGE_ALIAS = os.getenv("PAYMENT_VOUCHER_STORAGE_ALIAS", "").strip()
+
+
+# Monthly cost V4 is staged independently of production collection and finance.
+MONTHLY_PRODUCT_COST_ENABLED = env_bool("MONTHLY_PRODUCT_COST_ENABLED", False)
+MONTHLY_PRODUCT_COST_FINANCE_ENABLED = env_bool("MONTHLY_PRODUCT_COST_FINANCE_ENABLED", False)
+MONTHLY_PRODUCT_COST_CUTOVER_MONTH = os.getenv("MONTHLY_PRODUCT_COST_CUTOVER_MONTH", "")
+SUPPLY_MONTHLY_COST_JOBS_ENABLED = env_bool("SUPPLY_MONTHLY_COST_JOBS_ENABLED", False)
+
+MONTHLY_PRODUCT_COST_ACTOR_IDS = [int(value) for value in os.getenv("MONTHLY_PRODUCT_COST_ACTOR_IDS", "").split(",") if value.strip().isdigit()]
+if MONTHLY_PRODUCT_COST_ENABLED:
+    from celery.schedules import crontab as monthly_cost_crontab
+    CELERY_BEAT_SCHEDULE["monthly-product-cost-daily"] = {
+        "task": "apps.products.monthly_cost_schedule.dispatch_daily",
+        "schedule": monthly_cost_crontab(hour=2, minute=0),
+    }

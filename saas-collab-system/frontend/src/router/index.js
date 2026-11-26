@@ -61,6 +61,7 @@ const ResearchDetail = () => import('../views/products/ResearchDetail.vue');
 const ProductMasterList = () => import('../views/products/ProductMasterList.vue');
 const ProductMasterDetail = () => import('../views/products/ProductMasterDetail.vue');
 const ProductDetailData = () => import('../views/products/ProductDetailData.vue');
+const MonthlyCostLedger = () => import('../views/products/MonthlyCostLedger.vue');
 const ProductCostLedger = () => import('../views/products/ProductCostLedger.vue');
 const ProductSkuEditor = () => import('../views/products/ProductSkuEditor.vue');
 const ProductBundleEditor = () => import('../views/products/ProductBundleEditor.vue');
@@ -262,6 +263,7 @@ const routes = [
       { path: 'products/master/:id', component: ProductMasterDetail },
       { path: 'products/details', component: ProductDetailData },
       { path: 'products/costs', component: ProductCostLedger },
+      { path: 'inventory/cost-ledger', component: MonthlyCostLedger },
       { path: 'products/details/:id/edit', component: ProductSkuEditor },
       { path: 'products/bundles/:id/edit', component: ProductBundleEditor },
       { path: 'products/platform-details', component: PlatformProductDetailList },

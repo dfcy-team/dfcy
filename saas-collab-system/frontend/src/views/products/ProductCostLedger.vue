@@ -6,6 +6,7 @@
         <p>按仓库所在地和生效期间维护 SKU 成本版本；同一 SKU 在不同仓库可采用不同成本，历史成本永久保留。采购价格仅作为成本构成项。</p>
       </div>
       <div class="header-actions">
+        <el-button @click="$router.push('/inventory/cost-ledger')">月度库存成本台账</el-button>
         <el-button v-if="canViewSupply" data-testid="supply-cost-ledger-button" @click="supplyLedgerVisible=true">供应链批次成本</el-button>
         <el-button @click="load">刷新</el-button>
         <el-button v-if="canImport" data-testid="cost-import-button" @click="openImport">每期成本导入</el-button>

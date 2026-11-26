@@ -57,7 +57,12 @@
           "products.cost.view"
         ],
         "source": "frontend/src/router/menu.js",
-        "status": "active"
+        "status": "active",
+        "paths": [
+          "/products/costs",
+          "/inventory/cost-ledger"
+        ],
+        "registry_collision": true
       }
     },
     {
@@ -2841,6 +2846,15 @@
       ],
       "menuPermissions": [
         "menu.sales_management.category_inventory.view"
+      ]
+    },
+    {
+      "path": "/inventory/cost-ledger",
+      "permissions": [
+        "products.cost.view"
+      ],
+      "userTypes": [
+        "internal"
       ]
     },
     {

@@ -5,7 +5,7 @@ from celery import Celery
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
 
-app = Celery("config", include=["apps.sales_management.board_availability"])
+app = Celery("config", include=["apps.sales_management.board_availability", "apps.products.monthly_cost_schedule"])
 app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
 

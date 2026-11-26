@@ -183,6 +183,9 @@ def source_checkpoint(store_ids):
         'reviewed_inputs': FinanceSummaryInput.objects.filter(tenant_id__in=tenant_ids),
         'daily_exchange_rates': DailyExchangeRateSnapshot.objects.filter(tenant_id__in=tenant_ids),
     }
+    if getattr(settings, "MONTHLY_PRODUCT_COST_FINANCE_ENABLED", False):
+        from apps.products.monthly_cost_models import MonthlyProductCost
+        rows["monthly_costs"] = MonthlyProductCost.objects.filter(tenant_id__in=tenant_ids)
     result = {}
     for name, qs in rows.items():
         fields = {f.name for f in qs.model._meta.fields}

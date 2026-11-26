@@ -35,8 +35,9 @@ export const menuItems = [
   {
     label: '库存管理',
     internal: true,
-    permissions: ['sales_management.view', 'alerts.view', 'replenishment.view'],
+    permissions: ['sales_management.view', 'alerts.view', 'replenishment.view', 'products.cost.view'],
     children: [
+      { menuPermissions: ['menu.products.products_costs.view'], path: '/inventory/cost-ledger', label: '库存成本台账', permissions: ['products.cost.view'] },
       { menuPermissions: ["menu.sales_management.inventory_workbench.view"], path: '/inventory/workbench', label: '库存工作台', permissions: ['sales_management.view'] },
       { menuPermissions: ['menu.sales_management.warehouse_details.view'], path: '/inventory/warehouse-details', label: '仓库库存明细', permissions: ['sales_management.view'] },
       { menuPermissions: ['menu.sales_management.category_inventory.view'], path: '/inventory/category-query', label: '分类库存查询', sidebarHidden: true, secondaryTo: '/inventory/warehouse-details', permissions: ['sales_management.view'], allPermissions: ['sales_management.skus.view'] },
@@ -372,6 +373,7 @@ export const routeCapabilities = [
   { path: '/analytics/sales', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/inventory', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/inventory/category-query', permissions: ['sales_management.view'], allPermissions: ['sales_management.skus.view'], userTypes: ['internal'] },
+  { path: '/inventory/cost-ledger', permissions: ['products.cost.view'], userTypes: ['internal'] },
   { path: '/inventory/workbench', permissions: ['sales_management.view'], userTypes: ['internal'] },
   { path: '/inventory/warehouse-details', permissions: ['sales_management.view'], menuPermissions: ['menu.sales_management.warehouse_details.view'], userTypes: ['internal'] },
   { path: '/inventory/movements', permissions: ['sales_management.view'], allPermissions: ['supply.v2.view'], userTypes: ['internal'] },

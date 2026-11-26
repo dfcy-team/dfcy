@@ -19,6 +19,10 @@ def _rounded_unit_costs(purchase, freight, duty, quantity):
 
 
 def publish_received_costs(version, actor):
+    from django.conf import settings
+    # Monthly mode uses one month average; a batch must not overwrite it.
+    if getattr(settings, "MONTHLY_PRODUCT_COST_ENABLED", False) is True:
+        return
     if version.state != "confirmed" or version.stage != "received":
         return
     from .inbound_costs import receipt_allocations
