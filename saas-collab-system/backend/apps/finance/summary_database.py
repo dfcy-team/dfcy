@@ -317,10 +317,13 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                         batch = cursor.fetchall()
                     if not batch:
                         break
+                    row = FinanceRow(*batch[-1])
+                    next_key = (row.external_order_id, row.business_date, row.currency, row.pk)
+                    if last is not None and next_key <= last:
+                        raise ValidationError('财务流水分页游标未推进，已停止读取。')
                     for values in batch:
                         yield FinanceRow(*values)
-                    row = batch[-1]
-                    last = (row[3], row[2], row[7], row[0])
+                    last = next_key
         iterator = read_finance()
         grouped = ((key, list(rows)) for key, rows in groupby(iterator,
             lambda row: (row.store_id, row.external_order_id, str(row.business_date), row.currency)))
