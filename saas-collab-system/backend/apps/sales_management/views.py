@@ -1244,7 +1244,10 @@ class SalesOrderCollectionView(APIView):
             # Resolve only this page's authorized IDs before any presentation joins.
             ids = list(page_orders.values_list("pk", flat=True))
             serializer = SalesOrderWorkspaceSerializer if workspace else SalesOrderSerializer
-            return serializer(queryset.filter(pk__in=ids), **kwargs)
+            # A matching order can change after page IDs are selected. Reapply
+            # the request filters so stale IDs cannot leak into the response.
+            current_page = filtered_order_records(request, queryset.filter(pk__in=ids))
+            return serializer(current_page, **kwargs)
 
         data = paginated_data(request, selection, serialize_page,
                               page=page, page_size=page_size)

@@ -50,6 +50,53 @@ def test_order_list_pages_facts_before_loading_presentation_joins():
     assert 'select sum(' not in page
     assert 'select count(' not in page
 
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('workspace', [False, True])
+def test_order_page_drops_rows_that_stop_matching_during_detail_read(workspace):
+    from django.db import connection
+    from unittest.mock import patch
+    from apps.commerce.models import SalesOrder
+    from apps.sales_management.order_workspace_filters import filter_workspace as apply_workspace_filter
+
+    tenant, _, store, _ = create_scope(f'page-transition-{workspace}')
+    order = create_order(tenant, store, 'transition', '9')
+    SalesOrder.objects.filter(pk=order.pk).update(normalized_status='pending')
+    user = user_for(tenant, f'page-transition-{workspace}-viewer')
+    grant(user, 'sales_management.orders.view')
+    transitioned = False
+
+    def transition_after_page_ids(execute, sql, params, many, context):
+        nonlocal transitioned
+        if (not transitioned and sql.startswith('SELECT') and 'FROM "sales_order"' in sql
+                and 'AS "line_count"' in sql):
+            transitioned = True
+            SalesOrder.objects.filter(pk=order.pk).update(normalized_status='cancelled')
+        return execute(sql, params, many, context)
+
+    params = {'status': 'pending', 'include_summary': 'false', 'page_size': 1}
+    if workspace:
+        params['presentation'] = 'workspace'
+    recheck_queries = []
+
+    def capture_recheck_ids(request, queryset):
+        if 'AS "line_count"' in str(queryset.query):
+            recheck_queries.append(queryset.query.sql_with_params())
+        return apply_workspace_filter(request, queryset)
+
+    with patch('apps.sales_management.order_workspace_filters.filter_workspace', side_effect=capture_recheck_ids):
+        with connection.execute_wrapper(transition_after_page_ids):
+            response = client_for(user).get('/api/internal/sales-management/orders/', params)
+
+    assert transitioned
+    assert response.status_code == 200
+    assert response.json()['data']['count'] == 1
+    assert response.json()['data']['results'] == []
+    assert recheck_queries
+    recheck_sql, recheck_params = recheck_queries[-1]
+    assert '"sales_order"."id" IN (%s)' in recheck_sql
+    assert order.pk in recheck_params
+
 @pytest.mark.django_db
 def test_workspace_summary_is_explicit_and_skips_order_page_reads():
     from unittest.mock import patch
