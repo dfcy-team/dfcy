@@ -242,6 +242,61 @@ class Notifications(APIView):
     def post(self,request):
         Notification.objects.filter(recipient=request.user,pk=request.data.get('id')).update(read_at=timezone.now())
         return Response({'ok':True})
+class NotificationCenter(APIView):
+    """Current-user notifications; counts are never limited by the displayed page."""
+    permission_classes = [InternalOnly]
+
+    def queryset(self, request):
+        return Notification.objects.filter(
+            recipient=request.user,
+            issue__tenant_id=request.user.tenant_id,
+            issue__in=visible(request.user),
+        )
+
+    def get(self, request):
+        from django.core.paginator import Paginator
+        mode = request.query_params.get('view', 'unread')
+        if mode not in ('unread', 'all'):
+            raise ValidationError('消息筛选无效')
+        try:
+            page = max(1, int(request.query_params.get('page', 1)))
+            size = max(1, min(100, int(request.query_params.get('page_size', 20))))
+        except (TypeError, ValueError):
+            raise ValidationError('分页参数无效')
+        queryset = self.queryset(request)
+        unread_count = queryset.filter(read_at__isnull=True).count()
+        if mode == 'unread':
+            queryset = queryset.filter(read_at__isnull=True)
+        paginator = Paginator(queryset.select_related('issue').order_by('-created_at', '-pk'), size)
+        result = paginator.get_page(page)
+        return Response({
+            'unread_count': unread_count,
+            'count': paginator.count,
+            'page': result.number,
+            'page_size': size,
+            'results': [{
+                'id': item.pk, 'issue': item.issue_id, 'issue_title': item.issue.title,
+                'action': item.action, 'read_at': item.read_at, 'created_at': item.created_at,
+            } for item in result.object_list],
+        })
+
+    @transaction.atomic
+    def post(self, request):
+        from django.shortcuts import get_object_or_404
+        queryset = self.queryset(request)
+        if 'all' in request.data and not isinstance(request.data['all'], bool):
+            raise ValidationError('全部已读参数必须为布尔值')
+        if request.data.get('all') is True:
+            if 'id' in request.data:
+                raise ValidationError('请选择单条或全部已读')
+            updated = queryset.filter(read_at__isnull=True).update(read_at=timezone.now())
+        else:
+            identity = serializers.IntegerField(min_value=1).run_validation(request.data.get('id'))
+            item = get_object_or_404(queryset, pk=identity)
+            updated = queryset.filter(pk=item.pk, read_at__isnull=True).update(read_at=timezone.now())
+        return Response({'updated_count': updated, 'unread_count': self.queryset(request).filter(read_at__isnull=True).count()})
+
+
 class Download(APIView):
     permission_classes=[InternalOnly]
     def get(self,request,pk):

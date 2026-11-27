@@ -32,10 +32,12 @@ def config_data(actor):
     row=Config.objects.filter(tenant_id=actor.tenant_id).first()
     return {'chat_id':row.chat_id if row else '', 'chat_name':row.chat_name if row else '',
         'country_codes':row.country_codes if row else [],'all_countries':row.all_countries if row else False,
+        'arrival_unreceived_reminder_days':row.arrival_unreceived_reminder_days if row else 3,
         'enabled':row.enabled if row else False,'version':row.version if row else 0,'can_manage':can_manage(actor)}
 
 
 class ConfigInput(serializers.Serializer):
+    arrival_unreceived_reminder_days=serializers.IntegerField(min_value=1,max_value=365,required=False)
     chat_id=serializers.RegexField(r'^oc_[A-Za-z0-9_-]+$',max_length=191,allow_blank=True)
     chat_name=serializers.CharField(max_length=191,allow_blank=True)
     country_codes=serializers.ListField(child=serializers.CharField(max_length=8),max_length=100)

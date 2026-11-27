@@ -1,5 +1,6 @@
 <template>
 <section class="tracking"><header><h2>事件跟踪</h2><el-button type="primary" @click="createOpen=true">发起事项</el-button></header>
+<BusinessTodos v-if="!embedded && !context.menu_key"/>
 <el-alert v-if="error" :title="error" type="error" show-icon />
 <el-tabs v-model="view" @tab-change="reload"><el-tab-pane v-for="(label,key) in visibleViews" :key="key" :label="label" :name="key" /></el-tabs>
 <div class="filters"><el-input v-model="search" placeholder="标题、内容或单据号" clearable @keyup.enter="reload"/><el-select v-model="status" placeholder="未关闭事项" clearable><el-option v-for="(label,key) in states" :key="key" :label="label" :value="key"/></el-select><el-select v-model="department" clearable placeholder="归属部门"><el-option v-for="d in candidates.departments" :key="d.id" :label="d.name" :value="d.id"/></el-select><el-select v-model="assignee" clearable filterable placeholder="主处理人"><el-option v-for="u in candidates.users" :key="u.id" :label="u.full_name||u.username" :value="u.id"/></el-select><el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" start-placeholder="发起日期从" end-placeholder="至"/><el-checkbox v-if="status==='closed'" v-model="allHistory">全部关闭历史</el-checkbox><el-checkbox v-model="overdue">仅逾期</el-checkbox><el-button @click="reload">查询</el-button></div>
@@ -14,7 +15,8 @@
 </section>
 </template>
 <script setup>
-import { computed, ref, onMounted, watch } from 'vue';
+import BusinessTodos from '../../components/issueTracking/BusinessTodos.vue';
+import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import axios from 'axios';
@@ -24,7 +26,7 @@ import { tracking, rows, states, actions } from '../../api/issueTracking';
 import { trackingTime, eventLabels } from '../../components/issueTracking/display';
 import { dateFilters } from '../../components/issueTracking/filters';
 import IssueForm from '../../components/issueTracking/IssueForm.vue';
-const props=defineProps({context:{type:Object,default:()=>({})},initialIssueId:{type:[String,Number],default:''}});
+const props=defineProps({context:{type:Object,default:()=>({})},initialIssueId:{type:[String,Number],default:''},embedded:{type:Boolean,default:false}});
 const route=useRoute(), views={created:'我发起的',assigned:'我负责的',collaborating:'我协办的',managed:'管辖事项'};
 const closeLabels={completed:'已完成',cancelled:'已取消',unnecessary:'无需继续'};
 const allHistory=ref(false);
@@ -42,10 +44,12 @@ async function open(row){try{detail.value=await tracking(`issues/${row.id}/`);de
 async function act(){saving.value=true;try{await tracking(`issues/${detail.value.id}/actions/`,'post',{action:operation.value,content:content.value,assignee:targetUser.value,department:targetDepartment.value,due_at:targetDate.value,close_reason:closeReason.value});await open(detail.value);await reload();window.dispatchEvent(new Event('issue-tracking-updated'));ElMessage.success('操作已保存');}catch(e){error.value=e.message;ElMessage.error(e.message);}finally{saving.value=false;}}
 async function upload(e){const file=e.target.files?.[0];e.target.value='';if(!file)return;const data=new FormData();data.append('file',file);try{await tracking(`issues/${detail.value.id}/attachments/`,'post',data);await open(detail.value);}catch(e){error.value=e.message;}}
 async function download(a){try{const r=await axios.get(`${apiBaseUrl}/api/internal/issue-tracking/attachments/${a.id}/download/`,{responseType:'blob',headers:{Authorization:`Bearer ${getAccessToken()}`}});const url=URL.createObjectURL(r.data),link=document.createElement('a');link.href=url;link.download=a.name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch{ElMessage.error('附件下载失败或权限已变更');}}
-async function openNotification(n){await open({id:n.issue});await tracking('notifications/','post',{id:n.id});await reload();}
+async function openNotification(n){await open({id:n.issue});await tracking('notifications/','post',{id:n.id});window.dispatchEvent(new Event('issue-tracking-notifications-changed'));await reload();}
 async function created(issue){window.dispatchEvent(new Event('issue-tracking-updated'));createOpen.value=false;await reload();await open(issue);}
 watch(()=>props.initialIssueId,id=>{if(id)open({id});});
 watch(()=>props.context,async()=>{try{candidates.value=await tracking('candidates/','get',null,{menu_key:props.context.menu_key||'',record_type:props.context.record_type||'',record_id:props.context.record_id||''});await reload();}catch(e){error.value=e.message;}},{deep:true});
-onMounted(async()=>{try{candidates.value=await tracking('candidates/','get',null,{menu_key:props.context.menu_key||'',record_type:props.context.record_type||'',record_id:props.context.record_id||''});await reload();const issueId=props.initialIssueId||(!props.context.menu_key?route.query.issue:'');if(issueId)await open({id:issueId});}catch(e){error.value=e.message;}});
+async function syncNotifications(){try{notifications.value=rows(await tracking('notifications/'));}catch{ /* The message center exposes refresh failures. */ }}
+onBeforeUnmount(()=>window.removeEventListener('issue-tracking-notifications-changed',syncNotifications));
+onMounted(async()=>{window.addEventListener('issue-tracking-notifications-changed',syncNotifications);try{candidates.value=await tracking('candidates/','get',null,{menu_key:props.context.menu_key||'',record_type:props.context.record_type||'',record_id:props.context.record_id||''});await reload();const issueId=props.initialIssueId||(!props.embedded&&!props.context.menu_key?route.query.issue:'');if(issueId)await open({id:issueId});}catch(e){error.value=e.message;}});
 </script>
 <style scoped>.tracking{padding:16px;background:white;border-radius:10px}header,.filters{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px}header{justify-content:space-between}.filters .el-input{max-width:260px}.filters .el-select{width:180px}.el-pagination{margin:16px 0}.el-timeline{margin-top:24px}.el-button{margin-top:8px}</style>

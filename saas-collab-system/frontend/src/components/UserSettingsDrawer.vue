@@ -117,7 +117,7 @@
         />
       </el-tab-pane>
       <el-tab-pane v-if="currentUser?.user_type === 'internal'" label="事件跟踪" name="tracking">
-        <EventTracking v-if="drawerVisible && activeTab === 'tracking'" :initial-issue-id="trackingIssueId" />
+        <EventTracking v-if="drawerVisible && activeTab === 'tracking'" :key="trackingOpenKey" :initial-issue-id="trackingIssueId" :embedded="true" />
       </el-tab-pane>
     </el-tabs>
   </el-drawer>
@@ -137,6 +137,7 @@ const props = defineProps({
   openTabCount: { type: Number, default: 1 },
   initialTab: { type: String, default: '' },
   trackingIssueId: { type: [String, Number], default: '' },
+  trackingOpenKey: { type: Number, default: 0 },
   callbackMarker: { type: String, default: '' },
   callbackError: { type: String, default: '' },
 });

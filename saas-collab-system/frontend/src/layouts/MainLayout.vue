@@ -38,6 +38,7 @@
               <strong :title="auth.currentUser?.username">{{ auth.currentUser?.full_name || auth.currentUser?.username }}</strong>
               <span>{{ roleLabel }}</span>
             </div>
+            <NotificationBell v-if="auth.currentUser?.user_type === 'internal'" />
             <ReleaseNotes />
             <el-button class="user-settings-button" text @click="userSettingsOpen = true">个人设置</el-button>
             <el-button text @click="handleLogout">退出登录</el-button>
@@ -128,6 +129,7 @@
       :open-tab-count="openTabs.length"
       :initial-tab="settingsInitialTab"
       :tracking-issue-id="trackingIssueId"
+      :tracking-open-key="trackingOpenKey"
       :callback-marker="bindingCallbackMarker"
       :callback-error="bindingCallbackError"
       @profile-updated="handleProfileUpdated"
@@ -160,6 +162,7 @@ import { fetchAuthorizationVersion } from '../api/authorization';
 import { filterMenuItems, findMenuLabel, flattenMenuItems } from '../router/menu';
 import UserSettingsDrawer from '../components/UserSettingsDrawer.vue';
 import TrackingFloat from '../components/issueTracking/TrackingFloat.vue';
+import NotificationBell from '../components/issueTracking/NotificationBell.vue';
 import ReleaseNotes from '../components/ReleaseNotes.vue';
 import { buildIntegrationSidebar } from '../router/integrationNavigation';
 
@@ -171,9 +174,11 @@ const mobileMenuOpen = ref(false);
 const userSettingsOpen = ref(false);
 const settingsInitialTab = ref('');
 const trackingIssueId = ref('');
+const trackingOpenKey = ref(0);
 function openEventTracking(event) {
   if (auth.currentUser?.user_type !== 'internal') return;
   trackingIssueId.value = event.detail?.issueId || '';
+  trackingOpenKey.value += 1;
   settingsInitialTab.value = 'tracking';
   userSettingsOpen.value = true;
 }
@@ -285,6 +290,7 @@ watch(() => route.fullPath, () => {
 watch(userSettingsOpen, (visible) => {
   if (!visible) {
     settingsInitialTab.value = '';
+    trackingIssueId.value = '';
     bindingCallbackError.value = '';
   }
 });

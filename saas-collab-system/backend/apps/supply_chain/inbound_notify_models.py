@@ -9,6 +9,7 @@ class InboundNotificationConfig(models.Model):
     country_codes = models.JSONField(default=list)
     all_countries = models.BooleanField(default=False)
     enabled = models.BooleanField(default=False)
+    arrival_unreceived_reminder_days = models.PositiveSmallIntegerField(default=3)
     version = models.PositiveIntegerField(default=1)
     updated_by = models.ForeignKey('accounts.CustomUser', null=True, blank=True, on_delete=models.SET_NULL)
     updated_at = models.DateTimeField(auto_now=True)
