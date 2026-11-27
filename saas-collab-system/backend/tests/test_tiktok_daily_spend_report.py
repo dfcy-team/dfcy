@@ -105,6 +105,27 @@ def test_same_currency_subtotal_spans_pages(setup_report):
     assert len(data["results"]) == 1
 
 
+def test_gmv_90_days_deduplicates_over_a_thousand_raw_revisions(setup_report):
+    client, user, mapping, _ = setup_report
+    snapshots = []
+    for i in range(1002):
+        page = {"page_info": {"page": 1, "page_size": 100, "total_page": 1, "total_number": 1},
+                "list": [{"dimensions": {"campaign_id": "1"}, "metrics": {
+                    "cost": str(i), "gross_revenue": str(i), "orders": 1}}]}
+        payload = {"schema": "gmv-max-day-v1", "advertiser_id": mapping.advertiser_id,
+                   "date": "2026-10-01", "platform_store_id": "store", "currency": "PHP",
+                   "timezone": "Asia/Manila", "pages": [page]}
+        snapshots.append(SharedAdvertisingRawPayload(tenant=user.tenant, store=mapping.store,
+            platform="tiktok", endpoint=REPORT_PATH, payload_hash=sha256(str(i).encode()).hexdigest(), payload=payload))
+    SharedAdvertisingRawPayload.objects.bulk_create(snapshots)
+    result = get(client, report_type="gmv_max", date_to="2026-12-29")
+    assert result.status_code == 200
+    rows = result.data["data"]["gmv_max_snapshots"]
+    from decimal import Decimal
+    assert len(rows) == 1 and Decimal(rows[0]["cost"]) == 1001
+    assert get(client, report_type="gmv_max", date_to="2026-12-30").status_code == 400
+
+
 def test_gmv_snapshot_overflow_preserves_basic_api_report(setup_report):
     client, user, mapping, _ = setup_report
     fact(mapping, date="2026-10-01", spend="4.000000")

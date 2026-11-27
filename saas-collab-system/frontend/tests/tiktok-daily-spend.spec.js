@@ -45,6 +45,21 @@ afterEach(() => {
 });
 
 describe('TikTok stored spend', () => {
+  it('pages long daily tables without requesting or summing the data again', async () => {
+    const payload = response();
+    payload.data.gmv_max_snapshots = Array.from({ length: 51 }, (_, i) => ({
+      ...payload.data.gmv_max_snapshots[0], advertiser_name: 'row-' + String(i).padStart(2, '0'),
+    }));
+    fetchTikTokDailySpend.mockResolvedValue(payload);
+    const wrapper = render();
+    await flushPromises();
+    expect(wrapper.text()).toContain('row-49');
+    expect(wrapper.text()).not.toContain('row-50');
+    await wrapper.find('nav[aria-label="明细分页"] button:last-child').trigger('click');
+    expect(wrapper.text()).toContain('row-50');
+    expect(wrapper.text()).not.toContain('row-49');
+    expect(fetchTikTokDailySpend).toHaveBeenCalledTimes(1);
+  });
   it('shows a complete reporting account and another unverified account instead of 7/14', async () => {
     const payload = response();
     payload.data.date_from = '2026-10-28';
@@ -138,11 +153,11 @@ describe('TikTok stored spend', () => {
     const wrapper = render();
     await flushPromises();
     expect(wrapper.text()).toContain('0.000000');
-    await dates(wrapper, '2026-10-01', '2026-11-01');
+    await dates(wrapper, '2026-08-01', '2026-11-01');
     expect(wrapper.text()).not.toContain('0.000000');
     await query(wrapper);
     expect(fetchTikTokDailySpend).toHaveBeenCalledTimes(1);
-    expect(wrapper.text()).toContain('31');
+    expect(wrapper.text()).toContain('90');
   });
 
   it('shows unknown versus zero, status warnings and scoped subject dropdowns', async () => {
