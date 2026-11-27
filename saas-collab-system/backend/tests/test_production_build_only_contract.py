@@ -72,6 +72,8 @@ def test_archive_migrations_cannot_reuse_registered_release():
     archived_migration_sha = "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838"
     root = Path(__file__).resolve().parents[1]
     unregistered_migrations = {
+        # V555 forward VM index node also postdates this historical archive.
+        "apps/commerce/migrations/0014_v555_sales_query_indexes_vm.py",
         # V543-V546 new migration files postdate this frozen archive.
         "apps/finance/migrations/0018_alter_warehousebillformatrule_is_active.py",
         "apps/finance/migrations/0019_financesummaryautomationcheck.py",

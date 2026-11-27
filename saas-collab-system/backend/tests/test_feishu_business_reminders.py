@@ -7,10 +7,12 @@ from django.db import connection
 from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 
 from apps.accounts.models import InternalUserProfile
 from apps.integrations.feishu_delivery import execute_delivery
 from apps.integrations.models import FeishuBusinessReminder, FeishuConnection, FeishuDelivery, FeishuIdentity
+from apps.integrations.feishu_reminders import input_data, records
 from apps.masterdata.models import StoreMaster
 from apps.permissions.models import DataScope, OrgMembership
 from apps.tenants.models import Department
@@ -49,6 +51,38 @@ def data_for(s, **updates):
     data = {"source": "orders", "mode": "selected", "record_ids": [s["order"].pk], "filters": {},
             "recipient_user_ids": [s["member"].pk], "title": "请核查", "message": "请在系统中跟进", "due_date": "2026-10-21"}
     return {**data, **updates}
+
+
+@pytest.mark.parametrize("mode,filters", [
+    ("selected", {"search": "track", "warehouse_id": "12", "warehouse_status": "matched"}),
+    ("filtered", {"date_from": "2026-10-01", "date_to": "2026-10-31", "search": "track", "warehouse_id": "12", "warehouse_status": "matched"}),
+])
+def test_order_workspace_filters_validate_and_reach_selector(scene, mode, filters):
+    payload = data_for(scene, mode=mode, filters=filters,
+                       record_ids=[scene["order"].pk] if mode == "selected" else [])
+    parsed = input_data(payload)
+    assert parsed["filters"] == filters
+
+    from apps.sales_management.views import filtered_order_records as original_selector
+    seen = {}
+
+    def selector(request):
+        seen["filters"] = {key: request.query_params[key] for key in request.query_params}
+        return original_selector(request)
+
+    with patch("apps.sales_management.views.filtered_order_records", side_effect=selector):
+        queryset = records(scene["actor"], parsed)
+        # Evaluation confirms selector output remains constrained to the actor's authorized tenant.
+        assert set(queryset.values_list("tenant_id", flat=True)) <= {scene["tenant"].pk}
+    assert seen["filters"] == filters
+
+
+@pytest.mark.parametrize("field", ["search", "warehouse_id", "warehouse_status"])
+def test_order_workspace_filters_rejected_for_returns(scene, field):
+    payload = data_for(scene, source="returns", filters={field: "matched"})
+    with pytest.raises(ValidationError) as exc:
+        input_data(payload)
+    assert 'filters' in exc.value.detail
 
 
 def send(s, data=None, key=None):

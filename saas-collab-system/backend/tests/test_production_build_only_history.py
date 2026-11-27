@@ -177,6 +177,8 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
     for path in sorted(controller_backend.glob("apps/*/migrations/*.py")):
         relative = path.relative_to(controller_backend).as_posix()
         if relative in {
+            # V555 forward VM index node also postdates this historical archive.
+            "apps/commerce/migrations/0014_v555_sales_query_indexes_vm.py",
             # V543-V546 new migration files postdate this frozen archive.
             "apps/finance/migrations/0018_alter_warehousebillformatrule_is_active.py",
             "apps/finance/migrations/0019_financesummaryautomationcheck.py",

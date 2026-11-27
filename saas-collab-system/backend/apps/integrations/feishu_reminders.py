@@ -34,6 +34,7 @@ FILTERS = {"date_from", "date_to", "platform", "platforms", "store_id", "store_i
            "status", "order_status", "refund_status", "case_type", "return_type", "external_order_id", "order_no",
            "sku", "source_sku", "sku_mode", "mapping_as_of", "sku_exact", "order_exact", "exclude_cancelled",
            "unmapped_only", "has_refund_return"}
+ORDER_ONLY_FILTERS = {"search", "warehouse_id", "warehouse_status"}
 
 
 def active_internal(user):
@@ -89,7 +90,8 @@ class ReminderInput(serializers.Serializer):
     due_date = serializers.DateField(allow_null=True, default=None)
 
     def validate(self, data):
-        if set(data["filters"]) - FILTERS:
+        allowed_filters = FILTERS | (ORDER_ONLY_FILTERS if data["source"] == "orders" else set())
+        if set(data["filters"]) - allowed_filters:
             raise ValidationError({"filters": "存在不支持的筛选条件，请重新查询后再发送。"})
         if data["mode"] == "filtered":
             try:

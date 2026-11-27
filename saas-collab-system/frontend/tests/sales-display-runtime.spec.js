@@ -1,14 +1,14 @@
 import { mount, flushPromises } from '@vue/test-utils';
 import { computed } from 'vue';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const api = vi.hoisted(() => ({ fetchSalesPage: vi.fn(), fetchSalesFilters: vi.fn(), fetchSalesOrderDetail: vi.fn(), createSalesExport: vi.fn() }));
+const api = vi.hoisted(() => ({ fetchSalesPage: vi.fn(), fetchOrderWorkspaceSummary: vi.fn(), fetchSalesFilters: vi.fn(), fetchSalesOrderDetail: vi.fn(), createSalesExport: vi.fn() }));
 const testRoute = vi.hoisted(() => ({ query: {} }));
 vi.mock('../src/api/feishuReminders', () => ({ reminderOptions: vi.fn().mockResolvedValue({ success: true, data: { can_send: false, sources: [] } }) }));
 const priceApi = vi.hoisted(() => ({ fetchPrices: vi.fn() }));
 vi.mock('../src/api/salesManagement', () => api);
 vi.mock('../src/api/pricing', () => priceApi);
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }), useRoute: () => testRoute }));
-vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ currentUser: { permissions: [] } }) }));
+vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ currentUser: { permissions: [] }, hasPermission: () => false }) }));
 import SalesWorkspace from '../src/views/sales-management/SalesWorkspace.vue';
 import PriceList from '../src/views/pricing/PriceList.vue';
 
@@ -25,7 +25,7 @@ const stubs = {
   'el-table-column': { props: ['label'], inject: ['rows'], template: '<section>{{ label }}<slot v-for="row in rows" :row="row" /></section>' },
   'el-empty': { props: ['description'], template: '<p>{{ description }}</p>' },
   'el-drawer': { props: ['modelValue', 'title'], template: '<aside v-if="modelValue">{{ title }}<slot /></aside>' },
-  'el-dialog': true
+  'el-dialog': { props: ['modelValue', 'title'], template: '<aside v-if="modelValue">{{ title }}<slot /></aside>' }
 };
 const render = mode => mount(SalesWorkspace, { props: { mode }, global: { stubs, directives: { loading: () => {} } } });
 beforeEach(() => {
@@ -398,4 +398,111 @@ it('binds quality statistics to the last successful list filters and rejects uns
   finish({success:true,data:{api_status:'connected',quality:{score:100,checked_rows:10}}});await pending;await flushPromises();
   expect(w.vm.quality.score).toBeNull();expect(w.vm.rows).toHaveLength(1);
   w.unmount();
+});
+
+
+it('uses server status counts and keeps warehouse/search filters when switching tabs', async () => {
+ api.fetchSalesPage.mockResolvedValue({ success: true, data: { count: 100, results: [], workspace_summary: {
+  statuses: [{ normalized_status: 'completed', count: 80 }, { normalized_status: 'cancelled', count: 20 }],
+  warehouse_counts: { matched: 50, not_found: 20, not_requested: 30 }, warehouses: [{ value: 7, label: 'WH-7' }]
+ } } });
+ api.fetchOrderWorkspaceSummary.mockImplementation(() => api.fetchSalesPage());
+ const wrapper = render('orders'); await flushPromises();
+ await wrapper.vm.loadOrderSummary(); await flushPromises();
+ expect(wrapper.find('[aria-label="订单状态"]').text()).toContain('全部订单 100');
+ wrapper.vm.query.search = 'TRACK'; wrapper.vm.query.warehouse_id = 7; wrapper.vm.query.warehouse_status = 'matched';
+ await wrapper.find('[aria-label="订单状态"]').findAll('button')[1].trigger('click'); await flushPromises();
+ expect(api.fetchSalesPage.mock.lastCall[1]).toMatchObject({ page: 1, status: 'completed', search: 'TRACK', warehouse_id: 7, warehouse_status: 'matched' });
+ expect(wrapper.vm.optionsFor('order_warehouses')).toEqual([{ value: 7, label: 'WH-7' }]);
+ wrapper.unmount();
+});
+
+it('loads order summary only on request and discards it when list conditions change', async () => {
+  api.fetchSalesPage.mockResolvedValue({ success: true, data: { results: [], workspace_warehouses: [{value: 7, label: 'WH'}] } });
+  const wrapper = render('orders'); await flushPromises();
+  expect(api.fetchSalesPage.mock.lastCall[1].workspace_summary).toBe('false');
+  expect(api.fetchOrderWorkspaceSummary).not.toHaveBeenCalled();
+  expect(wrapper.vm.optionsFor('order_warehouses')).toEqual([{value: 7, label: 'WH'}]);
+  let resolve;
+  api.fetchOrderWorkspaceSummary.mockImplementation(() => new Promise(done => { resolve = done; }));
+  const button = wrapper.findAll('button').find(b => b.text() === '加载订单及仓库状态汇总');
+  await button.trigger('click');
+  const signal = api.fetchOrderWorkspaceSummary.mock.lastCall[1];
+  await button.trigger('click');
+  expect(api.fetchOrderWorkspaceSummary).toHaveBeenCalledTimes(1);
+  wrapper.vm.query.search = 'NEW'; wrapper.vm.applyFilters(); await flushPromises();
+  expect(signal.aborted).toBe(true);
+  resolve({ success: true, data: {workspace_summary: {statuses: [{normalized_status: 'old', count: 99}]}} });
+  await flushPromises();
+  expect(wrapper.find('[aria-label="订单状态"]').exists()).toBe(false);
+  api.fetchOrderWorkspaceSummary.mockRejectedValue(new Error('timeout'));
+  await button.trigger('click'); await flushPromises();
+  expect(wrapper.text()).toContain('订单列表仍可使用');
+  wrapper.unmount();
+});
+
+it('keeps status tabs through pending status loads and rejects an old summary after base filters change', async () => {
+  api.fetchSalesPage.mockResolvedValue({ success: true, data: { results: [] } });
+  const wrapper = render('orders'); await flushPromises();
+  api.fetchOrderWorkspaceSummary.mockResolvedValueOnce({ success: true, data: { workspace_summary: { statuses: [{ normalized_status: 'completed', count: 4 }] } } });
+  await wrapper.vm.loadOrderSummary(); await flushPromises();
+  expect(wrapper.find('[aria-label="订单状态"]').exists()).toBe(true);
+  let resolveOldSummary;
+  api.fetchOrderWorkspaceSummary.mockImplementationOnce(() => new Promise(resolve => { resolveOldSummary = resolve; }));
+  wrapper.vm.loadOrderSummary();
+  const oldSignal = api.fetchOrderWorkspaceSummary.mock.lastCall[1];
+  expect(api.fetchOrderWorkspaceSummary.mock.lastCall[0]).not.toHaveProperty('status');
+
+  let finishStatusLoad;
+  api.fetchSalesPage.mockImplementationOnce(() => new Promise(resolve => { finishStatusLoad = resolve; }));
+  wrapper.vm.selectOrderStatus('completed');
+  await flushPromises();
+  expect(wrapper.find('[aria-label="订单状态"]').exists()).toBe(true);
+  expect(wrapper.find('[aria-label="订单状态"]').text()).toContain('全部订单');
+  finishStatusLoad({ success: true, data: { results: [] } }); await flushPromises();
+  expect(wrapper.find('[aria-label="订单状态"]').exists()).toBe(true);
+
+  let finishNewBaseLoad;
+  api.fetchSalesPage.mockImplementationOnce(() => new Promise(resolve => { finishNewBaseLoad = resolve; }));
+  wrapper.vm.query.search = 'NEW-BASE'; wrapper.vm.applyFilters();
+  await flushPromises();
+  expect(oldSignal.aborted).toBe(true);
+  expect(wrapper.find('[aria-label="订单状态"]').exists()).toBe(false);
+  finishNewBaseLoad({ success: true, data: { results: [] } }); await flushPromises();
+
+  let resolveFreshSummary;
+  api.fetchOrderWorkspaceSummary.mockImplementationOnce(() => new Promise(resolve => { resolveFreshSummary = resolve; }));
+  wrapper.vm.loadOrderSummary();
+  resolveFreshSummary({ success: true, data: { workspace_summary: { statuses: [{ normalized_status: 'fresh', count: 7 }] } } });
+  await flushPromises();
+  resolveOldSummary({ success: true, data: { workspace_summary: { statuses: [{ normalized_status: 'stale', count: 99 }] } } });
+  await flushPromises();
+  expect(wrapper.find('[aria-label="订单状态"]').text()).toContain('fresh 7');
+  expect(wrapper.find('[aria-label="订单状态"]').text()).not.toContain('stale 99');
+  wrapper.unmount();
+});
+
+
+it('clears cached status counts on mode exit and access rejection and discards their late summaries', async () => {
+  api.fetchSalesPage.mockResolvedValue({ success: true, data: { results: [] } });
+  const wrapper = render('orders'); await flushPromises();
+  api.fetchOrderWorkspaceSummary.mockResolvedValueOnce({ success: true, data: { workspace_summary: { statuses: [{ normalized_status: 'old', count: 4 }] } } });
+  await wrapper.vm.loadOrderSummary(); await flushPromises();
+  expect(wrapper.find('[aria-label="订单状态"]').text()).toContain('old 4');
+  let late;
+  api.fetchOrderWorkspaceSummary.mockImplementationOnce(() => new Promise(resolve => { late = resolve; }));
+  wrapper.vm.loadOrderSummary(); const signal = api.fetchOrderWorkspaceSummary.mock.lastCall[1];
+  await wrapper.setProps({ mode: 'returns' }); await flushPromises();
+  expect(signal.aborted).toBe(true);
+  await wrapper.setProps({ mode: 'orders' }); await flushPromises();
+  late({ success: true, data: { workspace_summary: { statuses: [{ normalized_status: 'late', count: 99 }] } } });
+  await flushPromises();
+  expect(wrapper.find('[aria-label="订单状态"]').exists()).toBe(false);
+  api.fetchOrderWorkspaceSummary.mockResolvedValueOnce({ success: true, data: { workspace_summary: { statuses: [{ normalized_status: 'new', count: 7 }] } } });
+  await wrapper.vm.loadOrderSummary(); await flushPromises();
+  expect(wrapper.find('[aria-label="订单状态"]').text()).toContain('new 7');
+  api.fetchSalesPage.mockRejectedValueOnce(Object.assign(new Error('Forbidden'), { status: 403 }));
+  wrapper.vm.selectOrderStatus('completed'); await flushPromises();
+  expect(wrapper.find('[aria-label="订单状态"]').exists()).toBe(false);
+  wrapper.unmount();
 });

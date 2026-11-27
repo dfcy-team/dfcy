@@ -6,14 +6,16 @@ const api = vi.hoisted(() => ({ fetchSalesPage: vi.fn(), fetchSalesFilters: vi.f
 vi.mock('../src/api/salesManagement', () => api);
 vi.mock('../src/api/feishuReminders', () => ({ reminderOptions: vi.fn().mockResolvedValue({ data: {} }) }));
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }), useRoute: () => ({ query: {} }) }));
-vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ currentUser: { permissions: [] } }) }));
+vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ currentUser: { permissions: [] }, hasPermission: () => false }) }));
 import SalesWorkspace from '../src/views/sales-management/SalesWorkspace.vue';
+import SalesOrderDetailPanel from '../src/components/SalesOrderDetailPanel.vue';
+import OrderWarehouseInfo from '../src/components/OrderWarehouseInfo.vue';
 
 let wrapper;
 const stubs = {
   ElForm: { template: '<form><slot /></form>' }, ElFormItem: { template: '<label><slot /></label>' },
   ElButton: { template: '<button><slot /></button>' }, ElSelect: true, ElOption: true,
-  ElDatePicker: true, ElInput: true, ElPagination: true, ElDialog: true,
+  ElDatePicker: true, ElInput: true, ElPagination: true, ElDialog: { props: ['modelValue'], template: '<aside v-if="modelValue"><slot /></aside>' },
   ElAlert: { props: ['title'], template: '<p>{{ title }}</p>' }, ElTag: { template: '<span><slot /></span>' },
   ElTable: { props: ['data'], provide() { return { rows: computed(() => this.data) }; }, template: '<div><slot /></div>' },
   ElTableColumn: { props: ['label'], inject: ['rows'], template: '<section>{{ label }}<slot v-for="row in rows" :row="row" /></section>' },
@@ -24,7 +26,21 @@ beforeEach(() => {
   api.fetchSalesFilters.mockResolvedValue({ success: true, data: {} });
   api.fetchSalesPage.mockResolvedValue({ success: true, data: { results: [] } });
 });
-afterEach(() => wrapper?.unmount());
+afterEach(() => { wrapper?.unmount(); vi.unstubAllEnvs(); });
+
+it('propagates warehouse completion to detail and list without reloading orders', async () => {
+  vi.stubEnv('VITE_USE_MOCK', 'false');
+  api.fetchSalesPage.mockResolvedValue({ success: true, data: { results: [{ id: 1, external_order_id: 'ORDER-1' }] } });
+  await openDetail({ id: 1, external_order_id: 'ORDER-1' });
+  const summary = { status: 'matched', snapshot: { warehouse_name: 'WAREHOUSE-RESULT', packages: [] } };
+  wrapper.findComponent(OrderWarehouseInfo).vm.$emit('updated', { orderId: 1, summary });
+  await flushPromises();
+  expect(wrapper.findComponent(SalesOrderDetailPanel).props('order').warehouse_summary).toEqual(summary);
+  expect(wrapper.vm.rows[0].warehouse_summary).toEqual(summary);
+  wrapper.findComponent(OrderWarehouseInfo).vm.$emit('updated', { orderId: 99, summary: { status: 'failed' } });
+  await flushPromises();
+  expect(wrapper.vm.rows[0].warehouse_summary.status).toBe('matched');
+});
 async function openDetail(data) {
   api.fetchSalesOrderDetail.mockResolvedValue({ success: true, data });
   wrapper = mount(SalesWorkspace, { props: { mode: 'orders' }, global: { stubs, directives: { loading: () => {} } } });
@@ -32,6 +48,33 @@ async function openDetail(data) {
 }
 
 describe('sales order field details', () => {
+  it.each(['mock', 'degraded'])('rejects %s detail data in production mode and permits a real retry', async (api_status) => {
+    vi.stubEnv('VITE_USE_MOCK', 'false');
+    await openDetail({ id: 1, api_status, external_order_id: 'FAKE-DETAIL', order_total_amount: '999999',
+      items: [{ id: 1, seller_sku: 'FAKE-PRODUCT', quantity: 1 }] });
+    expect(wrapper.text()).not.toContain('FAKE-DETAIL');
+    expect(wrapper.text()).not.toContain('FAKE-PRODUCT');
+    expect(wrapper.text()).not.toContain('999,999');
+    expect(wrapper.text()).toContain('不能使用示例数据');
+    api.fetchSalesOrderDetail.mockResolvedValue({ success: true, data: { id: 1, external_order_id: 'REAL-DETAIL' } });
+    await wrapper.vm.selectRow({ id: 1 }); await flushPromises();
+    expect(wrapper.text()).toContain('REAL-DETAIL');
+    expect(wrapper.text()).not.toContain('不能使用示例数据');
+  });
+  it('ignores an older degraded response after switching orders', async () => {
+    vi.stubEnv('VITE_USE_MOCK', 'false');
+    await openDetail({ id: 1, external_order_id: 'FIRST' });
+    let resolveOld;
+    api.fetchSalesOrderDetail.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }))
+      .mockResolvedValueOnce({ success: true, data: { id: 3, external_order_id: 'LATEST' } });
+    const pending = wrapper.vm.selectRow({ id: 2 });
+    await wrapper.vm.selectRow({ id: 3 });
+    resolveOld({ success: true, data: { api_status: 'degraded', external_order_id: 'FAKE-OLD' } });
+    await pending; await flushPromises();
+    expect(wrapper.text()).toContain('LATEST');
+    expect(wrapper.text()).not.toContain('FAKE-OLD');
+    expect(wrapper.text()).not.toContain('不能使用示例数据');
+  });
   it('separates refund status amounts and flags an unreconciled item instead of showing zero', async () => {
     await openDetail({ id: 1, platform: 'shopee', currency: 'PHP', refund_summary: {
       case_count: 3, refund_amount: '20', accepted_amount: '30', cancelled_amount: '40' },

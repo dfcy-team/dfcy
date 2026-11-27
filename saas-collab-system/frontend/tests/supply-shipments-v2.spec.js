@@ -405,10 +405,52 @@ describe('supplier shipment API', () => {
     wrapper.unmount();
   });
 
+  it('shows the reason after goods only for changed submitted prices and hides it when restored', async () => {
+    mocks.canManage=true; mocks.routeQuery={};
+    const wrapper=mountPage(false);
+    wrapper.vm.current={id:31,status:'submitted',price_editable:true,lines:[{id:8,unit_price:'12.8000'}]};
+    wrapper.vm.form.lines=[{id:8,unit_price:12.8}];
+    // Opening a detail is read-only; API mutation semantics are tested separately.
+    await wrapper.vm.openShipment({id:31});
+    wrapper.vm.current={id:31,status:'submitted',price_editable:true,lines:[{id:8,unit_price:'12.8000'}]};
+    wrapper.vm.form.lines=[{id:8,unit_price:12.8}];
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('调价原因（已集货商品调价时必填）');
+    wrapper.vm.form.lines[0].unit_price=13;
+    await flushPromises();
+    const text=wrapper.text();
+    expect(text).toContain('调价原因（已集货商品调价时必填）');
+    expect(text.indexOf('调价原因（已集货商品调价时必填）')).toBeGreaterThan(text.indexOf('保存和提交会处理整单商品'));
+    expect(text.indexOf('调价原因（已集货商品调价时必填）')).toBeLessThan(text.indexOf('箱号文件（保存草稿后上传）'));
+    expect(wrapper.vm.current.lines[0].unit_price).toBe('12.8000');
+    wrapper.vm.form.lines[0].unit_price=12.8;
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('调价原因（已集货商品调价时必填）');
+    wrapper.vm.form.lines[0].unit_price=13; wrapper.vm.current.price_editable=false;
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('调价原因（已集货商品调价时必填）');
+    wrapper.unmount();
+  });
+
+  it.each([12.8, '12.8000'])('allows an unchanged or restored collected price without an invisible reason prompt (%s)', async price => {
+    mocks.canManage=true; mocks.routeQuery={};
+    const wrapper=mountPage(false);
+    wrapper.vm.current={id:31,status:'submitted',version:4,price_editable:true,price_adjustment_requires_reason:true,lines:[{id:8,unit_price:'12.8000'}]};
+    wrapper.vm.form.lines=[{id:8,unit_price:13}];
+    wrapper.vm.form.lines[0].unit_price=price;
+    mocks.requestApi.mockImplementation(async request=>request.url.endsWith('/prices/')?{success:true,data:{id:31,status:'submitted',version:5,lines:[{id:8,unit_price:'12.8000'}]}}:{success:true,data:[]});
+    await wrapper.vm.savePrices();
+    const request=mocks.requestApi.mock.calls.map(([r])=>r).find(r=>r.url.endsWith('/prices/'));
+    expect(request.data.lines).toEqual([{id:8,unit_price:12.8}]);
+    expect(request.data).not.toHaveProperty('reason');
+    expect(wrapper.vm.formError).toBe('');
+    wrapper.unmount();
+  });
+
   it('requires and submits a reason for a post-collection price adjustment', async () => {
     mocks.canManage=true; mocks.routeQuery={};
     const wrapper=mountPage(false);
-    wrapper.vm.current={id:31,status:'submitted',version:4,price_editable:true,price_adjustment_requires_reason:true};
+    wrapper.vm.current={id:31,status:'submitted',version:4,price_editable:true,price_adjustment_requires_reason:true,lines:[{id:8,unit_price:'12.8000'}]};
     wrapper.vm.form.lines=[{id:8,unit_price:0}];
     await wrapper.vm.savePrices();
     expect(mocks.requestApi.mock.calls.some(([r])=>r.url.endsWith('/prices/'))).toBe(false);

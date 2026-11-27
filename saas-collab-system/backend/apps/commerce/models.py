@@ -135,6 +135,8 @@ class SalesOrder(ValidatedWriteModel):
         ]
         indexes = [
             models.Index(fields=["tenant", "store", "created_at_utc"], name="idx_sales_order_store_time"),
+            models.Index(fields=["tenant", "created_at_utc", "id"], name="idx_sales_tenant_created_id"),
+            models.Index(fields=["store", "updated_at_utc"], name="idx_sales_store_stamp"),
             models.Index(
                 fields=["tenant", "normalized_status", "updated_at_utc"],
                 name="idx_sales_order_status_time",
@@ -221,6 +223,7 @@ class SalesOrderItem(ValidatedWriteModel):
         ]
         indexes = [
             models.Index(fields=["sales_order", "seller_sku"], name="idx_sales_item_seller_sku"),
+            models.Index(fields=["sales_order", "updated_at"], name="idx_items_order_stamp"),
         ]
 
     def clean(self):

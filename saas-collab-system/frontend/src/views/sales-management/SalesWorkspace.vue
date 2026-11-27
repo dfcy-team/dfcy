@@ -1,8 +1,8 @@
 <template>
-  <section class="sales-workspace" :class="{ 'sales-overview': isReport, 'sales-order-report': mode === 'overview', 'sales-store-report': mode === 'stores', 'sales-sku-report': mode === 'skus' }" :aria-busy="loading">
+  <section class="sales-workspace" :class="{ 'sales-orders': mode === 'orders', 'sales-overview': isReport, 'sales-order-report': mode === 'overview', 'sales-store-report': mode === 'stores', 'sales-sku-report': mode === 'skus' }" :aria-busy="loading">
     <header class="sales-header">
       <div>
-        <p v-if="!isReport" class="sales-eyebrow">{{ contract.eyebrow }}</p>
+        <p v-if="!isReport && mode !== 'orders'" class="sales-eyebrow">{{ contract.eyebrow }}</p>
         <h1>{{ contract.title }}</h1>
         <p>{{ contract.description }}</p>
       </div>
@@ -15,14 +15,15 @@
     </header>
 
     <el-alert
-      v-if="!isReport"
+      v-if="!isReport && mode !== 'orders'"
       title="只读分析：本模块不会执行平台改价、退款、库存调整或订单状态写回。"
       type="info"
       show-icon
       :closable="false"
     />
 
-    <section v-if="mode !== 'exports' && !isReport" class="freshness-rail" aria-label="数据新鲜度与来源">
+    <component :is="mode === 'orders' ? 'details' : 'section'" v-if="mode !== 'exports' && !isReport" class="freshness-rail" aria-label="数据新鲜度与来源">
+      <summary v-if="mode === 'orders'">数据来源与范围 · {{ sourceStatusLabel }}</summary>
       <div class="freshness-rail__lead">
         <span class="status-dot" :class="sourceStatus" />
         <div><small>数据新鲜度与来源</small><strong>{{ sourceStatusLabel }}</strong></div>
@@ -33,7 +34,7 @@
         <div><dt>币种口径</dt><dd>按来源币种分别展示，不跨币种相加</dd></div>
         <div><dt>质量检查评分</dt><dd>{{ quality.checked_rows === 0 || quality.score == null ? '尚未评估' : `${quality.score} / 100` }}</dd></div>
       </dl>
-    </section>
+    </component>
 
     <div v-if="mode === 'data-quality'" class="filter-recovery">
       <span class="field-note">先读取问题与同步记录；销售事实质量统计按需读取，未读取不代表没有问题。</span>
@@ -47,9 +48,12 @@
       <el-button v-for="tab in reportTabs" :key="tab.path" :type="tab.mode === mode ? 'primary' : 'default'" :aria-current="tab.mode === mode ? 'page' : undefined" @click="navigateReport(tab.path)">{{ tab.label }}</el-button>
     </nav>
     <div v-if="mode === 'skus'" class="overview-detail-switch" role="group" aria-label="SKU 汇总方式"><el-button :type="skuGrouping === 'store' ? 'primary' : 'default'" :aria-pressed="skuGrouping === 'store'" @click="changeSkuGrouping('store')">按店铺 SKU 汇总</el-button><el-button :type="skuGrouping === 'product' ? 'primary' : 'default'" :aria-pressed="skuGrouping === 'product'" @click="changeSkuGrouping('product')">按商品 SKU 汇总</el-button></div>
+    <div v-if="mode === 'orders'" class="field-note"><el-button :loading="orderSummaryLoading" :disabled="loading || !!errorMessage" @click="loadOrderSummary">加载订单及仓库状态汇总</el-button><span v-if="orderSummaryError" role="alert">{{ orderSummaryError }}</span><span v-else-if="!orderSummary">按需加载，不影响订单列表读取。</span></div>
+    <nav v-if="mode === 'orders' && orderSummary" class="order-status-tabs" aria-label="订单状态"><button :class="{ active: !query.status }" @click="selectOrderStatus('')">全部订单 {{ orderSummary.statuses.reduce((sum,row) => sum + row.count, 0) }}</button><button v-for="row in orderSummary.statuses" :key="row.normalized_status" :class="{ active: query.status === row.normalized_status }" @click="selectOrderStatus(row.normalized_status)">{{ statusLabel(row.normalized_status) }} {{ row.count }}</button></nav>
+    <p v-if="mode === 'orders' && orderSummary?.warehouse_counts" class="field-note">其他筛选条件范围（不含订单状态）：仓库已匹配 {{ orderSummary.warehouse_counts.matched || 0 }} · 未查到 {{ orderSummary.warehouse_counts.not_found || 0 }} · 尚未查询 {{ orderSummary.warehouse_counts.not_requested || 0 }} · 其余查询状态 {{ Object.entries(orderSummary.warehouse_counts).filter(([key]) => !['matched','not_found','not_requested'].includes(key)).reduce((sum,[,value]) => sum + value, 0) }}</p>
     <el-form v-if="resolvedFilters.length" class="sales-filters" :class="{ 'order-filters': mode === 'orders' }" :model="query" label-position="top" @submit.prevent="applyFilters">
       <div class="filter-grid">
-        <el-form-item v-for="filter in resolvedFilters" :key="filter.key" :label="filter.label" :class="`filter-${filter.key}`">
+        <el-form-item v-for="filter in resolvedFilters" v-show="mode !== 'orders' || orderMoreFilters || ['date_range', 'platform', 'store_id', 'search', 'warehouse_id', 'warehouse_status'].includes(filter.key) || query[filter.key]" :key="filter.key" :label="filter.label" :class="`filter-${filter.key}`">
           <div v-if="isReport && filter.type === 'daterange'" class="quick-dates" role="group" aria-label="快捷日期"><button v-for="days in [1, 7, 15, 30]" :key="days" type="button" :aria-pressed="isQuickRange(days)" @click="applyQuickRange(days)">{{ days === 1 ? '昨天' : `过去${days}天` }}</button></div>
           <el-date-picker
             v-if="filter.type === 'daterange'"
@@ -80,6 +84,7 @@
       <div class="filter-actions">
         <el-button type="primary" native-type="submit" :loading="loading">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
+        <el-button v-if="mode === 'orders'" link :aria-expanded="orderMoreFilters" @click="orderMoreFilters = !orderMoreFilters">{{ orderMoreFilters ? '收起筛选 ↑' : '更多筛选 ↓' }}</el-button>
       </div>
     </el-form>
 
@@ -143,12 +148,13 @@
 
       <section v-if="!['overview', 'skus'].includes(mode)" class="sales-panel table-panel">
         <div class="panel-heading">
-          <div><h2>{{ contract.tableTitle }}</h2><p>{{ contract.tableNote }}</p></div>
+          <div><h2>{{ mode === 'orders' ? '订单列表' : contract.tableTitle }}</h2><p v-if="mode !== 'orders'">{{ contract.tableNote }}</p></div>
           <el-tag effect="plain">{{ total }} 条</el-tag>
           <details v-if="mode === 'stores'" class="store-columns"><summary>展示列</summary><div><label v-for="column in contract.columns" :key="column.prop"><input v-model="storeColumns" type="checkbox" :value="column.prop" :disabled="column.prop === 'store_name'">{{ column.label }}</label></div></details>
         </div>
-        <p class="field-note">金额保留两位小数，数量使用千分位；“—”表示未提供，不等于 0。时间统一为协调世界时。点击详情可核对完整字段和原始值。</p>
-        <el-table ref="salesTable" v-if="rows.length || pageState === 'empty'" row-key="id" @selection-change="selectReminderRows" :data="rows" :empty-text="contract.emptyText" stripe @row-click="selectRow" @sort-change="sortStores">
+        <SalesOrderCards v-if="mode === 'orders'" :rows="rows" :ordering="orderOrdering || '-created_at_utc'" :selectable="canRemind" :selection-disabled="reminderDisabled" @open="selectRow" @copy="copyReference" @sort="sortOrderCards" @selection="selectReminderRows" />
+        <p v-if="mode !== 'orders'" class="field-note">金额保留两位小数，数量使用千分位；“—”表示未提供，不等于 0。时间统一为协调世界时。点击详情可核对完整字段和原始值。</p>
+        <el-table ref="salesTable" v-if="mode !== 'orders' && (rows.length || pageState === 'empty')" row-key="id" @selection-change="selectReminderRows" :data="rows" :empty-text="contract.emptyText" stripe @row-click="selectRow" @sort-change="sortStores">
           <el-table-column v-if="canRemind" type="selection" width="48" :selectable="() => !reminderDisabled" />
           <el-table-column
             v-for="column in displayedColumns"
@@ -190,7 +196,16 @@
       </section>
     </div>
 
-    <el-drawer v-model="detailOpen" size="min(960px, 100vw)" :title="`${contract.title} · 只读详情`" @closed="closeDetail">
+    <component :is="mode === 'orders' ? ElDialog : ElDrawer" v-model="detailOpen" :title="mode === 'orders' ? '订单详情' : `${contract.title} · 只读详情`" size="min(960px, 100vw)" width="min(1240px, calc(100vw - 32px))" top="4vh" :class="{ 'sales-order-modal': mode === 'orders' }" :close-on-click-modal="false" @closed="closeDetail">
+      <template v-if="mode === 'orders'">
+        <div class="sales-order-modal__content" v-loading="detailLoading">
+          <el-alert v-if="detailError" :title="detailError" type="error" :closable="false" /><el-button v-if="detailError && selectedRow" @click="selectRow(selectedRow)">重试</el-button>
+          <SalesOrderDetailPanel v-if="selectedRow && !detailLoading && !detailError" :key="selectedRow.id" :order="selectedRow" @warehouse-updated="updateWarehouseSummary" @copy="copyReference" />
+          <p v-if="detailLoading" role="status">正在读取订单详情…</p>
+        </div>
+      </template>
+      <details v-if="mode !== 'orders' || (selectedRow && !detailLoading && !detailError)" :open="mode !== 'orders'" class="order-evidence">
+        <summary v-if="mode === 'orders'">原始字段、商品明细与售后证据（原始时间为 UTC）</summary>
       <OrderRegistrationLinks v-if="mode === 'orders' && selectedRow" :store-id="selectedRow.store?.id || selectedRow.store_id" :order-number="selectedRow.external_order_id || ''" />
       <dl v-if="selectedRow" v-loading="detailLoading" class="detail-list">
         <div v-for="column in contract.columns" :key="column.prop"><dt>{{ column.label }}</dt><dd>{{ formatField(valueAt(selectedRow, column.prop), column) }}<small v-if="column.format === 'money' && valueAt(selectedRow, column.prop) != null" class="raw-value">原始金额：{{ rawAmount(selectedRow, column.prop) }}</small></dd></div>
@@ -299,7 +314,9 @@
         </article>
       </section>
       <el-alert title="敏感客户字段已脱敏；详情查看不会触发平台写操作。" type="info" :closable="false" />
-    </el-drawer>
+      </details>
+      <template v-if="mode === 'orders'" #footer><span class="field-note">当前页 {{ selectedOrderIndex + 1 }} / {{ rows.length }} · 只读查看</span><el-button :disabled="detailLoading || selectedOrderIndex <= 0" @click="selectRow(rows[selectedOrderIndex - 1])">上一单</el-button><el-button :disabled="detailLoading || selectedOrderIndex < 0 || selectedOrderIndex >= rows.length - 1" @click="selectRow(rows[selectedOrderIndex + 1])">下一单</el-button><el-button @click="detailOpen = false">关闭</el-button></template>
+    </component>
 
     <el-dialog v-model="exportDialogOpen" title="新建销售导出" width="520px">
       <el-form label-position="top">
@@ -324,10 +341,12 @@ import FeishuReminderDrawer from '../../components/FeishuReminderDrawer.vue';
 import { reminderOptions } from '../../api/feishuReminders';
 import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
 import OrderRegistrationLinks from '../../components/OrderRegistrationLinks.vue';
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import SalesOrderCards from '../../components/SalesOrderCards.vue';
+import SalesOrderDetailPanel from '../../components/SalesOrderDetailPanel.vue';
+import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
-import { createSalesExport, fetchSalesFilters, fetchSalesOrderDetail, fetchSalesPage } from '../../api/salesManagement';
+import { ElMessage, ElDialog, ElDrawer } from 'element-plus';
+import { createSalesExport, fetchSalesFilters, fetchSalesOrderDetail, fetchSalesPage, fetchOrderWorkspaceSummary } from '../../api/salesManagement';
 import { formatApiError } from '../../api/request';
 import { reportResponseError, accessFailure, queryScope } from '../reports/reportContext';
 import { reportError } from '../reports/reportDisplay';
@@ -373,6 +392,34 @@ const storeOrdering = ref('');
 const orderOrdering = ref('');
 const salesTable = ref(null);
 const query = reactive({});
+const orderSummary = ref(null);
+const orderWarehouses = ref([]);
+const orderSummaryLoading = ref(false);
+const orderSummaryError = ref('');
+let orderSummarySequence = 0;
+let orderSummaryController = null;
+let appliedOrderParams = null;
+onBeforeUnmount(() => { ++orderSummarySequence; orderSummaryController?.abort(); });
+async function loadOrderSummary() {
+  if (!appliedOrderParams || orderSummaryLoading.value) return;
+  const sequence = ++orderSummarySequence;
+  orderSummaryController?.abort();
+  orderSummaryController = new AbortController();
+  orderSummaryLoading.value = true;
+  orderSummaryError.value = '';
+  try {
+    const { page, page_size, ordering, status, include_summary, currency_basis, presentation, workspace_summary, ...summaryParams } = appliedOrderParams;
+    const response = await fetchOrderWorkspaceSummary(summaryParams, orderSummaryController.signal);
+    if (sequence !== orderSummarySequence) return;
+    if (!response?.success || !response.data?.workspace_summary) throw new Error('汇总读取失败');
+    orderSummary.value = response.data.workspace_summary;
+  } catch (error) {
+    if (sequence === orderSummarySequence) orderSummaryError.value = '状态汇总读取失败，可点击重试；订单列表仍可使用。';
+  } finally {
+    if (sequence === orderSummarySequence) orderSummaryLoading.value = false;
+  }
+}
+function selectOrderStatus(status) { query.status = status; applyFilters(); }
 const filterData = reactive({ platforms: [], stores: [], currencies: [], order_statuses: [], refund_statuses: [] });
 const tkOrderScope = computed(() => {
   if (props.mode !== 'orders') return false;
@@ -463,9 +510,18 @@ const total = ref(0);
 const page = ref(1);
 const pageSize = 20;
 const selectedRow = ref(null);
+const orderMoreFilters = ref(false);
+function updateWarehouseSummary({ orderId, summary }) {
+  if (selectedRow.value?.id !== orderId) return;
+  selectedRow.value = { ...selectedRow.value, warehouse_summary: summary };
+  rows.value = rows.value.map(row => row.id === orderId ? { ...row, warehouse_summary: summary } : row);
+}
 const unlinkedReturnLogistics = computed(() => (selectedRow.value?.order_observations?.return_logistics_snapshots || [])
   .filter(snapshot => !(selectedRow.value?.refund_returns || []).some(refund => refund.external_return_id === snapshot.return_sn)));
 const detailOpen = ref(false);
+const detailError = ref('');
+const selectedOrderIndex = computed(() => rows.value.findIndex(row => row.id === selectedRow.value?.id));
+function sortOrderCards(value) { orderOrdering.value = value; page.value = 1; loadData(); }
 const detailLoading = ref(false);
 const exportDialogOpen = ref(false);
 const actionLoading = ref(false);
@@ -493,6 +549,7 @@ let requestSequence = 0;
 let detailSequence = 0;
 
 function optionsFor(source) {
+  if (source === 'order_warehouses') return orderWarehouses.value;
   if (!source) return [];
   const values = filterData[source] || [];
   if (source === 'stores') {
@@ -559,7 +616,7 @@ function applyRouteFilters(routeQuery, load = true) {
     const stores = queryArray(routeQuery.store_ids ?? routeQuery.store_id).map(value => /^\d+$/.test(value) ? Number(value) : value);
     query.store_id = isMultiFilter('store_id') ? stores : (stores[0] || '');
   }
-  for (const key of ['currency', 'sku', 'external_order_id', 'sku_mode', 'mapping_as_of']) if (routeQuery[key] != null && Object.hasOwn(query, key)) query[key] = String(routeQuery[key]);
+  for (const key of ['currency', 'sku', 'external_order_id', 'sku_mode', 'mapping_as_of', 'search', 'warehouse_id', 'warehouse_status']) if (routeQuery[key] != null && Object.hasOwn(query, key)) query[key] = String(routeQuery[key]);
   if (Object.hasOwn(query, 'status')) query.status = String((props.mode === 'returns' ? routeQuery.refund_status : routeQuery.order_status) || routeQuery.status || '');
   for (const key of ['region','sku_exact','source_sku','order_exact','exclude_cancelled','unmapped_only']) {
     if (routeQuery[key] != null) query[key] = String(routeQuery[key]); else delete query[key];
@@ -614,6 +671,7 @@ function requestParams() {
   if (['orders', 'returns', 'data-quality'].includes(props.mode)) params.include_summary = 'false';
   if (props.mode === 'stores' && storeOrdering.value) params.ordering = storeOrdering.value;
   if (props.mode === 'orders' && orderOrdering.value) params.ordering = orderOrdering.value;
+  if (props.mode === 'orders') { params.presentation = 'workspace'; params.workspace_summary = 'false'; }
   Object.entries(query).forEach(([key, value]) => {
     if (key === 'tk_order_type' && !tkOrderScope.value) return;
     if (key === 'date_range' && value?.length === 2) {
@@ -686,6 +744,20 @@ async function loadData(useApplied = false) {
     if (storeOrdering.value) params.ordering = storeOrdering.value;
   }
   if (props.mode === 'skus') params.ordering = skuOrdering.value;
+  if (props.mode === 'orders') {
+    const summaryFilters = value => {
+      const { page, page_size, ordering, status, include_summary, currency_basis, presentation, workspace_summary, ...filters } = value || {};
+      return JSON.stringify(filters);
+    };
+    const changedSummaryFilters = appliedOrderParams && summaryFilters(params) !== summaryFilters(appliedOrderParams);
+    if (changedSummaryFilters) {
+      ++orderSummarySequence;
+      orderSummaryController?.abort();
+      orderSummaryLoading.value = false;
+      orderSummary.value = null;
+      orderSummaryError.value = '';
+    }
+  }
   loading.value = true;
   selectedReminderIds.value = [];
   errorMessage.value = '';
@@ -694,9 +766,13 @@ async function loadData(useApplied = false) {
     if (sequence !== requestSequence) return;
     if (!response?.success) throw reportResponseError({ ...response, message: salesError(response) });
     const data = response.data || {};
+    if (props.mode === 'orders') {
+      appliedOrderParams = { ...params };
+      orderWarehouses.value = data.workspace_warehouses || data.workspace_summary?.warehouses || [];
+    }
     if (data.api_status === 'degraded' || data.api_status === 'mock' && import.meta.env.VITE_USE_MOCK !== 'true') throw new Error(data.api_error || '读取失败，不能使用示例数据代替正式结果。');
     if (['orders', 'returns'].includes(props.mode)) {
-      const { page: ignoredPage, page_size: ignoredSize, ordering: ignoredOrdering, include_summary: ignoredSummary, currency_basis: ignoredBasis, reminder_id: ignoredReminder, ...filters } = params;
+      const { page: ignoredPage, page_size: ignoredSize, ordering: ignoredOrdering, include_summary: ignoredSummary, currency_basis: ignoredBasis, reminder_id: ignoredReminder, presentation: ignoredPresentation, workspace_summary: ignoredWorkspaceSummary, ...filters } = params;
       appliedReminderFilters.value = filters;
     }
     if (props.mode === 'data-quality') appliedQualityFilters.value = JSON.parse(JSON.stringify(params));
@@ -765,6 +841,8 @@ function onPlatformChange() {
   if (!isReport.value) loadData();
 }
 function clearData() {
+  ++orderSummarySequence; orderSummaryController?.abort(); orderSummaryLoading.value = false;
+  orderSummary.value = null; orderSummaryError.value = ''; appliedOrderParams = null;
   rows.value = []; metrics.value = []; overviewData.value = {}; sources.value = [];
   currencyConversion.value = null;
   appliedOverviewFilters.value = null;
@@ -791,15 +869,20 @@ async function selectRow(row) {
   const sequence = ++detailSequence;
   selectedRow.value = row;
   detailOpen.value = true;
+  detailError.value = '';
   if (props.mode !== 'orders') return;
   detailLoading.value = true;
   try {
     const response = await fetchSalesOrderDetail(row.id, query.currency === '__AUTO_CNY__' ? { currency_basis: 'CNY' } : {});
     if (sequence !== detailSequence) return;
-    if (!response?.success) return ElMessage.error(salesError(response));
+    if (!response?.success) { detailError.value = salesError(response); return; }
+    if (response.data?.api_status === 'degraded' || response.data?.api_status === 'mock' && import.meta.env.VITE_USE_MOCK !== 'true') {
+      detailError.value = '订单详情读取失败，不能使用示例数据代替正式结果，请重试。';
+      return;
+    }
     selectedRow.value = response.data;
   } catch (error) {
-    if (sequence === detailSequence) ElMessage.error(salesError({ message: error?.message }));
+    if (sequence === detailSequence) detailError.value = salesError({ message: error?.message });
   } finally { if (sequence === detailSequence) detailLoading.value = false; }
 }
 function closeDetail() { ++detailSequence; detailLoading.value = false; selectedRow.value = null; }
@@ -820,6 +903,8 @@ async function submitExport() {
   delete filters.ordering;
   delete filters.report;
   delete filters.grouping;
+  delete filters.presentation;
+  delete filters.workspace_summary;
   const response = await createSalesExport({ export_type: exportForm.export_type, filters }, newKey('sales-export'));
   actionLoading.value = false;
   if (!response?.success) return ElMessage.error(salesError(response));
@@ -994,10 +1079,29 @@ void UI_STATES;
   .order-filters .filter-actions { grid-column: 1 / -1; }
   .order-filters .filter-actions :deep(.el-button) { min-height: 44px; flex: 1; }
 }
-</style>
+.order-status-tabs{display:flex;flex-wrap:wrap;gap:16px;border-bottom:1px solid #dce5f0}.order-status-tabs button{padding:12px 4px;background:none;border:0;color:#576982;cursor:pointer}.order-status-tabs button.active{color:#235bd2;border-bottom:2px solid #235bd2;font-weight:600}</style>
 
 
 <style scoped>
 .feishu-reminder-shortcut { position: fixed; z-index: 31; right: 18px; bottom: 104px; border: 1px solid #cbd5e1; border-radius: 20px; background: #fff; color: #1d4ed8; padding: 9px 12px; cursor: pointer; box-shadow: 0 2px 8px rgb(15 23 42 / 14%); }
 .feishu-reminder-shortcut:disabled { color: #94a3b8; cursor: not-allowed; }
-</style>
+.order-status-tabs{display:flex;flex-wrap:wrap;gap:16px;border-bottom:1px solid #dce5f0}.order-status-tabs button{padding:12px 4px;background:none;border:0;color:#576982;cursor:pointer}.order-status-tabs button.active{color:#235bd2;border-bottom:2px solid #235bd2;font-weight:600}</style>
+<style>
+.sales-order-modal.el-dialog { display: flex; flex-direction: column; max-height: 92vh; margin-bottom: 4vh; }
+.sales-order-modal .el-dialog__body { min-height: 0; overflow: auto; padding-top: 0; }
+.sales-order-modal .el-dialog__footer { flex-shrink: 0; border-top: 1px solid #dce5f0; padding-top: 14px; }
+.sales-order-modal .el-dialog__footer .field-note { margin-right: 16px; }
+.sales-order-modal__content { min-height: 160px; }
+
+.sales-orders .freshness-rail{display:block;padding:10px 14px;background:transparent;border:0;margin:0;color:#576982;font-size:12px}
+.sales-orders .freshness-rail summary{cursor:pointer;width:fit-content;padding:4px 0}
+.sales-orders .freshness-rail[open] .freshness-rail__lead{display:none}
+.sales-orders .freshness-rail dl{margin-top:12px}
+.sales-orders .order-filters{gap:12px;padding:16px}
+.sales-orders .table-panel{padding:0;background:transparent;border:0}
+.sales-orders .table-panel>.panel-heading{padding:4px 0;margin-bottom:0}
+.sales-orders .table-panel>.panel-heading h2{font-size:14px}
+.sales-orders .sales-header{margin-bottom:4px}
+.sales-orders .order-filters .filter-actions{flex-wrap:wrap;grid-column:span 2;justify-content:flex-start}
+@container sales-orders (max-width: 560px){.sales-orders .order-filters .filter-actions{grid-column:1/-1}}
+.order-status-tabs{display:flex;flex-wrap:wrap;gap:16px;border-bottom:1px solid #dce5f0}.order-status-tabs button{padding:12px 4px;background:none;border:0;color:#576982;cursor:pointer}.order-status-tabs button.active{color:#235bd2;border-bottom:2px solid #235bd2;font-weight:600}</style>

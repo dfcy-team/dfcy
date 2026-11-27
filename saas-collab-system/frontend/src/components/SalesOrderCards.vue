@@ -1,0 +1,52 @@
+<template>
+  <section class="order-cards" aria-label="销售订单列表">
+    <div class="order-toolbar"><label>排序 <select :value="ordering" @change="$emit('sort', $event.target.value)"><option value="-created_at_utc">下单时间 · 最新在前</option><option value="created_at_utc">下单时间 · 最早在前</option><option value="-order_total_amount">订单金额 · 从高到低</option><option value="order_total_amount">订单金额 · 从低到高</option></select></label><span>时间为北京时间 · 金额按当前展示币种</span></div>
+    <p v-if="!rows.length">当前筛选没有订单，请调整筛选条件。</p>
+    <div class="order-table-head" aria-hidden="true"><span>商品信息</span><span>仓库与物流</span><span>关键时间</span><span>订单金额</span><span>订单进度</span><span>操作</span></div>
+    <article v-for="order in rows" :key="order.id" class="order-card">
+      <header><div><input v-if="selectable" type="checkbox" :disabled="selectionDisabled" :checked="selected.includes(order.id)" :aria-label="`选择订单 ${order.external_order_id}`" @change="toggle(order.id, $event.target.checked)"> <button class="order-id" @click="$emit('open', order)">{{ order.external_order_id }}</button><button @click="$emit('copy', order.external_order_id)">复制</button></div><span>{{ order.platform }} · {{ order.store?.name || order.store?.code }} · {{ order.store?.region }}</span></header>
+      <div class="order-columns">
+        <div class="goods" data-label="商品信息"><div v-for="item in (goodsExpanded.has(order.id) ? order.items || [] : (order.items || []).slice(0, 2))" :key="item.id" class="product"><img v-if="item.platform_image_url" :src="item.platform_image_url" alt="商品图片" loading="lazy" @error="$event.target.style.visibility = 'hidden'"><span v-else class="no-image">无图片</span><div><strong>{{ item.seller_sku || 'SKU 未提供' }}</strong><p class="name">{{ item.item_name_snapshot || '商品名称未提供' }}</p><small>{{ item.variation_snapshot }}</small><p>{{ item.currency || order.currency }} {{ orderMoney(item.sale_unit_price) }} × <b>{{ item.quantity }}</b></p><p class="warehouse-line" v-for="warehouseItem in (warehouseItemPairs(order).find(pair => pair.line === item)?.matches || [])" :key="warehouseItem.key">仓库 SKU {{ warehouseItem.sku || warehouseItem.warehouse_sku }} × {{ warehouseItem.quantity ?? '未提供' }}</p></div></div><button v-if="order.items?.length > 2" @click="toggleGoods(order.id)">{{ goodsExpanded.has(order.id) ? '收起商品 ↑' : `另 ${order.items.length - 2} 项商品 ↓` }}</button><span v-if="!order.items?.length">暂无商品明细</span></div>
+        <div class="order-delivery" data-label="仓库与物流"><strong>{{ order.warehouse_summary?.snapshot?.warehouse_name || order.warehouse_summary?.status_label || '尚未查询仓库' }}</strong><p>{{ [order.order_observations?.recipient_summary?.country, order.order_observations?.recipient_summary?.state || order.order_observations?.recipient_summary?.province, order.order_observations?.recipient_summary?.city].filter(Boolean).join(' · ') || '收件地区未提供' }}</p><p>{{ order.order_observations?.shipping_carrier || [...new Set((order.warehouse_summary?.snapshot?.packages || []).map(pack => pack.carrier).filter(Boolean))].join(' / ') || '物流商未提供' }}</p><small v-if="order.warehouse_summary?.stale">上次成功快照</small><p v-for="(pack, index) in platformPackages(order)" :key="index" class="tracking">平台运单 {{ pack.tracking_number || '未提供' }} <button v-if="pack.tracking_number" @click="$emit('copy', pack.tracking_number)">复制</button></p><details v-if="warehousePackages(order).length"><summary>仓库履约 {{ warehousePackages(order).length }} 条</summary><p v-for="(pack,index) in warehousePackages(order)" :key="index">{{ pack.carrier || '物流商未提供' }} · {{ pack.status_label || '仓库状态未提供' }}<br>运单 {{ pack.tracking_no || '未提供' }} <button v-if="pack.tracking_no" @click="$emit('copy', pack.tracking_no)">复制</button></p></details></div>
+        <div class="order-times" data-label="关键时间"><p>下单 {{ orderTime(order.created_at_utc) }}</p><p>{{ primaryOrderTime(order)[0] }} {{ orderTime(primaryOrderTime(order)[1]) }}</p><div v-if="expanded.has(order.id)"><p v-for="[label,value] in extraOrderTimes(order)" :key="label">{{ label }} {{ orderTime(value) }}</p></div><button v-if="extraOrderTimes(order).length" @click="toggleTime(order.id)">{{ expanded.has(order.id) ? '收起时间 ↑' : '更多时间 ↓' }}</button></div>
+        <div class="order-money" data-label="订单金额"><strong class="amount">{{ orderMoney(order.order_total_amount) }}</strong><span>{{ order.currency }}</span><p>{{ order.order_observations?.payment_method || '支付方式未提供' }}</p></div>
+        <div class="order-progress" data-label="订单进度">
+          <div class="progress-block"><span class="progress-label">订单</span><el-tag :type="statusType(order.normalized_status)">{{ statusLabel(order.normalized_status) }}</el-tag></div>
+          <div class="progress-block"><span class="progress-label">仓库</span><span class="warehouse-state" :class="{ 'needs-attention': ['failed','blocked','partial','conflict'].includes(order.warehouse_summary?.status) }">{{ warehouseProgress(order) }}</span><small v-if="order.warehouse_summary?.status === 'matched'">已匹配仓库</small><small v-else-if="order.warehouse_summary?.stale">上次成功快照</small></div>
+          <el-tag v-if="warehouseItemPairs(order).some(pair => pair.mismatch)" type="warning">商品数量待核对</el-tag>
+          <details v-if="order.raw_status" class="raw-status"><summary>原始状态</summary><small>{{ order.raw_status }}</small></details>
+        </div>
+        <div class="order-actions" data-label="操作"><button @click="$emit('open', order)">查看详情</button></div>
+      </div>
+    </article>
+  </section>
+</template>
+<script setup>
+import { ref, watch } from 'vue';
+import { statusLabel, statusType } from '../views/sales-management/display';
+import { orderTime, orderMoney, platformPackages, primaryOrderTime, warehouseItemPairs, warehousePackages, extraOrderTimes } from '../utils/orderPresentation';
+const props = defineProps({ rows: { type: Array, default: () => [] }, ordering: { type: String, default: '-created_at_utc' }, selectable: Boolean, selectionDisabled: Boolean });
+const emit = defineEmits(['open', 'copy', 'sort', 'selection']);
+const goodsExpanded = ref(new Set());
+function toggleGoods(id) { const next = new Set(goodsExpanded.value); next.has(id) ? next.delete(id) : next.add(id); goodsExpanded.value = next; }
+const expanded = ref(new Set()), selected = ref([]);
+function warehouseProgress(order) {
+  const summary = order.warehouse_summary;
+  if (summary?.status !== 'matched' || summary.stale) return summary?.status_label || '尚未查询';
+  const labels = [...new Set(warehousePackages(order).map(pack => pack.status_label || '状态待确认')
+    .map(label => ['未提供或未知状态', '未提供', '未知状态'].includes(label) ? '状态待确认' : label))];
+  return labels.join(' / ') || '状态待确认';
+}
+function toggleTime(id) { const next = new Set(expanded.value); next.has(id) ? next.delete(id) : next.add(id); expanded.value = next; }
+function toggle(id, checked) { selected.value = checked ? [...selected.value, id] : selected.value.filter(value => value !== id); emit('selection', props.rows.filter(row => selected.value.includes(row.id))); }
+watch(() => props.rows.map(row => row.id).join(','), () => { selected.value = []; goodsExpanded.value = new Set(); expanded.value = new Set(); emit('selection', []); });
+</script>
+<style scoped>
+.order-cards{--order-columns:minmax(300px,2.4fr) minmax(170px,1.35fr) minmax(190px,1.25fr) minmax(105px,.7fr) minmax(110px,.7fr) 90px;color:#203653;font-size:13px}
+.order-toolbar,header{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.order-toolbar{margin:12px 0}.order-toolbar span,small{color:#576982;font-size:12px}select{padding:7px;border:1px solid #d6e0ec;border-radius:4px;color:#203653;background:white}
+.order-table-head,.order-columns{display:grid;grid-template-columns:var(--order-columns)}.order-table-head{background:#eaf0f8;border:1px solid #dce5f0;font-size:12px;color:#435b78}.order-table-head span{padding:12px 14px}
+.order-card{border:1px solid #dce5f0;border-top:0;background:white}header{background:#f2f6fc;padding:8px 12px;font-size:12px}.order-columns>div{padding:14px;border-right:1px solid #edf1f6;overflow-wrap:anywhere;min-width:0}.order-columns>div:last-child{border:0}.product{display:flex;gap:12px;margin-bottom:14px}.product:last-child{margin-bottom:0}.product img,.no-image{width:52px;height:52px;object-fit:contain;flex-shrink:0}.no-image{display:grid;place-items:center;background:#f0f4f9;color:#576982;font-size:11px}.name{max-width:45ch;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.goods strong{color:#235bd2}.warehouse-line{color:#576982;font-size:12px}.amount{display:block;font-size:18px;margin:0 0 6px;font-variant-numeric:tabular-nums}.order-times{font-size:12px;font-variant-numeric:tabular-nums}.order-times p:first-child{margin-top:0}.tracking{color:#435b78;font-size:12px}.order-progress p{margin-top:8px}p{margin:6px 0;line-height:1.5}button{color:#235bd2;background:none;border:0;cursor:pointer;padding:4px}.order-id{font-weight:700;font-size:14px}button:hover{text-decoration:underline}button:focus-visible,select:focus-visible{outline:2px solid #235bd2;outline-offset:2px}
+@container sales-orders (max-width:1250px){.order-cards{--order-columns:minmax(230px,2fr) minmax(150px,1.2fr) minmax(175px,1.2fr) 100px 100px 80px}.order-columns>div,.order-table-head span{padding:10px}}
+@container sales-orders (max-width:1050px){.order-table-head{display:none}.order-columns{grid-template-columns:2fr 1fr 1fr}.goods{grid-column:1/-1}.order-columns>div::before{content:attr(data-label);display:block;color:#576982;font-size:12px;margin-bottom:8px}.order-card{border-top:1px solid #dce5f0;margin-bottom:12px}.order-columns>div{border-bottom:1px solid #edf1f6}}
+@container sales-orders (max-width:650px){.order-columns{grid-template-columns:1fr 1fr}.goods{grid-column:1/-1}.order-toolbar{align-items:flex-start}.order-actions button{min-height:40px}.order-times{font-size:12px}header{align-items:flex-start}}
+.progress-block{display:flex;flex-direction:column;align-items:flex-start;gap:5px}.progress-block+.progress-block{margin-top:14px}.progress-label{color:#65758b;font-size:11px}.warehouse-state{font-size:12px;line-height:1.5}.needs-attention{color:#9a5700}.raw-status{margin-top:12px;font-size:11px;color:#65758b}.raw-status summary{cursor:pointer;padding:4px 0}.raw-status small{display:block;overflow-wrap:anywhere;padding-top:4px}.order-progress>.el-tag{margin-top:10px;white-space:normal;height:auto;min-height:24px}</style>

@@ -127,3 +127,16 @@ def test_overview_endpoint_accepts_automatic_cny_basis():
     assert data["currency"] == "CNY"
     assert data["currency_conversion"]["target"] == "CNY"
     assert data["order_daily"][0]["total_sales"] == "10"
+
+
+def test_detail_subtotal_converts_with_currency_and_keeps_exact_original(monkeypatch):
+    monkeypatch.setattr('apps.sales_management.currency_conversion.tenant_cny_rates', lambda tenant: {
+        'PHP': {'rate': Decimal('10'), 'date': None}, 'CNY': {'rate': Decimal('1'), 'date': None}})
+    request = SimpleNamespace(query_params={'currency_basis': 'CNY'}, user=SimpleNamespace(tenant=object()))
+    original = {'currency': 'PHP', 'subtotal_amount': '128.0000', 'order_total_amount': '130.0000'}
+    result = convert_sales_payload(request, original)
+    assert result['currency'] == 'CNY' and result['subtotal_amount'] == '12.8'
+    assert result['source_currency'] == 'PHP' and result['source_amounts']['subtotal_amount'] == '128.0000'
+    assert original == {'currency': 'PHP', 'subtotal_amount': '128.0000', 'order_total_amount': '130.0000'}
+    request.query_params = {}
+    assert convert_sales_payload(request, original) is original
