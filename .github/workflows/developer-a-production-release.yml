@@ -255,6 +255,13 @@ jobs:
           ref: ${{ github.sha }}
           path: .v518-cumulative-control
           persist-credentials: false
+      - name: Check out protected V554 cumulative release control
+        if: inputs.action == 'deploy' && inputs.release_sha == '71faab0aee2b5e1c32204c6859a0022661ac46da'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .v554-cumulative-control
+          persist-credentials: false
       - name: Check out protected V546 cumulative R2 release control
         if: inputs.action == 'deploy' && inputs.release_sha == '3d977af50a0064d455f7c5e35baacc29f7c6278c'
         uses: actions/checkout@v4
@@ -445,6 +452,8 @@ jobs:
             python .v472-cumulative-control/saas-collab-system/deploy/production-control/ci/verify_v472_cumulative_source.py
           elif [[ "$action" = deploy && "$release_sha" = 1d1c50adb6050c2ba35fc968f3ee00c1a14d1901 ]]; then
             python .v518-cumulative-control/saas-collab-system/deploy/production-control/ci/verify_v518_cumulative_source.py
+          elif [[ "$action" = deploy && "$release_sha" = 71faab0aee2b5e1c32204c6859a0022661ac46da ]]; then
+            python .v554-cumulative-control/saas-collab-system/deploy/production-control/ci/verify_v554_cumulative_source.py
           elif [[ "$action" = deploy && "$release_sha" = 3d977af50a0064d455f7c5e35baacc29f7c6278c ]]; then
             python .v546-cumulative-r2-control/saas-collab-system/deploy/production-control/ci/verify_v546_cumulative_r2_source.py
           elif [[ "$action" = deploy && "$release_sha" = 69d2196e331f11a7001f515e1770c79cf2e1a8bb ]]; then
@@ -546,6 +555,17 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.release_sha }}
           fetch-depth: 1
+      - name: Enforce V554 frozen date before building images
+        if: needs.validate.outputs.release_sha == '71faab0aee2b5e1c32204c6859a0022661ac46da'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import datetime,json,os
+          from pathlib import Path
+          notes=json.loads(Path('saas-collab-system/frontend/src/data/releaseNotes.json').read_bytes())
+          today=datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).date().isoformat()
+          assert os.environ['GITHUB_RUN_ATTEMPT']=='1' and notes[0]['version']=='2.44.554' and notes[0]['date']==today=='2026-11-27', 'V554 crossed its frozen release date or reused an attempt; prepare fresh notes/source/control'
+          PY
       - uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR for deploy builds only
         if: needs.validate.outputs.action == 'deploy'
@@ -702,6 +722,13 @@ jobs:
         shell: pwsh
         run: |
           & "$env:GITHUB_WORKSPACE/saas-collab-system/deploy/production-control/ci/write_failure_receipt.ps1" -Path "$env:GITHUB_WORKSPACE/production-failure-receipt.json" -Stage deploy -Reason unknown -RunId $env:GITHUB_RUN_ID -Attempt $env:GITHUB_RUN_ATTEMPT -ReleaseSha $env:RELEASE_SHA -ControllerSha $env:GITHUB_SHA
+      - name: Enforce V554 frozen date immediately before VM deployment
+        if: env.RELEASE_SHA == '71faab0aee2b5e1c32204c6859a0022661ac46da'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $today = [DateTimeOffset]::UtcNow.ToOffset([TimeSpan]::FromHours(8)).ToString('yyyy-MM-dd')
+          if ($env:GITHUB_RUN_ATTEMPT -ne '1' -or $today -ne '2026-11-27') { throw 'V554 crossed its frozen release date or reused an attempt; prepare fresh notes/source/control.' }
       - name: Invoke the fixed forced-command entrypoint
         shell: pwsh
         run: |
