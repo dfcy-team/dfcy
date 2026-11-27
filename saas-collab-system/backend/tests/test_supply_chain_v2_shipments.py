@@ -268,11 +268,11 @@ def test_shipment_notes_search_filters_before_pagination_for_both_portals(world)
     internal = buyer_client(buyer)
     first = draft(internal, INTERNAL, world, order, key="search-first")
     second = draft(internal, INTERNAL, world, order, key="search-second")
-    assert write(internal, INTERNAL + f"supplier-shipments/{first['id']}/", {"expected_version": first["version"], "notes": "急件 ABC 装柜优先"}, "search-note-first", "patch").status_code == 200
+    assert write(internal, INTERNAL + f"supplier-shipments/{first['id']}/", {"expected_version": first["version"], "notes": "急件 NOTES_AbC_URGENT 装柜优先"}, "search-note-first", "patch").status_code == 200
     assert write(internal, INTERNAL + f"supplier-shipments/{second['id']}/", {"expected_version": second["version"], "notes": "普通发货"}, "search-note-second", "patch").status_code == 200
     external = supplier_client(supplier_user(world, world["supplier"], "notes-search"))
     for api, path in [(internal, INTERNAL + "supplier-shipments/"), (external, EXTERNAL + "shipments/")]:
-        response = api.get(path, {"search": "  abc  ", "limit": 1})
+        response = api.get(path, {"search": "  notes_abc_urgent  ", "limit": 1})
         assert response.status_code == 200, response.data
         assert response.data["count"] == 1
         assert response.data["data"][0]["id"] == first["id"]
