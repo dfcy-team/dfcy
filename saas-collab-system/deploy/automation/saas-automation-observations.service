@@ -1,0 +1,6 @@
+[Unit]
+Description=Collect system automation observations
+[Service]
+Type=oneshot
+Environment=TZ=UTC
+ExecStart=/usr/bin/python3 /opt/saas-collab/automation/collect.py --output /var/lib/saas-automation/observations.json

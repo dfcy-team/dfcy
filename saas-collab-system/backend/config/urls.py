@@ -5,9 +5,15 @@ from apps.supply_chain.notification_api import PublicDownload, WorkToolCallback
 from apps.integrations.developer_gateway import invoke as developer_invoke
 
 
+from apps.accounts import automation
+
 urlpatterns = [
     path("api/internal/issue-tracking/", include("apps.issue_tracking.urls")),
     path("api/internal/marketing/flash-sales/", include("apps.flash_sales.urls")),
+    path("api/internal/automation/tasks/overview/", automation.Overview.as_view()),
+    path("api/internal/automation/tasks/", automation.TaskList.as_view()),
+    path("api/internal/automation/tasks/<str:task_id>/", automation.TaskDetail.as_view()),
+    path("api/internal/automation/runs/", automation.RunList.as_view()),
     path('api/developer-gateway/v1/<int:app_id>/<slug:endpoint_code>/', developer_invoke, name='developer-gateway'),
     path("api/internal/demo-data-sync/", include("apps.demo_sync.urls")),
     path('api/supply-notifications/files/<int:attempt_id>/<str:token>/', PublicDownload.as_view(), name='sc2-public-notification-file'),

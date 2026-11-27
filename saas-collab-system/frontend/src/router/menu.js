@@ -259,6 +259,7 @@ export const menuItems = [
     internal: true,
     children: [
       { path: '/system/issue-tracking', label: '事件跟踪配置', permissions: ['issue_tracking.configure'], menuPermissions: ['menu.system.issue_tracking.view'] },
+      { path: '/system/automation-tasks', label: '自动化任务', superuserOnly: true, menuPermissions: ['menu.system.automation_tasks.view'] },
       {
         path: '/system/tenants', label: '租户管理', superuserOnly: true,
         menuPermissions: ['menu.system.tenants.view']
@@ -478,6 +479,7 @@ export const routeCapabilities = [
   { path: '/settings/config-center', permissions: ['config.view'], userTypes: ['internal'] },
   { path: '/settings/config-versions', permissions: ['config.view'], userTypes: ['internal'] },
   { path: '/settings/module-controls', permissions: ['config.system.manage'], allPermissions: ['config.view'], userTypes: ['internal'] },
+  { path: '/system/automation-tasks', superuserOnly: true, userTypes: ['internal'] },
   { path: '/system/tenants', superuserOnly: true, userTypes: ['internal'] },
   { path: '/system/departments', permissions: ['system.organization.view'], userTypes: ['internal'] },
   { path: '/system/users', permissions: ['system.users.view'], userTypes: ['internal'] },

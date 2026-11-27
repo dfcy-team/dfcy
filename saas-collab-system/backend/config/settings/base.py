@@ -716,3 +716,5 @@ if MONTHLY_PRODUCT_COST_ENABLED:
         "task": "apps.products.monthly_cost_schedule.dispatch_daily",
         "schedule": monthly_cost_crontab(hour=MONTHLY_PRODUCT_COST_BEAT_UTC_HOUR, minute=0),
     }
+# Sanitized observations from privileged host collection.
+AUTOMATION_OBSERVATIONS_FILE = os.environ.get("AUTOMATION_OBSERVATIONS_FILE", "")

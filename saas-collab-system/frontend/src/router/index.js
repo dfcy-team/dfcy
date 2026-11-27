@@ -369,6 +369,7 @@ const routes = [
       { path: 'issue-tracking', component: IssueTracking },
       { path: 'system/issue-tracking', component: IssueTrackingSettings },
       { path: 'system/users', component: UserDirectory },
+      { path: 'system/automation-tasks', component: () => import('../views/system/AutomationTasks.vue') },
       { path: 'system/roles', component: RolePermissionMatrix },
       { path: 'system/tenants', component: TenantManagement },
       { path: 'system/security-operations', component: SecurityOperations },

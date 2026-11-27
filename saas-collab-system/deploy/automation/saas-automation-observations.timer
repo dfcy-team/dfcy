@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh system automation observations every minute
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=60
+Unit=saas-automation-observations.service
+[Install]
+WantedBy=timers.target
