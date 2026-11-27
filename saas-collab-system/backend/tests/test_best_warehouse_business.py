@@ -47,7 +47,7 @@ def test_singleton_xml_package_reaches_costs_using_actual_sku():
     items, reasons = shipped_items(lookup, 'Asia/Shanghai')
     assert not reasons
     assert items == [{'source_sku': 'SKU-A', 'quantity': 2, 'shipped_date': '2026-09-02',
-                      'warehouse_order_no': 'WMS-1/PACK-1'}]
+                      'warehouse_order_no': 'WMS-1/PACK-1', 'shipped_at_utc': '2026-09-02T04:00:00+00:00'}]
 
 
 def test_packages_never_repeat_order_quantity_and_reject_duplicate_identity():

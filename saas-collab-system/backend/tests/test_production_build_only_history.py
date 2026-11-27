@@ -348,6 +348,14 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "apps/workflows/migrations/0006_paymentapprovalflow_department_keys_and_more.py",
             "apps/masterdata/migrations/0019_suppliermaster_payment_reminder_days_and_more.py",
             "apps/masterdata/migrations/0020_supplier_default_tax_rate.py",
+            # Registered V547–V554 forward migrations postdate this frozen archive.
+            'apps/integrations/migrations/0074_v551_webhook_order_identity_vm.py',
+            'apps/products/migrations/0033_monthly_product_cost_v4.py',
+            'apps/products/migrations/0034_monthly_product_cost_version.py',
+            'apps/products/migrations/0035_monthly_cost_amounts_nullable.py',
+            'apps/products/migrations/0036_monthly_cost_unknown_closing_amount.py',
+            'apps/products/migrations/0037_monthly_cost_adjustments_and_reconciliation.py',
+            'apps/supply_chain/migrations/0087_arrival_unreceived_reminder_days.py',
         }:
             continue
         historical_digest.update(relative.encode())

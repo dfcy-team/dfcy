@@ -387,6 +387,14 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/demo_sync/migrations/0002_register_permissions.py",
         "apps/demo_sync/migrations/0003_importedsnapshotreceipt.py",
         "apps/demo_sync/migrations/0004_snapshotbatch_heartbeat_at.py",
+        # Registered V547–V554 forward migrations postdate this frozen archive.
+        'apps/integrations/migrations/0074_v551_webhook_order_identity_vm.py',
+        'apps/products/migrations/0033_monthly_product_cost_v4.py',
+        'apps/products/migrations/0034_monthly_product_cost_version.py',
+        'apps/products/migrations/0035_monthly_cost_amounts_nullable.py',
+        'apps/products/migrations/0036_monthly_cost_unknown_closing_amount.py',
+        'apps/products/migrations/0037_monthly_cost_adjustments_and_reconciliation.py',
+        'apps/supply_chain/migrations/0087_arrival_unreceived_reminder_days.py',
     }
     assert all((root / name).is_file() for name in unregistered_migrations)
     registered_digest = sha256()

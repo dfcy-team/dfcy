@@ -14,6 +14,17 @@ from apps.tenants.models import Tenant
 from django.utils import timezone
 
 
+@pytest.fixture(autouse=True)
+def isolated_monthly_dashboard_cache(settings):
+    # DB fixtures recycle IDs; the new 30-second query cache outlives a transaction.
+    # Keep cache reuse testable within each case without sharing deleted fixtures.
+    settings.CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'monthly-dashboard-tests'}}
+    from django.core.cache import cache
+    cache.clear()
+    yield
+    cache.clear()
+
+
 def _user(tenant, name):
     return CustomUser.objects.create_user(username=name, tenant=tenant, user_type=CustomUser.UserType.INTERNAL)
 
@@ -444,3 +455,34 @@ def test_advertising_only_currency_and_previous_day_are_included(monkeypatch):
         "daily": [{"date": "2026-10-01", "amount": "0", "quantity": 0, "ad_spend": "0"},
                   {"date": "2026-10-02", "amount": "0", "quantity": 0, "ad_spend": None,
                    "ad_comparison": {"current": "20", "previous": "10", "covered_stores": 1, "total_stores": 2}}]}]
+
+
+@pytest.mark.django_db
+def test_monthly_query_cache_reuses_identical_scope_but_not_other_store(monkeypatch):
+    from contextlib import contextmanager
+    monkeypatch.setattr('apps.sales_management.views.timezone.localdate',lambda **_:date(2026,10,2))
+    tenant=Tenant.objects.create(name='monthly-cache',code='monthly-cache')
+    viewer=_user(tenant,'monthly-cache-viewer');_grant(viewer)
+    platform=PlatformMaster.objects.create(tenant=tenant,code='shopee',name='Shopee',platform_type='shopee')
+    one=_store(tenant,platform,'cache-one','PHP','PH','Asia/Manila')
+    two=_store(tenant,platform,'cache-two','PHP','PH','Asia/Manila')
+    for store in (one,two):
+        store.operator=viewer;store.save(update_fields=['operator'])
+    _order(tenant,one,'cache-order',10,local_day=date(2026,10,2))
+    calls=[]
+    @contextmanager
+    def projection(scope):
+        calls.append(scope)
+        yield
+    monkeypatch.setattr('apps.reports.query_hints.bounded_fact_projection',projection)
+    monkeypatch.setattr('apps.sales_management.dashboard_advertising.dashboard_advertising',lambda *a,**k:('unavailable',{},{}))
+    client=APIClient();client.force_authenticate(viewer)
+    url='/api/internal/commerce/dashboard/monthly-sales/'
+    first=client.get(url,{'store_id':one.pk});second=client.get(url,{'store_id':one.pk})
+    assert first.status_code==second.status_code==200
+    assert first.json()['data']['currencies']==second.json()['data']['currencies']
+    assert first.json()['data']['currencies'][0]['daily'][0]['amount']=='10'
+    assert len(calls)==1
+    other=client.get(url,{'store_id':two.pk})
+    assert other.status_code==200 and other.json()['data']['currencies']==[]
+    assert len(calls)==2
