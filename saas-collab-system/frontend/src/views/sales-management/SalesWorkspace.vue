@@ -411,10 +411,15 @@ async function loadOrderSummary() {
     const { page, page_size, ordering, status, include_summary, currency_basis, presentation, workspace_summary, ...summaryParams } = appliedOrderParams;
     const response = await fetchOrderWorkspaceSummary(summaryParams, orderSummaryController.signal);
     if (sequence !== orderSummarySequence) return;
-    if (!response?.success || !response.data?.workspace_summary) throw new Error('汇总读取失败');
+    if (!response?.success) throw reportResponseError(response);
+    if (!response.data?.workspace_summary) throw new Error('汇总读取失败');
     orderSummary.value = response.data.workspace_summary;
   } catch (error) {
-    if (sequence === orderSummarySequence) orderSummaryError.value = '状态汇总读取失败，可点击重试；订单列表仍可使用。';
+    if (sequence !== orderSummarySequence) return;
+    if (accessFailure(error)) {
+      clearData();
+      errorMessage.value = salesError({ message: error?.message });
+    } else orderSummaryError.value = '状态汇总读取失败，可点击重试；订单列表仍可使用。';
   } finally {
     if (sequence === orderSummarySequence) orderSummaryLoading.value = false;
   }

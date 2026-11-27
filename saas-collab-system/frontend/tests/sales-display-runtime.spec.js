@@ -506,3 +506,20 @@ it('clears cached status counts on mode exit and access rejection and discards t
   expect(wrapper.find('[aria-label="订单状态"]').exists()).toBe(false);
   wrapper.unmount();
 });
+
+
+it.each(['transport', 'envelope'])('clears cached order counts after summary access rejection (%s)', async kind => {
+  api.fetchSalesPage.mockResolvedValue({ success: true, data: { results: [] } });
+  const wrapper = render('orders'); await flushPromises();
+  api.fetchOrderWorkspaceSummary.mockResolvedValueOnce({ success: true, data: { workspace_summary: { statuses: [{ normalized_status: 'completed', count: 4 }] } } });
+  await wrapper.vm.loadOrderSummary(); await flushPromises();
+  expect(wrapper.find('[aria-label="订单状态"]').exists()).toBe(true);
+  if (kind === 'transport') api.fetchOrderWorkspaceSummary.mockRejectedValueOnce(Object.assign(new Error('访问被拒绝'), { response: { status: 403 } }));
+  else api.fetchOrderWorkspaceSummary.mockResolvedValueOnce({ success: false, http_status: 403, message: '访问被拒绝' });
+  await wrapper.vm.loadOrderSummary(); await flushPromises();
+  expect(wrapper.find('[aria-label="订单状态"]').exists()).toBe(false);
+  const calls = api.fetchOrderWorkspaceSummary.mock.calls.length;
+  await wrapper.vm.loadOrderSummary();
+  expect(api.fetchOrderWorkspaceSummary.mock.calls.length).toBe(calls);
+  wrapper.unmount();
+});
