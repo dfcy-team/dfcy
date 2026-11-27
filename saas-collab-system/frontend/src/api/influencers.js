@@ -212,6 +212,12 @@ export function sampleDuplicateWarning(influencer) {
   return `该达人已有${statuses.map((status) => labels[status]).join('、')}送样记录，请确认是否重复送样；仍可继续创建。`;
 }
 
+export const fetchDuplicateSampleRecords = (influencer) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/resolve/`, params: { duplicate_influencer: influencer } },
+  mockDetail({ records: [] }),
+  'influencers.resolve.duplicate-samples'
+);
+
 export const fetchInfluencers = (params = {}) => requestWithMockFallback(
   { method: 'get', url: `${API_ROOT}/`, params },
   () => influencerMocks.list(params),

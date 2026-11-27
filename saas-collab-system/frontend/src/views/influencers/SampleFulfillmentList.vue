@@ -308,6 +308,7 @@
 <script setup>
 import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { formatTaskDateTime } from './taskDateTime';
+import { useDuplicateSampleWarning } from './useDuplicateSampleWarning';
 import { recordSourceLabel, publishedEvidenceNotice, matchedVideoCount } from './recordEvidence';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
@@ -330,7 +331,6 @@ import {
   OUTREACH_PRIORITY_LABELS,
   restoreSampleFulfillment,
   resolveOrCreateInfluencerNickname,
-  sampleDuplicateWarning,
   statusLabel,
   updateSampleFulfillment
 } from '../../api/influencers';
@@ -601,7 +601,7 @@ watch([eligibleWarehouses, () => items.value.length], () => {
     }
   }
 });
-const duplicateSampleWarning = computed(() => sampleDuplicateWarning(selectedInfluencer.value));
+const duplicateSampleWarning = useDuplicateSampleWarning(() => visible.value && !editingSample.value ? selectedInfluencer.value?.id : null);
 const todayLabel = formatTaskDateTime(new Date()).slice(0, 10);
 
 function sampleTimeInput(value) {
