@@ -1,0 +1,7 @@
+{
+  "backend/apps/sales_management/views.py": "e4c1f98d0b0b28a2dda1ef044112f1239a099023f7655750ce5030f181c35901",
+  "backend/apps/commerce/models.py": "b0af7a7ce12a0881872d8ea0a125e78b76913b5e43bc12e02ec9c25f0e91e73f",
+  "backend/apps/commerce/migrations/0017_salesorder_tenant_created_id.py": "90356882ca2ee025c69b0430faab94a4f4b350625fb285e7a2ba3c35b06186da",
+  "frontend/src/api/salesManagement.js": "0b445777d647be44c8efa38ab6b4d3ad6d8a008b0024dceb921561425c7841af",
+  "frontend/src/views/sales-management/SalesWorkspace.vue": "8fd4b381650d3cef230be104f0d3be147e5becc5f2be9ae73cf38544bb11fb56"
+}

@@ -48,6 +48,7 @@
       <el-button v-for="tab in reportTabs" :key="tab.path" :type="tab.mode === mode ? 'primary' : 'default'" :aria-current="tab.mode === mode ? 'page' : undefined" @click="navigateReport(tab.path)">{{ tab.label }}</el-button>
     </nav>
     <div v-if="mode === 'skus'" class="overview-detail-switch" role="group" aria-label="SKU 汇总方式"><el-button :type="skuGrouping === 'store' ? 'primary' : 'default'" :aria-pressed="skuGrouping === 'store'" @click="changeSkuGrouping('store')">按店铺 SKU 汇总</el-button><el-button :type="skuGrouping === 'product' ? 'primary' : 'default'" :aria-pressed="skuGrouping === 'product'" @click="changeSkuGrouping('product')">按商品 SKU 汇总</el-button></div>
+    <div v-if="mode === 'orders'" class="field-note"><el-button :loading="orderSummaryLoading" :disabled="loading || !!errorMessage" @click="loadOrderSummary">加载订单及仓库状态汇总</el-button><span v-if="orderSummaryError" role="alert">{{ orderSummaryError }}</span><span v-else-if="!orderSummary">按需加载，不影响订单列表读取。</span></div>
     <nav v-if="mode === 'orders' && orderSummary" class="order-status-tabs" aria-label="订单状态"><button :class="{ active: !query.status }" @click="selectOrderStatus('')">全部订单 {{ orderSummary.statuses.reduce((sum,row) => sum + row.count, 0) }}</button><button v-for="row in orderSummary.statuses" :key="row.normalized_status" :class="{ active: query.status === row.normalized_status }" @click="selectOrderStatus(row.normalized_status)">{{ statusLabel(row.normalized_status) }} {{ row.count }}</button></nav>
     <p v-if="mode === 'orders' && orderSummary?.warehouse_counts" class="field-note">其他筛选条件范围（不含订单状态）：仓库已匹配 {{ orderSummary.warehouse_counts.matched || 0 }} · 未查到 {{ orderSummary.warehouse_counts.not_found || 0 }} · 尚未查询 {{ orderSummary.warehouse_counts.not_requested || 0 }} · 其余查询状态 {{ Object.entries(orderSummary.warehouse_counts).filter(([key]) => !['matched','not_found','not_requested'].includes(key)).reduce((sum,[,value]) => sum + value, 0) }}</p>
     <el-form v-if="resolvedFilters.length" class="sales-filters" :class="{ 'order-filters': mode === 'orders' }" :model="query" label-position="top" @submit.prevent="applyFilters">
@@ -342,10 +343,10 @@ import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
 import OrderRegistrationLinks from '../../components/OrderRegistrationLinks.vue';
 import SalesOrderCards from '../../components/SalesOrderCards.vue';
 import SalesOrderDetailPanel from '../../components/SalesOrderDetailPanel.vue';
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElDialog, ElDrawer } from 'element-plus';
-import { createSalesExport, fetchSalesFilters, fetchSalesOrderDetail, fetchSalesPage } from '../../api/salesManagement';
+import { createSalesExport, fetchSalesFilters, fetchSalesOrderDetail, fetchSalesPage, fetchOrderWorkspaceSummary } from '../../api/salesManagement';
 import { formatApiError } from '../../api/request';
 import { reportResponseError, accessFailure, queryScope } from '../reports/reportContext';
 import { reportError } from '../reports/reportDisplay';
@@ -392,6 +393,31 @@ const orderOrdering = ref('');
 const salesTable = ref(null);
 const query = reactive({});
 const orderSummary = ref(null);
+const orderWarehouses = ref([]);
+const orderSummaryLoading = ref(false);
+const orderSummaryError = ref('');
+let orderSummarySequence = 0;
+let orderSummaryController = null;
+let appliedOrderParams = null;
+onBeforeUnmount(() => { ++orderSummarySequence; orderSummaryController?.abort(); });
+async function loadOrderSummary() {
+  if (!appliedOrderParams || orderSummaryLoading.value) return;
+  const sequence = ++orderSummarySequence;
+  orderSummaryController?.abort();
+  orderSummaryController = new AbortController();
+  orderSummaryLoading.value = true;
+  orderSummaryError.value = '';
+  try {
+    const response = await fetchOrderWorkspaceSummary(appliedOrderParams, orderSummaryController.signal);
+    if (sequence !== orderSummarySequence) return;
+    if (!response?.success || !response.data?.workspace_summary) throw new Error('汇总读取失败');
+    orderSummary.value = response.data.workspace_summary;
+  } catch (error) {
+    if (sequence === orderSummarySequence) orderSummaryError.value = '状态汇总读取失败，可点击重试；订单列表仍可使用。';
+  } finally {
+    if (sequence === orderSummarySequence) orderSummaryLoading.value = false;
+  }
+}
 function selectOrderStatus(status) { query.status = status; applyFilters(); }
 const filterData = reactive({ platforms: [], stores: [], currencies: [], order_statuses: [], refund_statuses: [] });
 const tkOrderScope = computed(() => {
@@ -522,7 +548,7 @@ let requestSequence = 0;
 let detailSequence = 0;
 
 function optionsFor(source) {
-  if (source === 'order_warehouses') return orderSummary.value?.warehouses || [];
+  if (source === 'order_warehouses') return orderWarehouses.value;
   if (!source) return [];
   const values = filterData[source] || [];
   if (source === 'stores') {
@@ -644,7 +670,7 @@ function requestParams() {
   if (['orders', 'returns', 'data-quality'].includes(props.mode)) params.include_summary = 'false';
   if (props.mode === 'stores' && storeOrdering.value) params.ordering = storeOrdering.value;
   if (props.mode === 'orders' && orderOrdering.value) params.ordering = orderOrdering.value;
-  if (props.mode === 'orders') params.presentation = 'workspace';
+  if (props.mode === 'orders') { params.presentation = 'workspace'; params.workspace_summary = 'false'; }
   Object.entries(query).forEach(([key, value]) => {
     if (key === 'tk_order_type' && !tkOrderScope.value) return;
     if (key === 'date_range' && value?.length === 2) {
@@ -706,6 +732,14 @@ async function loadQualitySummary() {
 
 async function loadData(useApplied = false) {
   const sequence = ++requestSequence;
+  if (props.mode === 'orders') {
+    ++orderSummarySequence;
+    orderSummaryController?.abort();
+    orderSummaryLoading.value = false;
+    orderSummary.value = null;
+    orderSummaryError.value = '';
+    appliedOrderParams = null;
+  }
   qualitySummarySequence++;
   qualitySummaryError.value = '';
   qualitySummaryLoading.value = false;
@@ -725,10 +759,13 @@ async function loadData(useApplied = false) {
     if (sequence !== requestSequence) return;
     if (!response?.success) throw reportResponseError({ ...response, message: salesError(response) });
     const data = response.data || {};
-    if (props.mode === 'orders') orderSummary.value = data.workspace_summary || null;
+    if (props.mode === 'orders') {
+      appliedOrderParams = { ...params };
+      orderWarehouses.value = data.workspace_warehouses || data.workspace_summary?.warehouses || [];
+    }
     if (data.api_status === 'degraded' || data.api_status === 'mock' && import.meta.env.VITE_USE_MOCK !== 'true') throw new Error(data.api_error || '读取失败，不能使用示例数据代替正式结果。');
     if (['orders', 'returns'].includes(props.mode)) {
-      const { page: ignoredPage, page_size: ignoredSize, ordering: ignoredOrdering, include_summary: ignoredSummary, currency_basis: ignoredBasis, reminder_id: ignoredReminder, presentation: ignoredPresentation, ...filters } = params;
+      const { page: ignoredPage, page_size: ignoredSize, ordering: ignoredOrdering, include_summary: ignoredSummary, currency_basis: ignoredBasis, reminder_id: ignoredReminder, presentation: ignoredPresentation, workspace_summary: ignoredWorkspaceSummary, ...filters } = params;
       appliedReminderFilters.value = filters;
     }
     if (props.mode === 'data-quality') appliedQualityFilters.value = JSON.parse(JSON.stringify(params));
@@ -859,6 +896,7 @@ async function submitExport() {
   delete filters.report;
   delete filters.grouping;
   delete filters.presentation;
+  delete filters.workspace_summary;
   const response = await createSalesExport({ export_type: exportForm.export_type, filters }, newKey('sales-export'));
   actionLoading.value = false;
   if (!response?.success) return ElMessage.error(salesError(response));
@@ -866,7 +904,7 @@ async function submitExport() {
   ElMessage.success('导出任务已创建，可在任务列表查看进度');
 }
 
-watch(() => props.mode, () => { ++detailSequence; detailOpen.value = false; detailLoading.value = false; selectedRow.value = null; clearData(); initializeFilters(); loadFilterOptions(); loadData(); }, { immediate: true });
+watch(() => props.mode, () => { ++orderSummarySequence; orderSummaryController?.abort(); orderSummaryLoading.value = false; appliedOrderParams = null; ++detailSequence; detailOpen.value = false; detailLoading.value = false; selectedRow.value = null; clearData(); initializeFilters(); loadFilterOptions(); loadData(); }, { immediate: true });
 watch(() => route.query, (next, previous) => {
   if (JSON.stringify(next) === JSON.stringify(previous)) return;
   applyRouteFilters(next);
