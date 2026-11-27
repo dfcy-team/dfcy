@@ -1898,6 +1898,38 @@
       "owner": "influencers"
     },
     {
+      "code": "influencers.requirements.review",
+      "name": "汇总查看达人模块需求反馈",
+      "module": "influencers",
+      "action": "requirements.review",
+      "permission_type": "action",
+      "description": "Review requests within the current tenant.",
+      "risk": "high",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "influencers.requirements.review",
+      "resource_code": "legacy_resource",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "influencers"
+    },
+    {
+      "code": "influencers.requirements.submit",
+      "name": "提交达人模块需求反馈",
+      "module": "influencers",
+      "action": "requirements.submit",
+      "permission_type": "action",
+      "description": "Submit feedback and view your own requests.",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "influencers.requirements.submit",
+      "resource_code": "legacy_resource",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "influencers"
+    },
+    {
       "code": "influencers.view",
       "name": "View influencers",
       "module": "influencers",
@@ -3399,6 +3431,22 @@
       "menu_path": "/influencers/outreach-tasks",
       "menu_code": "menu.influencers.influencers_outreach_tasks.view",
       "resource_code": "influencers_outreach_tasks",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "influencers"
+    },
+    {
+      "code": "menu.influencers.influencers_requirements.view",
+      "name": "达人模块需求反馈",
+      "module": "influencers",
+      "action": "influencers_requirements.view",
+      "permission_type": "menu",
+      "description": "显示达人模块需求反馈入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/influencers/requirements",
+      "menu_code": "menu.influencers.influencers_requirements.view",
+      "resource_code": "influencers_requirements",
       "scope_adapter": "existing_business_adapter",
       "allowed_dimensions": [],
       "owner": "influencers"
@@ -30406,6 +30454,180 @@
       "owner": "influencers"
     },
     {
+      "route": "api/internal/influencers/requirements/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "influencers.requirements.review",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/influencers/requirements/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "influencers.requirements.submit",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/influencers/requirements/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "influencers.requirements.review",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/influencers/requirements/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "influencers.requirements.submit",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/influencers/requirements/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers"
+    },
+    {
+      "route": "api/internal/influencers/requirements/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "influencers.requirements.review",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/influencers/requirements/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "influencers.requirements.submit",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/influencers/requirements/<int:pk>/images/<int:image_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "influencers.requirements.review",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/influencers/requirements/<int:pk>/images/<int:image_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "influencers.requirements.submit",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/influencers/requirements/<int:pk>/images/<int:image_id>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "influencers.requirements.review",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/influencers/requirements/<int:pk>/images/<int:image_id>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "influencers.requirements.submit",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "12ee86195af49ed302cbb427fcd952a311143b49e5e61719afa5c778587e7761",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/influencers/requirements/<int:pk>/images/<int:image_id>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "RequirementFeedbackPermission"
+      ],
+      "owner": "influencers"
+    },
+    {
       "route": "api/internal/influencers/resolve/",
       "method": "GET",
       "action": "read",
@@ -55591,5 +55813,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "9197d716c7fd493a17ff06bc38ed182ebff7029e035f7763d156b14d07ea88b2"
+  "catalog_hash": "a76c0ad7867c71cc6473c47d02170be9e5e13c3295c22cb6f7cc247f525f087a"
 }

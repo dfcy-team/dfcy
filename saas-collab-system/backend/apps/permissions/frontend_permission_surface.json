@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "9197d716c7fd493a17ff06bc38ed182ebff7029e035f7763d156b14d07ea88b2",
+  "catalog_hash": "a76c0ad7867c71cc6473c47d02170be9e5e13c3295c22cb6f7cc247f525f087a",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -324,6 +324,14 @@
     },
     {
       "file": "src/router/menu.js",
+      "permission_code": "influencers.requirements.review"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "influencers.requirements.submit"
+    },
+    {
+      "file": "src/router/menu.js",
       "permission_code": "influencers.view"
     },
     {
@@ -541,6 +549,10 @@
     {
       "file": "src/router/menu.js",
       "permission_code": "menu.influencers.influencers_outreach_tasks.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.influencers.influencers_requirements.view"
     },
     {
       "file": "src/router/menu.js",
@@ -1807,5 +1819,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "f0b9425eb15f76a219acc6930885f4bcb773ecca1764c2592fd5de17effdac05"
+  "surface_hash": "b09b270e33487cbf256f762638357d085eafd0f78ed228564f130258d5ab5d91"
 }

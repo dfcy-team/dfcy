@@ -16,6 +16,7 @@
     </div>
     <p class="metrics-note">统计不包含“下发人”和“正常任务”页内筛选；接口当前页指标包含因此隐藏的行。</p>
 
+    <PriorityTaskCarousel :groups="priorityTasks" :loading="priorityLoading" :error="priorityError" />
     <el-card class="workspace-card" shadow="never">
       <div class="toolbar">
         <el-input
@@ -407,6 +408,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
+import PriorityTaskCarousel from './PriorityTaskCarousel.vue';
 import { taskProgressNotice, recordSourceLabel, publishedEvidenceNotice } from './recordEvidence';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
@@ -448,6 +450,20 @@ import { collectionRows, collectionTotal, detailData } from '../../utils/busines
 
 const auth = useAuthStore();
 const rows = ref([]);
+const priorityTasks = ref({ urgent: [], high: [] });
+const priorityLoading = ref(false);
+const priorityError = ref(false);
+async function loadPriorityTasks() {
+  priorityLoading.value = true;
+  try {
+    const response = await fetchOutreachTasks({ priority_only: 'true' });
+    const grouped = response.data?.priority_tasks;
+    if (!response.success || !Array.isArray(grouped?.urgent) || !Array.isArray(grouped?.high)) throw new Error('Invalid priority data');
+    priorityTasks.value = grouped;
+    priorityError.value = false;
+  } catch { priorityError.value = true; }
+  finally { priorityLoading.value = false; }
+}
 const total = ref(0);
 const page = ref(1);
 const pageSize = ref(20);
@@ -623,6 +639,7 @@ const detailProgressLabel = computed(() => {
 });
 
 async function load() {
+  void loadPriorityTasks();
   loading.value = true;
   const params = { page: page.value, page_size: pageSize.value, ordering: filters.ordering };
   if (filters.search.trim()) params.search = filters.search.trim();
