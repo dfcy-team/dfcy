@@ -1,13 +1,6 @@
 <template>
   <nav v-if="!warehouseDetails" class="inventory-view-switch" aria-label="库存数据视图">
     <el-button v-if="auth.hasPermission('sales_management.skus.view')" :type="viewMode === 'operations' ? 'primary' : 'default'" @click="viewMode='operations'">库存经营</el-button>
-    <el-dropdown v-if="canViewMoreAnalysis" @command="openAnalysis">
-      <el-button :type="viewMode !== 'operations' ? 'primary' : 'default'">更多分析<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
-      <template #dropdown><el-dropdown-menu>
-        <el-dropdown-item v-if="auth.hasPermission('sales_management.skus.view')" command="summary">国家 SKU 经营汇总</el-dropdown-item>
-        <el-dropdown-item v-if="auth.hasPermission('reports.view')" command="comparison">库存周期对比</el-dropdown-item>
-      </el-dropdown-menu></template>
-    </el-dropdown>
   </nav>
   <CountryInventoryDecisions v-if="viewMode === 'operations' && auth.hasPermission('sales_management.skus.view')" mode="operations" />
   <CountryInventoryDecisions v-else-if="viewMode === 'summary' && auth.hasPermission('sales_management.skus.view')" />
@@ -142,7 +135,6 @@ import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
 import CountryInventoryDecisions from '../../components/inventory/CountryInventoryDecisions.vue';
 import InventoryPeriodComparison from '../../components/inventory/InventoryPeriodComparison.vue';
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
-import { ArrowDown } from '@element-plus/icons-vue';
 import { fetchInventoryWorkbench } from '../../api/analytics';
 import { reportError } from '../reports/reportDisplay';
 import { canAccessPath } from '../../router/menu';
@@ -153,8 +145,6 @@ const props = defineProps({ warehouseDetails: Boolean });
 const auth = useAuthStore(pinia);
 const initialView = () => !props.warehouseDetails && auth.hasPermission('sales_management.skus.view') ? 'operations' : 'snapshot';
 const viewMode = ref(initialView());
-const canViewMoreAnalysis = computed(() => auth.hasPermission('sales_management.skus.view') || auth.hasPermission('reports.view'));
-function openAnalysis(command) { viewMode.value = command; }
 const perspective = ref('operations');
 const includeVirtual = ref(false);
 const appliedIncludeVirtual = ref(false);

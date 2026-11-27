@@ -600,11 +600,12 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                     candidates[wh] = version
             matched = {lookup.warehouse_id} if lookup and lookup.warehouse_id else set()
             version = candidates.get(next(iter(matched))) if len(matched) == 1 else None
-            cost_day = line["shipped_date"]
-            if line.get("shipped_at_utc"):
-                from apps.products.monthly_cost_reconciliation import business_zone
-                cost_day = parse_datetime(line["shipped_at_utc"]).astimezone(business_zone()).date().isoformat()
-            version = select_monthly_cost(monthly_costs, sku.pk if sku else None, lookup.warehouse_id if lookup else None, cost_day, version)
+            if monthly_costs is not None:
+                cost_day = line["shipped_date"]
+                if line.get("shipped_at_utc"):
+                    from apps.products.monthly_cost_reconciliation import business_zone
+                    cost_day = parse_datetime(line["shipped_at_utc"]).astimezone(business_zone()).date().isoformat()
+                version = select_monthly_cost(monthly_costs, sku.pk if sku else None, lookup.warehouse_id if lookup else None, cost_day, version)
             quantity = int(line.get('quantity') or 0);reason = ''
             if not sku:reason = 'SKU尚未唯一关联'
             elif not version:reason = '缺出库日有效的对应仓库已确认成本'

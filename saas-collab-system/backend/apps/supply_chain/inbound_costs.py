@@ -41,8 +41,11 @@ def calculate_partial(actor, batch, source, fingerprint, lines, revisions, batch
     clearance = {}
     for inbound in inbounds:
         revision = revisions.get(('inbound', inbound.pk))
+        if revision is None and not getattr(costs.settings, 'MONTHLY_PRODUCT_COST_ENABLED', False):
+            issues.append(f'{inbound.number}：清货费用未维护；无费用时也需确认零。')
         clearance[inbound.pk] = ({line.pk: None for line in costs.source_lines('inbound', inbound)}
-            if fallback_reason else costs.fee_amounts('inbound', inbound, revision, issues))
+            if fallback_reason or (revision is None and not getattr(costs.settings, 'MONTHLY_PRODUCT_COST_ENABLED', False))
+            else costs.fee_amounts('inbound', inbound, revision, issues))
     extra = InternalStockReceiptLine.objects.filter(receipt__inbound__in=inbounds, extra_line__isnull=False)
     if extra.exists():
         issues.append('存在额外实收商品，其货值尚未确认，未混入计划商品成本。')

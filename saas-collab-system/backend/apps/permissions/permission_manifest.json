@@ -4920,6 +4920,22 @@
       "owner": "supply"
     },
     {
+      "code": "menu.system.automation_tasks.view",
+      "name": "自动化任务",
+      "module": "system",
+      "action": "automation_tasks.view",
+      "permission_type": "menu",
+      "description": "显示自动化任务入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/system/automation-tasks",
+      "menu_code": "menu.system.automation_tasks.view",
+      "resource_code": "system_automation_tasks",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "system"
+    },
+    {
       "code": "menu.system.demo_data_sync.view",
       "name": "开发环境数据同步",
       "module": "system",
@@ -21796,6 +21812,41 @@
       "owner": "finance"
     },
     {
+      "route": "api/finance/monthly-adjustments/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "finance",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/finance/monthly-adjustments/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "finance",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/finance/monthly-adjustments/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "finance"
+    },
+    {
       "route": "api/finance/platform-wallet/overview/",
       "method": "GET",
       "action": "read",
@@ -24829,6 +24880,146 @@
       "permission_classes": [],
       "owner": "accounts",
       "guard_source_sha256": "690352f1d5b6b6d0ab21ee539f10191cee40aad0701a82bd4d87bde7fd508f32"
+    },
+    {
+      "route": "api/internal/automation/runs/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalSuperuserPermission"
+      ],
+      "owner": "accounts",
+      "guard_source_sha256": "67deb80559380697ca7fee97f8b28a9487ab6bbf76fce37847da3b2832b4e4aa"
+    },
+    {
+      "route": "api/internal/automation/runs/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalSuperuserPermission"
+      ],
+      "owner": "accounts",
+      "guard_source_sha256": "67deb80559380697ca7fee97f8b28a9487ab6bbf76fce37847da3b2832b4e4aa"
+    },
+    {
+      "route": "api/internal/automation/runs/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalSuperuserPermission"
+      ],
+      "owner": "accounts"
+    },
+    {
+      "route": "api/internal/automation/tasks/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalSuperuserPermission"
+      ],
+      "owner": "accounts",
+      "guard_source_sha256": "b247963d0fc2f8533d4ebef8fb7b5abab0a142252618db82bd4e8f076214ed1d"
+    },
+    {
+      "route": "api/internal/automation/tasks/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalSuperuserPermission"
+      ],
+      "owner": "accounts",
+      "guard_source_sha256": "b247963d0fc2f8533d4ebef8fb7b5abab0a142252618db82bd4e8f076214ed1d"
+    },
+    {
+      "route": "api/internal/automation/tasks/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalSuperuserPermission"
+      ],
+      "owner": "accounts"
+    },
+    {
+      "route": "api/internal/automation/tasks/<str:task_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalSuperuserPermission"
+      ],
+      "owner": "accounts",
+      "guard_source_sha256": "9f8c54367dbb3e0aecc885c8a7089c7bac6a1541502a0c65c2a16d92a7cd5722"
+    },
+    {
+      "route": "api/internal/automation/tasks/<str:task_id>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalSuperuserPermission"
+      ],
+      "owner": "accounts",
+      "guard_source_sha256": "9f8c54367dbb3e0aecc885c8a7089c7bac6a1541502a0c65c2a16d92a7cd5722"
+    },
+    {
+      "route": "api/internal/automation/tasks/<str:task_id>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalSuperuserPermission"
+      ],
+      "owner": "accounts"
+    },
+    {
+      "route": "api/internal/automation/tasks/overview/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalSuperuserPermission"
+      ],
+      "owner": "accounts",
+      "guard_source_sha256": "b57619f891f6ddb163418c3444d95ff35b69d1de84389eb59fdcdfc7d39af002"
+    },
+    {
+      "route": "api/internal/automation/tasks/overview/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalSuperuserPermission"
+      ],
+      "owner": "accounts",
+      "guard_source_sha256": "b57619f891f6ddb163418c3444d95ff35b69d1de84389eb59fdcdfc7d39af002"
+    },
+    {
+      "route": "api/internal/automation/tasks/overview/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalSuperuserPermission"
+      ],
+      "owner": "accounts"
     },
     {
       "route": "api/internal/commerce/aftersales/",
@@ -37483,6 +37674,41 @@
       "owner": "issue_tracking"
     },
     {
+      "route": "api/internal/issue-tracking/business-todos/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "7c957722f8c5112e9db60b931c6656a5605b7b3ebbde609f9823a45f04a50db4"
+    },
+    {
+      "route": "api/internal/issue-tracking/business-todos/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "7c957722f8c5112e9db60b931c6656a5605b7b3ebbde609f9823a45f04a50db4"
+    },
+    {
+      "route": "api/internal/issue-tracking/business-todos/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
       "route": "api/internal/issue-tracking/candidates/",
       "method": "GET",
       "action": "read",
@@ -37516,6 +37742,53 @@
         "InternalOnly"
       ],
       "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/notification-center/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "e6f89c5c7c2536f9d557bba94b145fb29b75f5cc2bc9de10bf6ee1fb9250f05a"
+    },
+    {
+      "route": "api/internal/issue-tracking/notification-center/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "e6f89c5c7c2536f9d557bba94b145fb29b75f5cc2bc9de10bf6ee1fb9250f05a"
+    },
+    {
+      "route": "api/internal/issue-tracking/notification-center/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking"
+    },
+    {
+      "route": "api/internal/issue-tracking/notification-center/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "InternalOnly"
+      ],
+      "owner": "issue_tracking",
+      "guard_source_sha256": "f7d6f66cb08a754078c94dbf73688588520bb6996afccbbf48946ebaaa865176"
     },
     {
       "route": "api/internal/issue-tracking/notifications/",
@@ -42290,6 +42563,117 @@
       "permission_logic": "existing_specialized_guard",
       "guard_source_sha256": "b87b69034ea1c3263051c022dfdfb6e6fa6d2f98aab8fb772b992a9f838fb812",
       "risk": "normal"
+    },
+    {
+      "route": "api/internal/products/costs/monthly/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "products.cost.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsProductCostViewer"
+      ],
+      "owner": "products",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "b87b69034ea1c3263051c022dfdfb6e6fa6d2f98aab8fb772b992a9f838fb812",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/products/costs/monthly/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsProductCostViewer"
+      ],
+      "owner": "products",
+      "guard_source_sha256": "1f21c098848689c9fe3192144a530f0b26df82409c24fb4e46efff683124ebf6"
+    },
+    {
+      "route": "api/internal/products/costs/monthly/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsProductCostViewer"
+      ],
+      "owner": "products"
+    },
+    {
+      "route": "api/internal/products/costs/monthly/missing/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "products.cost.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsProductCostViewer"
+      ],
+      "owner": "products",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "b87b69034ea1c3263051c022dfdfb6e6fa6d2f98aab8fb772b992a9f838fb812",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/products/costs/monthly/missing/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsProductCostViewer"
+      ],
+      "owner": "products",
+      "guard_source_sha256": "1f21c098848689c9fe3192144a530f0b26df82409c24fb4e46efff683124ebf6"
+    },
+    {
+      "route": "api/internal/products/costs/monthly/missing/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsProductCostViewer"
+      ],
+      "owner": "products"
+    },
+    {
+      "route": "api/internal/products/costs/monthly/warehouses/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "products.cost.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsProductCostViewer"
+      ],
+      "owner": "products",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "b87b69034ea1c3263051c022dfdfb6e6fa6d2f98aab8fb772b992a9f838fb812",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/products/costs/monthly/warehouses/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsProductCostViewer"
+      ],
+      "owner": "products",
+      "guard_source_sha256": "1f21c098848689c9fe3192144a530f0b26df82409c24fb4e46efff683124ebf6"
+    },
+    {
+      "route": "api/internal/products/costs/monthly/warehouses/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsProductCostViewer"
+      ],
+      "owner": "products"
     },
     {
       "route": "api/internal/products/costs/versions/",
@@ -60027,5 +60411,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "7c7637e9dd3a871999d597229cf2b1dd54d826061f1ff76a0b5f398baa5f2d37"
+  "catalog_hash": "545ad161a2d8ea5c191533de8bbb2f8e307eee723df9fb3b21f019b741d96d11"
 }

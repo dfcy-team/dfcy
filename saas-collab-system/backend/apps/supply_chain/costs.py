@@ -5,6 +5,7 @@ do not execute a payment and cost adjustments do not change receipt quantities.
 """
 from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP, localcontext
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Case, F, IntegerField, Sum, When
@@ -748,9 +749,13 @@ def fee_amounts(kind, owner, revision, issues):
     if kind == 'shipment' and domestic_freight.settlement_mode(owner) == domestic_freight.SUPPLIER_BORNE:
         return {line.pk: ZERO for line in source_lines(kind, owner)}
     if revision is None:
-        # Non-goods expenses are optional inputs. An absent fee revision means
-        # no amount has been recorded yet; it must not block a usable estimate.
-        return {line.pk: ZERO for line in source_lines(kind, owner)}
+        if getattr(settings, 'MONTHLY_PRODUCT_COST_ENABLED', False):
+            # V548 estimate behavior is opt-in with monthly costing.
+            return {line.pk: ZERO for line in source_lines(kind, owner)}
+        if kind == 'inbound':
+            return {}
+        issues.append(f'{owner.number}：{FEE_LABELS[kind]}未维护；无费用时也需确认零。')
+        return {line.pk: None for line in source_lines(kind, owner)}
     if not revision.cost_exchange and revision.amount:
         from .cost_models import PaymentCurrencyConfirmation
         purpose = 'domestic_freight' if kind == 'shipment' else 'goods'

@@ -33,14 +33,11 @@ describe('actual warning route restores deployed SPU risk and safe details',()=>
  it('rejects a detail result from a newer snapshot instead of mixing runs',async()=>{
   const wrapper=await open();state.request.mockResolvedValue({success:true,data:{run_id:202,results:[sku('MIXED-RUN-PRIVATE')]}});expand(wrapper);await flushPromises();expect(wrapper.text()).toContain('库存预警已更新');expect(wrapper.text()).not.toContain('MIXED-RUN-PRIVATE');
  });
- it('defaults same-code users with limited data scope to the original follow-up',async()=>{
-  state.auth.hasAllDataScopeFor=()=>false;const wrapper=mount(Entry,{global:{stubs:{ElTabs:{template:'<section><slot /></section>'},ElTabPane:{props:['label'],template:'<div>{{ label }}<slot /></div>'},InventoryWarningRisk537:{template:'<div>RISK-CONTENT</div>'},InventoryAlertFollowup537:{template:'<div>ORIGINAL-FOLLOWUP</div>'}}}});wrappers.push(wrapper);await flushPromises();expect(wrapper.text()).toContain('ORIGINAL-FOLLOWUP');expect(wrapper.text()).not.toContain('RISK-CONTENT');
+ it('hides retired follow-up and does not mount risk for a user without full scope',async()=>{
+  state.auth.hasAllDataScopeFor=()=>false;const wrapper=mount(Entry,{global:{stubs:{'el-empty':{props:['description'],template:'<div>{{ description }}</div>'},InventoryWarningRisk537:{template:'<div>RISK-CONTENT</div>'}}}});wrappers.push(wrapper);await flushPromises();expect(wrapper.text()).not.toContain('原有预警跟进');expect(wrapper.text()).not.toContain('RISK-CONTENT');expect(wrapper.text()).toContain('暂无查看库存风险');expect(state.request).not.toHaveBeenCalled();
  });
- it('switches an active risk entry to follow-up synchronously when membership loses full scope',async()=>{
+ it('unmounts risk synchronously when membership loses full scope',async()=>{
   state.auth.currentUser.all_scope_permission_codes=['alerts.view','sales_management.view','sales_management.skus.view','sales_management.supply_summary.view'];state.auth.hasAllDataScopeFor=code=>state.auth.currentUser.all_scope_permission_codes.includes(code);
-  const wrapper=mount(Entry,{global:{stubs:{ElTabs:{template:'<section><slot /></section>'},ElTabPane:{props:['label'],template:'<div>{{ label }}<slot /></div>'},InventoryWarningRisk537:{template:'<div>RISK-CONTENT</div>'},InventoryAlertFollowup537:{template:'<div>ORIGINAL-FOLLOWUP</div>'}}}});wrappers.push(wrapper);await flushPromises();expect(wrapper.text()).toContain('RISK-CONTENT');state.auth.currentUser={id:1,tenant_id:2,active_membership_id:2,all_scope_permission_codes:[]};await flushPromises();expect(wrapper.text()).not.toContain('RISK-CONTENT');expect(wrapper.text()).toContain('ORIGINAL-FOLLOWUP');
- });
- it('keeps the original follow-up reachable and default for a viewer without risk permissions',async()=>{
-  state.auth.hasPermission=()=>false;const wrapper=mount(Entry,{global:{stubs:{ElTabs:{template:'<section><slot /></section>'},ElTabPane:{props:['label'],template:'<div>{{ label }}<slot /></div>'},InventoryWarningRisk537:true,InventoryAlertFollowup537:{template:'<div>ORIGINAL-FOLLOWUP</div>'}}}});wrappers.push(wrapper);await flushPromises();expect(wrapper.text()).toContain('库存风险');expect(wrapper.text()).toContain('原有预警跟进');expect(wrapper.text()).toContain('ORIGINAL-FOLLOWUP');
+  const wrapper=mount(Entry,{global:{stubs:{'el-empty':{template:'<div>UNAVAILABLE</div>'},InventoryWarningRisk537:{template:'<div>RISK-CONTENT</div>'}}}});wrappers.push(wrapper);await flushPromises();expect(wrapper.text()).toContain('RISK-CONTENT');state.auth.currentUser={id:1,tenant_id:2,active_membership_id:2,all_scope_permission_codes:[]};await flushPromises();expect(wrapper.text()).not.toContain('RISK-CONTENT');expect(wrapper.text()).toContain('UNAVAILABLE');
  });
 });

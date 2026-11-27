@@ -115,7 +115,7 @@ function buildDefinition(item, ancestors = []) {
 
 function collectDefinitions(items, ancestors = [], target = []) {
   for (const item of items || []) {
-    target.push(...buildDefinition(item, ancestors));
+    if (!item.menuAlias) target.push(...buildDefinition(item, ancestors));
     collectDefinitions(item.children, [...ancestors, item.label], target);
   }
   return target;
@@ -127,6 +127,32 @@ function collectDefinitions(items, ancestors = [], target = []) {
  * route metadata is identical; a release check can then report a collision.
  */
 export function buildMenuPermissionRegistry(items = []) {
+  // A second entry may reuse an existing grant only when it declares the
+  // canonical route and exactly the same action scope. Ordinary duplicate
+  // codes still produce registry_collision below.
+  const flat = [];
+  const visit = (nodes) => { for (const item of nodes || []) { flat.push(item); visit(item.children); } };
+  visit(items);
+  for (const alias of flat.filter((item) => item.menuAlias)) {
+    const targets = flat.filter((item) => !item.menuAlias && item.path === alias.menuAlias);
+    if (typeof alias.menuAlias !== 'string' || targets.length !== 1 || alias.path === alias.menuAlias || alias.children?.length) {
+      throw new Error('Invalid canonical menu alias');
+    }
+    const canonical = targets[0];
+    const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+    if (!explicitMenuCodes(alias).length || !same(menuPermissionCodesForItem(alias), menuPermissionCodesForItem(canonical))
+      || !same(actionCodes(alias), actionCodes(canonical))
+      || !same(alias.allPermissions || [], canonical.allPermissions || [])
+      || Boolean(alias.superuserOnly) !== Boolean(canonical.superuserOnly)) {
+      throw new Error('Menu alias must preserve canonical grants and action scope');
+    }
+    const definitions = buildDefinition(alias);
+    const canonicalDefinitions = buildDefinition(canonical);
+    if (definitions.some((definition) => !same(definition.metadata.action_codes,
+      canonicalDefinitions.find((item) => item.code === definition.code).metadata.action_codes))) {
+      throw new Error('Menu alias action mapping differs from canonical menu');
+    }
+  }
   const definitions = collectDefinitions(items);
   const byCode = new Map();
   for (const definition of definitions) {

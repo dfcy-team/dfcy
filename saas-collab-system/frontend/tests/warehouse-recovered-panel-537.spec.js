@@ -22,7 +22,7 @@ describe('warehouse recovered inventory panel', () => {
     permissions.exceptions = true;
     request.mockResolvedValue({ success: true, data: { countries: [{ id: 1, name: '中国', country_code: 'CN' }], results: [], count: 0 } });
   });
-  it('renders recovered category tree and keeps the exception tab', async () => {
+  it('renders recovered category tree without the retired exception tab', async () => {
     request.mockResolvedValueOnce({ success: true, data: { countries: [{ id: 1, name: '中国', country_code: 'CN' }], results: [], count: 0 } });
     request.mockResolvedValueOnce({ success: true, data: { countries: [{ id: 1, name: '中国', country_code: 'CN' }], results: [], count: 0, categories: [{ id: 1, name: '服装', parent_id: null }], warehouses: [] } });
     const wrapper = mount(WarehouseInventoryDetails, { global: { stubs: { 'el-tabs': { template: '<div><slot /></div>' }, 'el-tab-pane': { props: ['label'], template: '<section><header>{{ label }}</header><slot /></section>' }, InventoryWorkbench: { template: '<div>异常视图</div>' } } } });
@@ -32,7 +32,7 @@ describe('warehouse recovered inventory panel', () => {
     await flushPromises();
     expect(wrapper.text()).toContain('商品分类');
     expect(wrapper.text()).toContain('服装');
-    expect(wrapper.text()).toContain('库存异常清单');
+    expect(wrapper.text()).not.toContain('库存异常清单');
     expect(request).toHaveBeenCalledWith(expect.objectContaining({ url: '/api/internal/commerce/inventory/category-query/' }));
     wrapper.unmount();
   });

@@ -9,20 +9,15 @@ const stubs = {
   CountryInventoryDecisions: { props: { mode: { default: 'summary' } }, template: '<p data-testid="decisions">{{ mode }}</p>' },
   BusinessDashboardLink: true, InventoryPeriodComparison: true,
   'el-button': { emits: ['click'], template: '<button @click="$emit(\'click\')"><slot/></button>' },
-  'el-dropdown': { emits: ['command'], template: '<div><slot/><button @click="$emit(\'command\', \'summary\')">选择旧汇总</button><button @click="$emit(\'command\', \'snapshot\')">选择原始快照</button></div>' },
-  'el-icon': true, 'el-alert': true, 'el-empty': true,
+  'el-dropdown': true, 'el-icon': true, 'el-alert': true, 'el-empty': true,
 };
 describe('inventory more analysis navigation', () => {
   beforeEach(() => { mocks.sales = true; mocks.fetch.mockReset().mockResolvedValue({ success: true, data: { warehouses: [] } }); });
-  it('opens legacy views and returns to operations without changing routes', async () => {
+  it('keeps authorized operations available and hides the retired more-analysis entry', async () => {
     const wrapper = mount(InventoryWorkbench, { global: { stubs } }); await flushPromises();
     expect(wrapper.get('[data-testid="decisions"]').text()).toBe('operations');
+    expect(wrapper.text()).not.toContain('更多分析');
     expect(mocks.fetch).not.toHaveBeenCalled();
-    await wrapper.findAll('button').find(b => b.text() === '选择旧汇总').trigger('click');
-    expect(wrapper.get('[data-testid="decisions"]').text()).toBe('summary');
-    expect(mocks.fetch).not.toHaveBeenCalled();
-    await wrapper.findAll('button').find(b => b.text() === '库存经营').trigger('click');
-    expect(wrapper.get('[data-testid="decisions"]').text()).toBe('operations');
     wrapper.unmount();
   });
   it('opens warehouse details directly, including when switching from the workbench', async () => {

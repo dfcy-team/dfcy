@@ -33,7 +33,7 @@ beforeEach(() => {
 });
 
 async function mountPage() {
-  const { default: Page } = await import('../src/views/inventory/InventoryAlertList.vue');
+  const { default: Page } = await import('../src/views/inventory/InventoryAlertFollowup537.vue');
   wrapper = mount(Page, { attachTo: document.body, global: { plugins: [ElementPlus] } });
   await flushPromises();
   return wrapper;
@@ -78,9 +78,7 @@ describe('inventory alert follow-up page', () => {
     expect(wrapper.text()).toContain('缺少库存快照');
     expect(wrapper.text()).toContain('评估状态');
     expect(wrapper.text()).toContain('待核对数据');
-    const followup = wrapper.findComponent({ name: 'InventoryAlertFollowup537' });
-    expect(followup.exists()).toBe(true);
-    followup.vm.validity = 'all'; await followup.vm.loadAlerts(); await flushPromises();
+    wrapper.vm.validity = 'all'; await wrapper.vm.loadAlerts(); await flushPromises();
     expect(api.fetchInventoryAlerts).toHaveBeenLastCalledWith(expect.objectContaining({ validity: 'all', source_mode: 'real_observation' }));
   });
 });
