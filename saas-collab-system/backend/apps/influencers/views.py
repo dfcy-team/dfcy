@@ -47,6 +47,7 @@ from .models import (
     StoreProductListing,
     VideoResult,
     active_influencer_restriction_subquery,
+    influencer_identity_queryset,
     influencer_has_active_restriction,
     is_valid_tiktok_username,
     lock_influencer_identity_change,
@@ -686,6 +687,28 @@ class InfluencerBlacklistHistoryView(ScopedInfluencerView):
         return success_response(InfluencerRestrictEventSerializer(rows, many=True).data)
 
 
+_DUPLICATE_SAMPLE_STATUSES = (
+    SampleFulfillment.Status.PENDING, SampleFulfillment.Status.SHIPPED,
+    SampleFulfillment.Status.DELIVERED, SampleFulfillment.Status.OVERDUE,
+    SampleFulfillment.Status.BLACKLISTED,
+)
+
+
+def _duplicate_sample_records(request, permission_codes):
+    creator_id = request.query_params.get("duplicate_influencer", "").strip()
+    if not creator_id.isascii() or not creator_id.isdecimal() or len(creator_id) > 19 or not 0 < int(creator_id) < 2**63:
+        raise ValidationError({"duplicate_influencer": "A valid creator ID is required."})
+    user = request.user
+    creators = filter_any_permission(user, Influencer.objects.filter(tenant=user.tenant, is_deleted=False), permission_codes)
+    creator = get_object_or_404(creators, pk=int(creator_id))
+    matches = SampleFulfillment.objects.filter(
+        tenant=user.tenant, is_deleted=False, status__in=_DUPLICATE_SAMPLE_STATUSES,
+        influencer_id__in=influencer_identity_queryset(creator).values("pk"),
+    )
+    matches = filter_any_permission(user, matches, permission_codes)
+    return success_response({"records": list(matches.order_by("-created_at", "-id").values("fulfillment_no", "status")[:3])})
+
+
 class InfluencerResolveView(ScopedInfluencerView):
     """Resolve creator accounts without exposing cross-tenant profile data."""
 
@@ -700,6 +723,8 @@ class InfluencerResolveView(ScopedInfluencerView):
 
     def get(self, request):
         permission_codes = _require_resolve_read_scope(request.user)
+        if "duplicate_influencer" in request.query_params:
+            return _duplicate_sample_records(request, permission_codes)
         raw_query = str(
             request.query_params.get("q")
             or request.query_params.get("search")

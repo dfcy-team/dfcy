@@ -452,6 +452,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import PriorityTaskCarousel from './PriorityTaskCarousel.vue';
+import { useDuplicateSampleWarning } from './useDuplicateSampleWarning';
 import { taskProgressNotice, recordSourceLabel, publishedEvidenceNotice } from './recordEvidence';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
@@ -479,7 +480,6 @@ import {
   restoreOutreachTarget,
   restoreOutreachTask,
   resolveOrCreateInfluencerNickname,
-  sampleDuplicateWarning,
   statusLabel,
   updateOutreachStatus,
   updateOutreachTarget,
@@ -603,7 +603,7 @@ const sampleInfluencerOptions = computed(() => {
   if (!query) return influencerOptions.value;
   return influencerOptions.value.filter((item) => influencerOptionLabel(item).toLowerCase().includes(query));
 });
-const duplicateSampleWarning = computed(() => sampleDuplicateWarning(selectedSampleInfluencer.value));
+const duplicateSampleWarning = useDuplicateSampleWarning(() => sampleVisible.value ? selectedSampleInfluencer.value?.id : null);
 
 const hasValue = (value) => value !== undefined && value !== null && value !== '';
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
