@@ -35,6 +35,14 @@ class MissingFeeDefaultGateTests(SimpleTestCase):
         self.assertEqual(costs.fee_amounts("inbound", self.owner, None, issues), {7: costs.ZERO})
         self.assertEqual(issues, [])
 
+    @override_settings(MONTHLY_PRODUCT_COST_ENABLED=False, SUPPLY_MONTHLY_COST_JOBS_ENABLED=True)
+    @patch("apps.supply_chain.costs.source_lines")
+    def test_supply_job_opt_in_does_not_change_legacy_manual_fee_rules(self, source_lines):
+        source_lines.return_value = [self.line]
+        issues = []
+        self.assertEqual(costs.fee_amounts("shipment", self.owner, None, issues), {7: None})
+        self.assertEqual(len(issues), 1)
+
     @override_settings(MONTHLY_PRODUCT_COST_ENABLED=False)
     def test_partial_calculation_keeps_legacy_clearance_issue(self):
         inbound = type("Inbound", (), {"pk": 9, "number": "IN-1"})()

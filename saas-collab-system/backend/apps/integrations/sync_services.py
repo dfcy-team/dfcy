@@ -743,6 +743,42 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                         raise ValidationError("Sync job run lease was lost.") from exc
                     _yield_sync_slice(locked_job, run, video_data_wait=True)
                 return run, True
+            # MySQL lock waits can happen after a video day has already archived
+            # provider pages. Preserve that day cursor and resume the same run.
+            lock_error = _mysql_lock_error(exc)
+            if sync_job.resource_type == "video_metrics" and lock_error in {1205, 1213}:
+                existing_budget = (run.masked_log or {}).get("runtime_budget") or {}
+                wait_state = _creator_rate_wait(
+                    existing_budget.get("video_lock_first_seen_at"), timezone.now(), 120,
+                )
+                with transaction.atomic():
+                    locked_job = SyncJob.objects.select_for_update().get(pk=sync_job.pk, tenant_id=sync_job.tenant_id)
+                    if not _owns_lease(locked_job, run):
+                        raise ValidationError("Sync job run lease was lost.") from exc
+                    if wait_state is None:
+                        run.error_code = "VIDEO_LOCK_WAIT_TIMEOUT"
+                        run.masked_error_message = "MySQL lock contention persisted beyond 24 hours."
+                        run.status = SyncRun.Status.FAILED
+                        run.failed_count += 1
+                        run.finished_at = timezone.now()
+                        run.masked_log = sanitize_payload({**(run.masked_log or {}), "video_lock_wait": {
+                            "expired": True, "mysql_error": lock_error, "max_wait_seconds": 86400,
+                        }})
+                        locked_job.status = SyncJob.Status.FAILED
+                        locked_job.lock_token = ""
+                        locked_job.lock_expires_at = None
+                        locked_job.lock_heartbeat_at = timezone.now()
+                        locked_job.save(update_fields=["status", "lock_token", "lock_expires_at", "lock_heartbeat_at", "updated_at"])
+                        _save_run(run)
+                        upsert_sync_failure_alert(locked_job, sync_run=run)
+                        return run, True
+                    retry_after, first_seen_at = wait_state
+                    run.masked_log = sanitize_payload({**(run.masked_log or {}), "video_lock_wait": {
+                        "retry_after_seconds": retry_after, "mysql_error": lock_error, "max_wait_seconds": 86400,
+                    }})
+                    _yield_sync_slice(locked_job, run, retry_after=retry_after,
+                                      mysql_lock_first_seen_at=first_seen_at)
+                return run, True
             # A TikTok shared app/search cooldown is a durable pause, not a
             # failed page attempt. Keep the current cursor and receipts intact
             # and let the scheduler resume after the provider's cooldown.
@@ -881,7 +917,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                 _save_run(run)
                 upsert_sync_failure_alert(sync_job, sync_run=run)
             return run, True
-def _yield_sync_slice(sync_job, run, *, credential_wait=False, history_wait=None, ads_lease_wait=False, video_data_wait=False, retry_after=None, creator_rate_first_seen_at=None):
+def _yield_sync_slice(sync_job, run, *, credential_wait=False, history_wait=None, ads_lease_wait=False, video_data_wait=False, retry_after=None, creator_rate_first_seen_at=None, mysql_lock_first_seen_at=None):
     """Called inside the page transaction; completion watermark stays unchanged."""
     if not _owns_lease(sync_job, run):
         raise ValidationError("Sync job run lease was lost.")
@@ -891,7 +927,7 @@ def _yield_sync_slice(sync_job, run, *, credential_wait=False, history_wait=None
         "sequence": int(budget.get("sequence", 0)) + 1,
         "pending": True, "ready_at": (now + timedelta(seconds=retry_after if retry_after is not None else 3600 if video_data_wait else 60)).isoformat(),
         "submitted_at": None,
-        **({} if ads_lease_wait or video_data_wait or creator_rate_first_seen_at is not None else {"last_page_committed_at": now.isoformat()}),
+        **({} if ads_lease_wait or video_data_wait or creator_rate_first_seen_at is not None or mysql_lock_first_seen_at is not None else {"last_page_committed_at": now.isoformat()}),
     })
     if history_wait:
         budget["wait_reason"] = history_wait["state"]
@@ -910,10 +946,16 @@ def _yield_sync_slice(sync_job, run, *, credential_wait=False, history_wait=None
         run.error_code = "VIDEO_DATA_WAIT"
         run.masked_error_message = "Video metrics are not available yet; waiting one hour before continuing the frozen scope."
     if retry_after is not None:
-        budget["wait_reason"] = "creator_shared_rate_limit"
-        budget["creator_rate_limit_first_seen_at"] = creator_rate_first_seen_at
-        run.error_code = "CREATOR_SHARED_RATE_LIMIT_WAIT"
-        run.masked_error_message = "TikTok Creator search is under a shared rate limit; the current cursor will resume after cooldown."
+        if mysql_lock_first_seen_at is not None:
+            budget["wait_reason"] = "video_database_lock"
+            budget["video_lock_first_seen_at"] = mysql_lock_first_seen_at
+            run.error_code = "VIDEO_LOCK_WAIT"
+            run.masked_error_message = "Video metrics are waiting for a MySQL lock; the current cursor will resume after cooldown."
+        else:
+            budget["wait_reason"] = "creator_shared_rate_limit"
+            budget["creator_rate_limit_first_seen_at"] = creator_rate_first_seen_at
+            run.error_code = "CREATOR_SHARED_RATE_LIMIT_WAIT"
+            run.masked_error_message = "TikTok Creator search is under a shared rate limit; the current cursor will resume after cooldown."
     run.masked_log = sanitize_payload({**(run.masked_log or {}), "runtime_budget": budget})
     _save_run(run)
     sync_job.status = SyncJob.Status.IDLE

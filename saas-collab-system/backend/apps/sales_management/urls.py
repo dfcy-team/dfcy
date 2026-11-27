@@ -11,6 +11,7 @@ from .realtime_board import RealtimeBoardView
 from .board_declines import BoardDeclinesView
 from .sales_operations import SalesOperationsView
 from .nine_snapshot_api import SalesNineSnapshotView
+from .order_event_api import OrderEventView
 
 from .views import (
     CommerceFiltersView,
@@ -34,6 +35,7 @@ from .warehouse_order_api import OrderWarehouseView
 
 urlpatterns = [
     path("inventory/abc/", InventoryABCView.as_view(), name="inventory-abc"),
+    path('orders/<int:pk>/events/', OrderEventView.as_view(), name='sales-order-events'),
     path("orders/<int:pk>/warehouse/", OrderWarehouseView.as_view(), name="sales-order-warehouse"),
     path('aftersales/', aa.AftersalesCollection.as_view(), name='order-aftersales'),
     path('aftersales/options/', aa.AftersalesOptions.as_view(), name='order-aftersales-options'),

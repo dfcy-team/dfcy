@@ -311,15 +311,15 @@ function activateTab(path) {
   if (path !== route.fullPath) router.push(path);
 }
 
-function closeTab(path) {
+async function closeTab(path) {
   const index = openTabs.value.findIndex((tab) => tab.path === path);
   if (index < 0 || path === '/') return;
-  const wasActive = route.fullPath === path;
-  openTabs.value.splice(index, 1);
-  if (wasActive) {
-    const nextTab = openTabs.value[Math.max(0, index - 1)] || openTabs.value[0];
-    router.push(nextTab.path);
+  if (activeMenuTabPath.value === path) {
+    const nextTab = openTabs.value[index - 1] || homeTab;
+    const navigationFailure = await router.push(nextTab.path);
+    if (navigationFailure) return;
   }
+  openTabs.value = openTabs.value.filter(tab => tab.path !== path);
 }
 
 async function clearAllTabs() {
@@ -396,7 +396,8 @@ onMounted(() => {
   const initialMembership = savedMembership ?? auth.currentUser?.active_membership_id ?? '';
   activeMembershipId.value = initialMembership === null ? '' : String(initialMembership);
   sessionStorage.setItem('saas-collab.active-membership.v1', activeMembershipId.value);
-  removeTabLimitGuard = router.beforeEach(async (to) => {
+  const resetAfterNavigation = new WeakSet();
+  const removeBeforeGuard = router.beforeEach(async (to) => {
     const menuTab = resolveMenuTab(to.path);
     if (!menuTab) return true;
     const alreadyOpen = openTabs.value.some((tab) => tab.path === menuTab.path);
@@ -407,12 +408,18 @@ onMounted(() => {
         '已达页签上限',
         { confirmButtonText: '清空后打开', cancelButtonText: '自行关闭', type: 'warning' }
       );
-      openTabs.value = [homeTab];
+      resetAfterNavigation.add(to);
       return true;
     } catch {
       return false;
     }
   });
+  const removeAfterGuard = router.afterEach((to, _from, failure) => {
+    if (failure || !resetAfterNavigation.has(to)) return;
+    openTabs.value = [homeTab];
+    updateOpenTabs(to);
+  });
+  removeTabLimitGuard = () => { removeBeforeGuard(); removeAfterGuard(); };
   nextTick(updateScrollControls);
   window.addEventListener('resize', updateScrollControls);
   const scrollElement = getMainScrollElement();

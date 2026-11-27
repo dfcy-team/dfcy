@@ -33,8 +33,10 @@ describe('Vue decision routing', () => {
 
   it('places inventory alerts and replenishment under the dedicated inventory menu', () => {
     const inventory = menuItems.find((item) => item.label === '库存管理');
-    expect(inventory.children.filter((item) => !item.sidebarHidden).map((item) => item.path)).toEqual(inventoryRoutes.map(([path]) => path));
-    expect(inventory.permissions).toEqual(['sales_management.view', 'alerts.view', 'replenishment.view']);
+    const visibleInventoryPaths = inventory.children.filter((item) => !item.sidebarHidden).map((item) => item.path);
+    expect(visibleInventoryPaths.filter((path) => path !== '/inventory/cost-ledger')).toEqual(inventoryRoutes.map(([path]) => path));
+    expect(visibleInventoryPaths).toContain('/inventory/cost-ledger');
+    expect(inventory.permissions).toEqual(['sales_management.view', 'alerts.view', 'replenishment.view', 'products.cost.view']);
 
     for (const [path] of inventoryRoutes) {
       expect(router.resolve(path).matched.length, path).toBeGreaterThan(0);

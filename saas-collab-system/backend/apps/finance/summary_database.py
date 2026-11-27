@@ -270,16 +270,21 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
             ids = finance.filter(store_id=store_id, platform='shopee', raw_envelope_id__isnull=False).order_by().values_list('raw_envelope_id', flat=True).distinct()
             if connection.vendor == 'mysql':
                 upper = upper_value(finance.filter(store_id=store_id, platform='shopee'), 'raw_envelope_id')
-                last = 0
-                while upper is not None and last < upper:
-                    page = ids.filter(raw_envelope_id__gt=last, raw_envelope_id__lte=upper).order_by('raw_envelope_id')[:500]
-                    with connection.cursor() as cursor:
-                        cursor.execute(*read_sql(page))
-                        batch = cursor.fetchall()
-                    if not batch:
-                        break
-                    envelope_ids.update(row[0] for row in batch)
-                    last = batch[-1][0]
+                if upper is not None:
+                    from MySQLdb.cursors import SSCursor
+                    query = ids.filter(raw_envelope_id__lte=upper).order_by('raw_envelope_id')
+                    last = None
+                    with connection.wrap_database_errors:
+                        with connection.connection.cursor(SSCursor) as cursor:
+                            cursor.execute(*read_sql(query))
+                            while batch := cursor.fetchmany(500):
+                                for (envelope_id,) in batch:
+                                    if last is not None and envelope_id <= last:
+                                        raise ValidationError('结算来源版本读取异常，未生成部分账单。')
+                                    envelope_ids.add(envelope_id)
+                                    last = envelope_id
+                    if last != upper:
+                        raise ValidationError('结算来源版本读取不完整，请重试；未生成部分账单。')
             else:
                 envelope_ids.update(ids)
         group_order = ['store_id', 'external_order_id', 'business_date', 'currency', 'pk']
@@ -301,29 +306,33 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                         yield FinanceRow(*values)
                     continue
                 upper = upper_value(query, 'id')
-                last = None
-                table = connection.ops.quote_name(query.model._meta.db_table)
-                while upper is not None:
-                    page = query.filter(pk__lte=upper)
-                    if last is not None:
-                        page = page.extra(where=[
-                            '(BINARY %s, %s, BINARY %s, %s) > (%%s, %%s, %%s, %%s)' %
-                            tuple(table + '.' + connection.ops.quote_name(name) for name in
-                                ('external_order_id', 'business_date', 'currency', 'id'))
-                        ], params=last)
-                    page = page[:500]
+                expected = 0
+                if upper is not None:
+                    sql, params = read_sql(query.filter(pk__lte=upper).order_by().values_list('pk'))
                     with connection.cursor() as cursor:
-                        cursor.execute(*read_sql(page))
-                        batch = cursor.fetchall()
-                    if not batch:
-                        break
-                    row = FinanceRow(*batch[-1])
-                    next_key = (row.external_order_id, row.business_date, row.currency, row.pk)
-                    if last is not None and next_key <= last:
-                        raise ValidationError('财务流水分页游标未推进，已停止读取。')
-                    for values in batch:
-                        yield FinanceRow(*values)
-                    last = next_key
+                        cursor.execute('SELECT COUNT(*) FROM (' + sql + ') AS finance_count', params)
+                        expected = cursor.fetchone()[0]
+                read_count = 0
+                if upper is not None:
+                    from MySQLdb.cursors import SSCursor
+                    sql, params = read_sql(query.filter(pk__lte=upper))
+                    last_key = None
+                    with connection.wrap_database_errors:
+                        with connection.connection.cursor(SSCursor) as cursor:
+                            cursor.execute(sql, params)
+                            while batch := cursor.fetchmany(500):
+                                for values in batch:
+                                    row = FinanceRow(*values)
+                                    next_key = (row.external_order_id, row.business_date, row.currency, row.pk)
+                                    if last_key is not None and next_key <= last_key:
+                                        raise ValidationError('财务流水排序异常，已停止读取。')
+                                    last_key = next_key
+                                    read_count += 1
+                                    if read_count > expected:
+                                        raise ValidationError('结算来源读取异常，未生成部分账单。')
+                                    yield row
+                if read_count != expected:
+                    raise ValidationError('结算来源读取不完整，请重试；未生成部分账单。')
         iterator = read_finance()
         grouped = ((key, list(rows)) for key, rows in groupby(iterator,
             lambda row: (row.store_id, row.external_order_id, str(row.business_date), row.currency)))
@@ -361,78 +370,85 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
     component_pool, text_pool = {}, {}
     settled = {}
     raw_stores = set()
-    for (store_id, order, day, currency), rows in grouped:
-        store = stores[store_id]
-        if native:
-            financial_count += len(rows)
-            if store_id not in raw_stores:
-                raw.append({'platform': rows[0].platform, 'store_id': store_id, 'store': store.code})
-                raw_stores.add(store_id)
-        if store.platform.platform_type == 'lazada':
-            if order and any(r.match_status != 'conflict' for r in rows):
+    try:
+        for (store_id, order, day, currency), rows in grouped:
+            store = stores[store_id]
+            if native:
+                financial_count += len(rows)
+                if store_id not in raw_stores:
+                    raw.append({'platform': rows[0].platform, 'store_id': store_id, 'store': store.code})
+                    raw_stores.add(store_id)
+            if store.platform.platform_type == 'lazada':
+                if order and any(r.match_status != 'conflict' for r in rows):
+                    settled[(store_id, order)] = min(settled.get((store_id, order), day), day)
+                by_kind = defaultdict(list)
+                for row in rows:
+                    name = row.raw_fee_name.strip().lower()
+                    kind = 'sales' if name == 'item price credit' else 'refund' if name in (
+                        'reversal item price', 'shipping fee refund to customer') else 'adjustment' if name in (
+                        'wrong shipping fee adjustment', 'lost claim', 'damaged claim',
+                        'commission fee - correction for undercharge', 'payment fee - correction for undercharge') else 'order_fee'
+                    by_kind[kind].append(row)
+                for kind, members in by_kind.items():
+                    add(store, kind, sum((r.signed_amount for r in members), ZERO), day, order,
+                        'preview:'+'|'.join(['lazada', str(store_id), order, day, currency])+':'+kind,
+                        currency=currency, status='pending' if any(r.match_status == 'conflict' for r in members) else 'confirmed',
+                        description='SaaS财务流水按原始费用名称分类，收入、支出及返还保留符号。')
+                    facts[-1]['rows'] = [{'id': r.pk, 'name': r.raw_fee_name, 'raw': text(r.raw_amount), 'amount': text(r.signed_amount), 'currency': r.currency} for r in members]
+                continue
+            net_rows = [r for r in rows if r.raw_fee_name == 'escrow_amount']
+            if len(net_rows) != 1:
+                continue
+            net_row = net_rows[0]
+            if order and net_row.match_status != 'conflict':
                 settled[(store_id, order)] = min(settled.get((store_id, order), day), day)
-            by_kind = defaultdict(list)
-            for row in rows:
-                name = row.raw_fee_name.strip().lower()
-                kind = 'sales' if name == 'item price credit' else 'refund' if name in (
-                    'reversal item price', 'shipping fee refund to customer') else 'adjustment' if name in (
-                    'wrong shipping fee adjustment', 'lost claim', 'damaged claim',
-                    'commission fee - correction for undercharge', 'payment fee - correction for undercharge') else 'order_fee'
-                by_kind[kind].append(row)
-            for kind, members in by_kind.items():
-                add(store, kind, sum((r.signed_amount for r in members), ZERO), day, order,
-                    'preview:'+'|'.join(['lazada', str(store_id), order, day, currency])+':'+kind,
-                    currency=currency, status='pending' if any(r.match_status == 'conflict' for r in members) else 'confirmed',
-                    description='SaaS财务流水按原始费用名称分类，收入、支出及返还保留符号。')
-                facts[-1]['rows'] = [{'id': r.pk, 'name': r.raw_fee_name, 'raw': text(r.raw_amount), 'amount': text(r.signed_amount), 'currency': r.currency} for r in members]
-            continue
-        net_rows = [r for r in rows if r.raw_fee_name == 'escrow_amount']
-        if len(net_rows) != 1:
-            continue
-        net_row = net_rows[0]
-        if order and net_row.match_status != 'conflict':
-            settled[(store_id, order)] = min(settled.get((store_id, order), day), day)
-        source = escrow.get((store_id, order, net_row.raw_envelope_id)) or posted_income(rows, net_row.raw_envelope_id)
-        income = source['income'] if source else {}
-        if native and source:
-            income = {key: text_pool.setdefault(value, value) for key, value in income.items()}
-            source = {**source, 'income': income}
-        components = []
-        if store.code.startswith('SPKJ'):
-            fields = [('voucher_from_seller', -1), ('seller_coin_cash_back', -1),
-                ('buyer_paid_shipping_fee', 1), ('shipping_fee_discount_from_3pl', 1), ('shopee_shipping_rebate', 1),
-                ('actual_shipping_fee', -1), ('reverse_shipping_fee', -1), ('seller_shipping_discount', 1), ('final_return_to_seller_shipping_fee', -1)]
-            fields += [(k, -1) for k in ('commission_fee', 'service_fee', 'seller_transaction_fee',
-                'order_ams_commission_fee', 'seller_order_processing_fee', 'withholding_tax', 'cross_border_tax',
-                'escrow_tax', 'fbs_fee', 'ads_escrow_top_up_fee_or_technical_support_fee', 'campaign_fee', 'sspl_fee',
-                'sales_tax_on_lvg', 'shipping_fee_sst', 'return_handling_fee', 'overseas_return_service_fee',
-                'shipping_seller_protection_fee_amount', 'lff_seller_protection_fee_amount', 'reverse_shipping_fee_sst',
-                'return_to_seller_shipping_fee_sst', 'final_product_vat_tax', 'final_shipping_vat_tax')]
-            merchandise = None if any(income.get(k) is None for k in ['original_price', 'seller_discount']) else Decimal(income['original_price'])-Decimal(income['seller_discount'])
-        else:
-            fields = [(k, -1) for k in ('voucher_from_seller', 'commission_fee', 'seller_transaction_fee',
-                'order_ams_commission_fee', 'seller_order_processing_fee', 'ads_escrow_top_up_fee_or_technical_support_fee',
-                'actual_shipping_fee', 'reverse_shipping_fee')]+[('buyer_paid_shipping_fee', 1), ('shopee_shipping_rebate', 1)]
-            merchandise = Decimal(income['order_selling_price']) if income.get('order_selling_price') is not None else None
-        refund = Decimal(income['seller_return_refund']) if income.get('seller_return_refund') is not None else None
-        for name, sign in fields:
-            value = text(Decimal(income[name])*sign) if income.get(name) is not None else None
-            component = {'field': name, 'label': name, 'amount': value}
-            if native and value in (None, '0.000000', '-0.000000'):
-                component = component_pool.setdefault((name, value), component)
-            components.append(component)
-        fees = None if any(c['amount'] is None for c in components) else sum((Decimal(c['amount']) for c in components), ZERO)
-        sales = None if merchandise is None or refund is None else merchandise-refund
-        reconciled = sales is not None and fees is not None and refund is not None and sales+fees+refund == net_row.raw_amount
-        prefix = 'html2:sp6th:settlement:'+order if store.code == 'SP6TH' else 'preview:'+'|'.join(['shopee', str(store_id), order, day, currency])
-        for kind, amount in [('sales', sales if reconciled else None), ('refund', refund), ('order_fee', fees if reconciled else None)]:
-            add(store, kind, amount, day, order, prefix+':'+kind, source_proof=source and {k: source[k] for k in ['envelope_id', 'response_index', 'platform_finance_fields', 'basis'] if k in source},
-                sp6th_components=components if kind == 'order_fee' else None, description='SaaS保存的官方订单结算响应；构成必须与净结算额对平。')
-        if source:shopee_income.append({'store_id': store_id, 'order': order, 'date': day, 'currency': currency, **source})
+            source = escrow.get((store_id, order, net_row.raw_envelope_id)) or posted_income(rows, net_row.raw_envelope_id)
+            income = source['income'] if source else {}
+            if native and source:
+                income = {key: text_pool.setdefault(value, value) for key, value in income.items()}
+                source = {**source, 'income': income}
+            components = []
+            if store.code.startswith('SPKJ'):
+                fields = [('voucher_from_seller', -1), ('seller_coin_cash_back', -1),
+                    ('buyer_paid_shipping_fee', 1), ('shipping_fee_discount_from_3pl', 1), ('shopee_shipping_rebate', 1),
+                    ('actual_shipping_fee', -1), ('reverse_shipping_fee', -1), ('seller_shipping_discount', 1), ('final_return_to_seller_shipping_fee', -1)]
+                fields += [(k, -1) for k in ('commission_fee', 'service_fee', 'seller_transaction_fee',
+                    'order_ams_commission_fee', 'seller_order_processing_fee', 'withholding_tax', 'cross_border_tax',
+                    'escrow_tax', 'fbs_fee', 'ads_escrow_top_up_fee_or_technical_support_fee', 'campaign_fee', 'sspl_fee',
+                    'sales_tax_on_lvg', 'shipping_fee_sst', 'return_handling_fee', 'overseas_return_service_fee',
+                    'shipping_seller_protection_fee_amount', 'lff_seller_protection_fee_amount', 'reverse_shipping_fee_sst',
+                    'return_to_seller_shipping_fee_sst', 'final_product_vat_tax', 'final_shipping_vat_tax')]
+                merchandise = None if any(income.get(k) is None for k in ['original_price', 'seller_discount']) else Decimal(income['original_price'])-Decimal(income['seller_discount'])
+            else:
+                fields = [(k, -1) for k in ('voucher_from_seller', 'commission_fee', 'seller_transaction_fee',
+                    'order_ams_commission_fee', 'seller_order_processing_fee', 'ads_escrow_top_up_fee_or_technical_support_fee',
+                    'actual_shipping_fee', 'reverse_shipping_fee')]+[('buyer_paid_shipping_fee', 1), ('shopee_shipping_rebate', 1)]
+                merchandise = Decimal(income['order_selling_price']) if income.get('order_selling_price') is not None else None
+            refund = Decimal(income['seller_return_refund']) if income.get('seller_return_refund') is not None else None
+            for name, sign in fields:
+                value = text(Decimal(income[name])*sign) if income.get(name) is not None else None
+                component = {'field': name, 'label': name, 'amount': value}
+                if native and value in (None, '0.000000', '-0.000000'):
+                    component = component_pool.setdefault((name, value), component)
+                components.append(component)
+            fees = None if any(c['amount'] is None for c in components) else sum((Decimal(c['amount']) for c in components), ZERO)
+            sales = None if merchandise is None or refund is None else merchandise-refund
+            reconciled = sales is not None and fees is not None and refund is not None and sales+fees+refund == net_row.raw_amount
+            prefix = 'html2:sp6th:settlement:'+order if store.code == 'SP6TH' else 'preview:'+'|'.join(['shopee', str(store_id), order, day, currency])
+            for kind, amount in [('sales', sales if reconciled else None), ('refund', refund), ('order_fee', fees if reconciled else None)]:
+                add(store, kind, amount, day, order, prefix+':'+kind, source_proof=source and {k: source[k] for k in ['envelope_id', 'response_index', 'platform_finance_fields', 'basis'] if k in source},
+                    sp6th_components=components if kind == 'order_fee' else None, description='SaaS保存的官方订单结算响应；构成必须与净结算额对平。')
+            if source:shopee_income.append({'store_id': store_id, 'order': order, 'date': day, 'currency': currency, **source})
 
-    financial_flows = [{'native_fact_index': index} for index in range(len(facts))] if native else []
+    finally:
+        if native:
+            iterator.close()
+
+    financial_fact_count = len(facts) if native else 0
     if native:
         escrow.clear()
+        envelope_ids.clear()
+        del envelopes
         component_pool.clear()
         text_pool.clear()
 
@@ -501,6 +517,12 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
             'sales_order_id', 'store_id', 'platform_id', 'shipped_at_utc'))
     from .summary_cost_classification import collect_classifications, classify
     classifications = collect_classifications(user, stores, orders, facts, native=native)
+    if native:
+        # Shipping-date and classification evidence has consumed these projections.
+        for order in orders:
+            order.source_details = None
+            del order._read_logistics, order._read_pickup
+        del order_query, lookup_query, selected, financial_orders, related_ids
     sku_sales = {'source': 'SaaS SalesOrderItem', 'orders': {}, 'exchanges': {}}
     products = {}; catalogue = []
     provider_shops = defaultdict(set)
@@ -520,22 +542,24 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
     for key, product in saved_products.items():
         if product['title']:products[key] = product
     if native:
-        # Retain the same historical title fallback without loading unrelated item payloads.
+        # Resolve the earliest historical item per product in SQL. MySQL's
+        # default collation may collapse distinct provider identifiers.
         from itertools import islice
+        from django.db.models import BinaryField, F, Func, Min
+
+        product_key = F('platform_product_id')
+        if connection.vendor == 'mysql':
+            product_key = Func(product_key, template='CAST(%(expressions)s AS BINARY)', output_field=BinaryField())
         for sid in sorted(stores):
-            historical_orders = iter(SalesOrder.objects.filter(tenant=user.tenant, store_id=sid
-                ).order_by().values_list('pk', flat=True).iterator(chunk_size=500))
-            fallback = {}
-            while True:
-                batch = list(islice(historical_orders, 500))
-                if not batch:break
-                titles = SalesOrderItem.objects.filter(sales_order_id__in=batch).order_by().values_list(
-                    'pk', 'platform_product_id', 'item_name_snapshot')
-                for item_id, pid, title in titles.iterator(chunk_size=500):
-                    if (sid, pid) not in products and (pid not in fallback or item_id < fallback[pid][0]):
-                        fallback[pid] = (item_id, title)
-            for pid, (_, title) in fallback.items():
-                products[(sid, pid)] = {'store_id': sid, 'platform_product_id': pid, 'title': title, 'url': ''}
+            items = SalesOrderItem.objects.using(finance.db).filter(sales_order__tenant=user.tenant, sales_order__store_id=sid)
+            first_ids = iter(items.order_by().values(key=product_key).annotate(first_id=Min('pk'))
+                             .values_list('first_id', flat=True).iterator(chunk_size=500))
+            while batch := list(islice(first_ids, 500)):
+                titles = items.filter(pk__in=batch).values_list('platform_product_id', 'item_name_snapshot')
+                for pid, title in titles:
+                    products.setdefault((sid, pid), {
+                        'store_id': sid, 'platform_product_id': pid, 'title': title, 'url': '',
+                    })
     item_query = SalesOrderItem.objects.filter(sales_order__tenant=user.tenant, sales_order__store_id__in=stores).select_related('sales_order').order_by('pk')
     if native:
         item_query = item_query.only('id', 'sales_order_id', 'internal_sku_id', 'platform_product_id',
@@ -545,8 +569,23 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
         from itertools import chain
         order_ids = [order.pk for order in orders]
         item_rows = item_query
-        item_query = chain.from_iterable(item_rows.filter(sales_order_id__in=order_ids[offset:offset+500]).iterator(chunk_size=500)
-            for offset in range(0, len(order_ids), 500))
+        def read_item_pages(query):
+            # Exclude rows inserted after this bounded group starts reading.
+            upper = query.order_by('-pk').values_list('pk', flat=True).first()
+            if upper is None:
+                return
+            last = 0
+            while batch := list(query.filter(pk__gt=last, pk__lte=upper).order_by('pk')[:200]):
+                for item in batch:
+                    if item.pk <= last:
+                        raise ValidationError('商品明细分页游标未推进，已停止读取。')
+                    last = item.pk
+                    yield item
+
+        item_query = chain.from_iterable(
+            read_item_pages(item_rows.filter(sales_order_id__in=order_ids[offset:offset+500]))
+            for offset in range(0, len(order_ids), 500)
+        )
     for item in item_query:
         order = item.sales_order;key = str(order.store_id)+'|'+order.external_order_id
         line = {'item_id': item.pk, 'internal_sku_id': item.internal_sku_id, 'platform_product_id': item.platform_product_id,
@@ -568,14 +607,23 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
     from .summary_shipped_items import shipped_items
     if shipment_lookups is None:
         shipment_lookups = {r.order_id: r for r in OrderWarehouseLookup.objects.filter(order__tenant=user.tenant, order__store_id__in=stores)}
-    skus = {s.pk: s for s in ProductSKU.objects.filter(tenant=user.tenant)}
+    sku_query = ProductSKU.objects.filter(tenant=user.tenant)
+    if native:
+        sku_query = sku_query.only('id', 'sku_code', 'legacy_sku_code')
+    skus = {sku.pk: sku for sku in sku_query}
     aliases = defaultdict(set)
     for sku in skus.values():
         for code in [sku.sku_code, sku.legacy_sku_code]:
             if code:aliases[code.strip().casefold()].add(sku.pk)
     from .monthly_cost_adapter import monthly_cost_index, select_monthly_cost
     monthly_costs = monthly_cost_index(user.tenant)
-    cost_versions = list(ProductCostVersion.objects.filter(tenant=user.tenant).select_related('warehouse'))
+    cost_query = ProductCostVersion.objects.filter(tenant=user.tenant).select_related('warehouse')
+    if native:
+        cost_query = cost_query.only(
+            'id', 'sku_id', 'warehouse_id', 'warehouse__country_code', 'status',
+            'confirmed_cost', 'currency', 'version_no', 'effective_from', 'effective_to',
+        )
+    cost_versions = list(cost_query)
     costs_by_sku = defaultdict(lambda: defaultdict(list))
     for version in cost_versions:
         costs_by_sku[version.sku_id][version.warehouse_id].append(version)
@@ -734,9 +782,12 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
             key = '|'.join([p['country'], p['bill_month'], p.get('currency') or 'CNY'])
             basis[key] = {'total': str(p['order_detail_sum']), 'file': r.file_name, 'sha256': r.file_hash}
     from .summary_raw_flows import source_flows
-    raw_flows = financial_flows + source_flows(stores, financial_rows, fees, registrations,
+    raw_flows = [{'native_fact_index': index} for index in range(financial_fact_count)]
+    raw_flows.extend(source_flows(stores, financial_rows, fees, registrations,
         FinanceSummaryInput.objects.filter(tenant=user.tenant, kind='adjustment', store_id__in=stores),
-        facts, start, end) + cost_flows + [dict(r) for r in returns]
+        facts, start, end))
+    raw_flows.extend(cost_flows)
+    raw_flows.extend(dict(row) for row in returns)
     convert_costs(facts, stores, rates)
     shares = warehouse_shares(facts, basis, rates)
     members = [] if native else _sku_members(facts, rates)

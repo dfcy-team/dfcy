@@ -114,6 +114,10 @@ def test_purchase_list_supplier_date_filters_and_stage_counts(world):
     response=api.get(BASE+'purchase-orders/',params)
     assert response.status_code==200,response.data
     counts=response.data['workflow_counts']
+    counts_only = api.get(BASE+'purchase-orders/', {**params, 'include_workflow_counts': 'only'})
+    assert counts_only.status_code == 200
+    assert counts_only.data['data'] == []
+    assert counts_only.data['workflow_counts'] == counts
     assert response.data['count']==2 and counts['all']==2 and counts['pending']==2
     assert counts['draft']==1 and counts['awaiting_shipment']==1
     assert api.get(BASE+'purchase-orders/',{**params,'workflow':'pending'}).data['count']==2

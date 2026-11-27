@@ -412,6 +412,22 @@ def batch_action(batch, user, action, payload=None):
     return batch
 
 
+def reconcile_terminal_history_batches(limit=20):
+    """Repair a missed batch aggregate without dispatching or retrying work."""
+    from django.db.models import Exists, OuterRef
+    unfinished = HistorySyncSegment.objects.filter(batch_id=OuterRef("pk")).exclude(
+        status__in=["success", "failed", "superseded"])
+    candidate_ids = list(HistorySyncBatch.objects.filter(status="running")
+        .annotate(has_unfinished=Exists(unfinished)).filter(has_unfinished=False)
+        .order_by("pk").values_list("pk", flat=True)[:max(1, min(limit, 100))])
+    for batch_id in candidate_ids:
+        with transaction.atomic():
+            batch = HistorySyncBatch.objects.select_for_update().get(pk=batch_id)
+            # Recheck after locking: pause/range adjustment can race selection.
+            if batch.status == "running":
+                update_batch_status(batch.pk)
+
+
 def dispatch_history_segments(enqueue, now=None, limit=20, delivery_snapshot=None, admission=None):
     """Retry broker delivery with the same run/sequence, never repeat a completed segment."""
     now = now or timezone.now()
@@ -421,6 +437,7 @@ def dispatch_history_segments(enqueue, now=None, limit=20, delivery_snapshot=Non
     from .sync_delivery import observe_delivery, read_delivery_snapshot
     delivery_snapshot = delivery_snapshot if delivery_snapshot is not None else read_delivery_snapshot()
     from .sync_dispatch_policy import fair_job_ids, mark_served
+    reconcile_terminal_history_batches(limit)
     pending = HistorySyncSegment.objects.filter(batch__status="running").exclude(status__in=["success", "failed", "superseded"])
     job_ids = fair_job_ids(SyncJob.objects.filter(pk__in=pending.values("sync_job_id")), "history", limit)
     for job_id in job_ids:

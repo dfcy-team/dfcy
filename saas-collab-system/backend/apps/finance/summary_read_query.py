@@ -248,7 +248,9 @@ def launch_source_worker(request):
             input=json.dumps(request), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, encoding='utf-8', timeout=600, cwd=str(Path(__file__).resolve().parents[2]))
         reply = json.loads(result.stdout) if result.returncode == 0 else {}
-    except (OSError, ValueError, subprocess.TimeoutExpired):
+    except subprocess.TimeoutExpired:
+        raise SourceReadTimeout() from None
+    except (OSError, ValueError):
         raise ValidationError('来源读取未完成，请重试；未更改账务数据。') from None
     if not isinstance(reply, dict):
         reply = {}

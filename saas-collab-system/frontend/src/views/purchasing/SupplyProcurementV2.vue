@@ -312,17 +312,31 @@ async function load() {
   loading.value = true; errorMessage.value = '';
   const params = { search: filters.search.trim(), limit: pagination.pageSize, offset: (pagination.page - 1) * pagination.pageSize };
   const fingerprint=JSON.stringify({search:params.search,status:filters.status,source:filters.source_kind,country:filters.country_code,supplier:filters.supplier_id,dates:filters.order_dates});
-  if (tab === 'orders') Object.assign(params, { status: filters.status, source_kind: filters.source_kind, ...(filters.workflow ? {workflow:filters.workflow} : {}), ...(filters.country_code?.trim() ? {country_code:filters.country_code.trim()} : {}), ...(filters.supplier_id?{supplier_id:filters.supplier_id}:{}), ...(filters.order_dates?.length===2?{order_date_from:filters.order_dates[0],order_date_to:filters.order_dates[1]}:{}), ...(fingerprint!==countFingerprint || Date.now()-countsLoadedAt>30000?{include_workflow_counts:'1'}:{}) });
+  if (tab === 'orders') Object.assign(params, { status: filters.status, source_kind: filters.source_kind, ...(filters.workflow ? {workflow:filters.workflow} : {}), ...(filters.country_code?.trim() ? {country_code:filters.country_code.trim()} : {}), ...(filters.supplier_id?{supplier_id:filters.supplier_id}:{}), ...(filters.order_dates?.length===2?{order_date_from:filters.order_dates[0],order_date_to:filters.order_dates[1]}:{}) });
   if (tab === 'prices' && filters.supplier_id) params.supplier_id = filters.supplier_id;
   const fetchers = { orders: api.fetchPurchaseOrders, suppliers: api.fetchSuppliers, prices: api.fetchSupplierPrices, freight: api.fetchFreightCompanies };
   try {
     const response = await fetchers[tab](params);
     if (sequence !== listSequence) return;
     if (!response?.success) { rows.value = []; total.value = 0; errorMessage.value = failureMessage(response); return; }
-    if(tab==='orders' && response.workflow_counts){workflowCounts.value=response.workflow_counts;countFingerprint=fingerprint;countsLoadedAt=Date.now();}
     const result = collection(response); rows.value = result.rows; total.value = result.count;
+    if (tab === 'orders' && (fingerprint !== countFingerprint || Date.now() - countsLoadedAt > 30000)) {
+      void loadWorkflowCounts(params, fingerprint, sequence);
+    }
   } catch (error) { if (sequence === listSequence) { rows.value = []; total.value = 0; errorMessage.value = error.message || '请求失败，请重试。'; } }
   finally { if (sequence === listSequence) loading.value = false; }
+}
+async function loadWorkflowCounts(params, fingerprint, sequence) {
+  if (fingerprint !== countFingerprint) workflowCounts.value = {};
+  try {
+    const response = await api.fetchPurchaseOrders({ ...params, include_workflow_counts: 'only' });
+    if (sequence !== listSequence || !response?.success || !response.workflow_counts) return;
+    workflowCounts.value = response.workflow_counts;
+    countFingerprint = fingerprint;
+    countsLoadedAt = Date.now();
+  } catch {
+    // Keep the loaded list usable if the optional counts are unavailable.
+  }
 }
 function flowType(stage){return ({completed:'success',awaiting_shipment:'warning',partial_shipment:'primary',awaiting_dispatch:'warning',in_transit:'primary',awaiting_inbound:'danger'})[stage]||'info';}
 function applyFilters(refreshCounts=true) { if(refreshCounts!==false)countFingerprint='';pagination.page = 1; selectedFlow.value=null; ++flowSequence; return load(); }

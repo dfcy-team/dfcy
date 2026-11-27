@@ -2,7 +2,12 @@ import { requestApi, requestWithMockFallback } from './request';
 import { mockBusinessOverview, mockInventoryAnalysis, mockSalesAnalysis } from '../mock/analytics';
 import { buildAnalyticsQuery, normalizeAnalyticsResponse, normalizeInventoryAnalysisResponse } from './uiP6Adapters';
 
-export const fetchBusinessFilters = () => requestApi({ method: 'get', url: '/api/internal/analytics/filters/' });
+export const fetchBusinessFilters = () => requestApi({
+  method: 'get',
+  url: '/api/internal/analytics/filters/',
+  params: { catalog: 'overview' },
+  timeout: 30000,
+});
 
 const analyticsRequest = async (config, mockHandler, moduleName) =>
   normalizeAnalyticsResponse(

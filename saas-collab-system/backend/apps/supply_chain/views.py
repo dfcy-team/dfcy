@@ -71,10 +71,15 @@ class InternalPurchases(InternalAPI):
     def get(self, request):
         from .api import purchase_queryset
         from .fulfillment import prepare_orders
+        counts_mode = request.query_params.get('include_workflow_counts')
+        if counts_mode == 'only':
+            from .fulfillment import workflow_counts
+            counts = workflow_counts(purchase_queryset(request, apply_workflow=False))
+            return Response({"data": [], "workflow_counts": counts})
         queryset = purchase_queryset(request)
         extra = None
         count_override = None
-        if request.query_params.get('include_workflow_counts') == '1':
+        if counts_mode == '1':
             from .fulfillment import workflow_counts
             counts = workflow_counts(purchase_queryset(request, apply_workflow=False))
             extra = {"workflow_counts": counts}

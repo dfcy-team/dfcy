@@ -52,12 +52,23 @@ export const fetchSalesPage = (mode, params = {}) => {
       data: null
     });
   }
+  const qualitySummary = mode === 'data-quality' && (params.include_summary === true || params.include_summary === 'true');
   return salesRequest(
-    { method: 'get', url, params },
+    {
+      method: 'get', url,
+      ...(qualitySummary ? { timeout: 60000, params: { ...params, summary_projection: 'quality' } } : { params })
+    },
     mockFor(mode, params),
     `sales_management.${mode}`
   );
 };
+
+export const fetchSalesOrderSummary = (params, signal) => requestApi({
+  method: 'get',
+  url: endpointByMode.orders,
+  params: { ...params, workspace_summary: 'only' },
+  signal,
+});
 
 export const fetchSalesOrderDetail = (id, params = {}) =>
   salesRequest(
@@ -65,6 +76,10 @@ export const fetchSalesOrderDetail = (id, params = {}) =>
     salesManagementMocks.orderDetail ? () => salesManagementMocks.orderDetail(id) : undefined,
     'sales_management.orders.detail'
   );
+
+export const fetchOrderWarehouse = id => requestApi({ method: 'get', url: `/api/internal/commerce/orders/${id}/warehouse/` });
+export const fetchOrderEvents = (id, params = {}) => requestApi({ method: 'get', url: `/api/internal/commerce/orders/${id}/events/`, params });
+export const retryOrderWarehouse = id => requestApi({ method: 'post', url: `/api/internal/commerce/orders/${id}/warehouse/`, data: {} });
 
 export const createSalesExport = (payload, idempotencyKey) =>
   salesRequest(

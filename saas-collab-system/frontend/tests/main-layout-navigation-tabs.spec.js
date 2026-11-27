@@ -32,6 +32,7 @@ function mountMainLayout(path, query = {}) {
   harness.route = reactive({ path, fullPath: path + (Object.keys(query).length ? '?' + new URLSearchParams(query) : ''), query, hash: '' });
   harness.router = {
     beforeEach: vi.fn(() => vi.fn()),
+    afterEach: vi.fn(() => vi.fn()),
     push: vi.fn(async (nextPath) => {
       harness.route.path = nextPath;
       harness.route.fullPath = nextPath;
@@ -176,7 +177,7 @@ describe('MainLayout navigation shell', () => {
     expect(source).toContain('@drop.prevent="dropTab(tab.path)"');
     expect(source).toContain('function closeTab(path)');
     expect(source).toContain("if (index < 0 || path === '/') return;");
-    expect(source).toContain("const nextTab = openTabs.value[Math.max(0, index - 1)] || openTabs.value[0];");
+    expect(source).toContain("const nextTab = openTabs.value[index - 1] || homeTab;");
     expect(source).toContain("const tabsStorageKey = 'business-workbench:open-tabs';");
     expect(source).toContain('const openTabs = ref(loadOpenTabs());');
     expect(source).toContain('sessionStorage.setItem(tabsStorageKey, JSON.stringify(tabs));');
@@ -262,4 +263,19 @@ it('desktop menu toggles without changing the active page', async () => {
   expect(sidebar.attributes('style') || '').not.toContain('display: none');
   expect(button.attributes('aria-expanded')).toBe('true');
   wrapper.unmount();
+});
+
+it('keeps the active tab when closing a queried route fails to navigate', async () => {
+  const path = '/sales-management/stores';
+  const wrapper = mountMainLayout(path, { store: '1' });
+  try {
+    harness.router.push.mockResolvedValueOnce({ type: 4 });
+    await wrapper.get('.route-tab__close').trigger('click');
+    await nextTick();
+    expect(harness.router.push).toHaveBeenCalledWith('/');
+    expect(harness.route.path).toBe(path);
+    expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toContain('门店销售');
+  } finally {
+    wrapper.unmount();
+  }
 });

@@ -33,7 +33,7 @@
 
       <section class="workbench-summary" :aria-label="`${perspectiveLabel}重点指标`">
         <button v-for="metric in visibleMetrics" :key="metric.label" type="button" class="workbench-metric" :disabled="!metric.risk || loading" :class="{ selected: selectedRisk === metric.risk && metric.risk }" @click="selectRisk(metric.risk)">
-          <span>{{ metric.label }}</span><strong>{{ number(metric.value) }}</strong><small>{{ metric.note }}</small>
+          <span>{{ metric.label }}</span><strong>{{ metric.value == null ? '—' : number(metric.value) }}</strong><small>{{ metric.note }}</small>
         </button>
       </section>
 

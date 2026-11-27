@@ -33,13 +33,17 @@ describe('inventory more analysis navigation', () => {
     wrapper.unmount();
   });
   it('loads summary first, drills into a category, and resets to summary', async () => {
-    mocks.fetch.mockResolvedValue({ success: true, data: { warehouses: [{ warehouse_id: 1, warehouse_name: 'Test' }], sales_category_counts: { sales_no_stock: 8 } } });
+    mocks.fetch.mockResolvedValue({ success: true, data: { warehouses: [{ warehouse_id: 1, warehouse_name: 'Test' }], sales_category_counts: { sales_no_stock: 8, sales_unknown: 0 } } });
     const wrapper = mount(InventoryWorkbench, { props: { warehouseDetails: true }, global: { stubs } });
     await flushPromises();
     expect(mocks.fetch.mock.lastCall[0]).toMatchObject({ sales_report: true, summary_only: true });
     expect(wrapper.find('.focus-table').exists()).toBe(false);
     const category = wrapper.findAll('.workbench-metric').find(button => button.text().includes('无库存有销售'));
     expect(category.text()).toContain('8');
+    const unavailable = wrapper.findAll('.workbench-metric').find(button => button.text().includes('有库存无销售'));
+    expect(unavailable.get('strong').text()).toBe('—');
+    const zero = wrapper.findAll('.workbench-metric').find(button => button.text().includes('销量待核查'));
+    expect(zero.get('strong').text()).toBe('0');
     await category.trigger('click');
     await flushPromises();
     expect(mocks.fetch.mock.lastCall[0]).toMatchObject({ summary_only: false, risk: 'sales_no_stock' });

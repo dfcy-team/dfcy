@@ -21,7 +21,7 @@ from apps.integrations.models import (
     SyncCursor,
     SyncRun,
 )
-from apps.masterdata.models import StoreMaster, WarehouseMaster
+from apps.masterdata.models import PlatformMaster, StoreMaster, WarehouseMaster
 from apps.listings.models import PlatformProductDetail
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
@@ -45,6 +45,7 @@ from .serializers import (
     SalesExportRequestSerializer,
     SalesOrderDetailSerializer,
     SalesOrderSerializer,
+    SalesOrderWorkspaceSerializer,
     SalesReturnSerializer,
     SyncSourceSerializer,
 )
@@ -574,7 +575,35 @@ class CommerceFiltersView(APIView):
         return success_response(commerce_filters_payload(request, self.read_permission_code))
 
 
+def _overview_filter_catalog(request, permission_code):
+    orders = _scoped_order_facts(request, permission_code)
+    dimensions = list(orders.order_by().values_list("store_id", "platform_id").distinct())
+    store_ids = {store_id for store_id, _ in dimensions}
+    platform_ids = {platform_id for _, platform_id in dimensions}
+    platforms = dict(PlatformMaster.objects.filter(
+        tenant_id=request.user.tenant_id, pk__in=platform_ids,
+    ).values_list("pk", "platform_type"))
+    store_rows = StoreMaster.objects.filter(tenant_id=request.user.tenant_id, pk__in=store_ids).in_bulk()
+    scope = {(store_id, platforms[platform_id]) for store_id, platform_id in dimensions
+             if store_id in store_rows and platform_id in platforms}
+    stores = [
+        {"id": store_id, "code": store_rows[store_id].code, "name": store_rows[store_id].name,
+         "region": store_rows[store_id].country_code, "platform": platform}
+        for store_id, platform in sorted(scope, key=lambda pair: (store_rows[pair[0]].code, pair[1]))
+    ]
+    currency_orders = orders
+    if any(store_id not in store_rows or platform_id not in platforms for store_id, platform_id in dimensions):
+        currency_orders = orders.filter(store_id__in=store_rows, platform_id__in=platforms)
+    return {
+        "platforms": sorted({row["platform"] for row in stores}),
+        "stores": stores,
+        "currencies": list(currency_orders.order_by("currency").values_list("currency", flat=True).distinct()),
+    }
+
+
 def commerce_filters_payload(request, permission_code):
+    if permission_code == "analytics.view" and request.query_params.get("catalog") == "overview":
+        return _overview_filter_catalog(request, permission_code)
     if request.query_params.get("catalog") == "sales":
         from .filter_catalog import sales_filter_catalog
         orders = _scoped_order_facts(request, permission_code)
@@ -712,6 +741,43 @@ def _sales_quality(orders, refunds, summaries):
     }
 
 
+def _sales_quality_projection(orders, refunds):
+    """Compute the quality payload without building monetary/unit summaries."""
+    item_stats = SalesOrderItem.objects.filter(sales_order__in=orders).aggregate(
+        total=Count("pk"),
+        problems=Count("pk", filter=Q(seller_sku="") | Q(internal_sku__isnull=True)),
+        unmapped=Count("pk", filter=Q(internal_sku__isnull=True)),
+    )
+    refund_stats = refunds.aggregate(
+        total=Count("pk"), unlinked=Count("pk", filter=Q(sales_order__isnull=True)),
+        refreshed_at=Max("updated_at_utc", filter=Q(normalized_status="completed")),
+    )
+    refund_item_stats = RefundReturnItem.objects.filter(refund_return__in=refunds).aggregate(
+        total=Count("pk"), unmapped=Count("pk", filter=Q(internal_sku__isnull=True)),
+    )
+    order_stats = orders.aggregate(
+        total=Count("pk"), missing_currency=Count("pk", filter=Q(currency="")),
+        refreshed_at=Max("updated_at_utc"),
+    )
+    checked_rows = order_stats["total"] + item_stats["total"] + refund_stats["total"] + refund_item_stats["total"]
+    problem_rows = order_stats["missing_currency"] + item_stats["problems"] + refund_stats["unlinked"] + refund_item_stats["unmapped"]
+    score = max(0, round((1 - problem_rows / checked_rows) * 100)) if checked_rows else 100
+    refreshed_at = max(filter(None, (order_stats["refreshed_at"], refund_stats["refreshed_at"])), default=None)
+    return {
+        "score": score,
+        "status": "healthy" if score >= 95 else "warning",
+        "metric_version": "reports-v2",
+        "refreshed_at": refreshed_at,
+        "checked_rows": checked_rows,
+        "problem_rows": problem_rows,
+        "linkage": {
+            "order_item_count": item_stats["total"], "unmapped_order_items": item_stats["unmapped"],
+            "refund_count": refund_stats["total"], "unlinked_refunds": refund_stats["unlinked"],
+            "refund_item_count": refund_item_stats["total"], "unmapped_refund_items": refund_item_stats["unmapped"],
+        },
+    }
+
+
 def _sales_quality_not_evaluated(summaries=()):
     refreshed_at = max((row["refreshed_at"] for row in summaries if row.get("refreshed_at")), default=None)
     return {
@@ -792,7 +858,19 @@ def _sales_management_metrics(summaries, refund_count=0):
     ]
 
 
-def _sales_page_context(orders, refunds):
+def _sales_page_context(orders, refunds, quality_projection=False):
+    if quality_projection:
+        quality = _sales_quality_projection(orders, refunds)
+        return {
+            "source_status": "ready" if quality["checked_rows"] else "pending",
+            "refreshed_at": quality["refreshed_at"],
+            "definition": {
+                "currency_basis": "按来源币种分别展示",
+                "data_scope": "当前租户、当前角色及授权门店",
+            },
+            "quality": quality,
+            "summary_metrics": [],
+        }
     summaries = _currency_summary(orders, refunds, original_dimensions=True)
     quality = _sales_quality(orders, refunds, summaries)
     order_count = sum(int(row["orders"] or 0) for row in summaries)
@@ -989,10 +1067,26 @@ class DashboardMonthlySalesView(APIView):
         currencies = {}
         # The bounded store/time index avoids scanning every order in the tenant.
         from apps.reports.query_hints import bounded_fact_projection
-        with bounded_fact_projection({
-            "dataset": "sales", "filters": {"date_from": previous_day, "date_to": through},
-        }):
-            grouped = list(grouped)
+        from hashlib import sha256
+        from django.core.cache import cache
+        from django.core.exceptions import EmptyResultSet
+
+        try:
+            sql, params = grouped.query.get_compiler(using=grouped.db).as_sql()
+        except EmptyResultSet:
+            grouped = []
+        else:
+            fingerprint = sha256(repr((grouped.db, request.user.tenant_id, request.user.pk, sql, params)).encode()).hexdigest()
+            cache_key = f"dashboard-monthly-sales:v1:{fingerprint}"
+            cached = cache.get(cache_key)
+            if cached is None:
+                with bounded_fact_projection({
+                    "dataset": "sales", "filters": {"date_from": previous_day, "date_to": through},
+                }):
+                    grouped = list(grouped)
+                cache.set(cache_key, tuple(grouped), timeout=30)
+            else:
+                grouped = cached
         for row in grouped:
             currency = row["currency"] or ""
             if not currency:
@@ -1086,7 +1180,7 @@ class SalesTrendView(SalesOverviewView):
 
 
 
-def filtered_order_records(request, queryset=None):
+def filtered_order_records(request, queryset=None, *, ignore_status=False):
     if queryset is None:
         queryset = _scoped_orders(request, "sales_management.orders.view")
     scoped_orders = queryset
@@ -1117,7 +1211,7 @@ def filtered_order_records(request, queryset=None):
         )
         queryset = queryset.filter(pk__in=Subquery(items.values("sales_order_id")))
     status = request.query_params.get("status") or request.query_params.get("order_status")
-    if status:
+    if status and not ignore_status:
         queryset = queryset.filter(normalized_status=status)
     if _parse_boolean(request.query_params.get("exclude_cancelled"), "exclude_cancelled"):
         queryset = queryset.exclude(normalized_status="cancelled")
@@ -1151,7 +1245,8 @@ def filtered_order_records(request, queryset=None):
     if request.query_params.get("reminder_id"):
         from apps.integrations.feishu_reminders import apply_reminder_scope
         queryset = apply_reminder_scope(request, queryset, "orders")
-    return queryset
+    from .order_workspace_filters import filter_workspace
+    return filter_workspace(request, queryset)
 
 
 def filtered_refund_records(request, queryset=None):
@@ -1189,7 +1284,14 @@ class SalesOrderCollectionView(APIView):
     read_permission_code = "sales_management.orders.view"
 
     def get(self, request):
-        scoped_orders = _scoped_orders(request, self.read_permission_code)
+        scoped_orders = _scoped_order_facts(request, self.read_permission_code)
+        summary_mode = request.query_params.get("workspace_summary", "true")
+        if summary_mode not in {"true", "false", "only"}:
+            raise ValidationError({"workspace_summary": "无效的汇总读取方式。"})
+        if summary_mode == "only":
+            from .order_workspace_filters import workspace_summary
+            return success_response({"workspace_summary": workspace_summary(
+                request, filtered_order_records(request, scoped_orders, ignore_status=True))})
         scoped_refunds = _scoped_refunds(request, self.read_permission_code)
         item_totals = (
             SalesOrderItem.objects.filter(sales_order_id=OuterRef("pk"))
@@ -1202,7 +1304,7 @@ class SalesOrderCollectionView(APIView):
             item_count=Coalesce(Subquery(item_totals.values("quantity_sum")[:1]), 0, output_field=BigIntegerField()),
             line_count=Coalesce(Subquery(item_totals.values("line_total")[:1]), 0, output_field=BigIntegerField()),
         )
-        queryset = filtered_order_records(request, queryset)
+        selection = filtered_order_records(request, scoped_orders)
         page, page_size = _pagination(request)
         sort_fields = {
             "platform": "platform__platform_type", "store.name": "store__name",
@@ -1218,10 +1320,40 @@ class SalesOrderCollectionView(APIView):
             if field not in sort_fields:
                 raise ValidationError({"ordering": "请选择销售订单中支持排序的列。"})
             order_fields = (("-" if ordering.startswith("-") else "") + sort_fields[field], "-id")
-        queryset = queryset.prefetch_related(
+        if ordering.removeprefix("-") == "item_count":
+            selection = selection.annotate(item_count=Coalesce(
+                Subquery(item_totals.values("quantity_sum")[:1]), 0, output_field=BigIntegerField()))
+        selection = selection.order_by(*order_fields)
+        queryset = queryset.select_related(
+            "platform", "store", "authorization", "internal_sync_batch__source",
+        ).prefetch_related(
             Prefetch("refund_returns", queryset=_order_linked_refunds(request.user.tenant_id))
         ).order_by(*order_fields)
-        data = paginated_data(request, queryset, SalesOrderSerializer, page=page, page_size=page_size)
+        workspace = request.query_params.get('presentation') == 'workspace'
+        if workspace:
+            queryset = queryset.prefetch_related(Prefetch('items', queryset=_sales_item_images(
+                SalesOrderItem.objects.select_related('internal_spu', 'internal_sku'), 'sales_order')))
+        def serialize_page(page_orders, **kwargs):
+            # Resolve only this page's authorized IDs before any presentation joins.
+            ids = list(page_orders.values_list("pk", flat=True))
+            serializer = SalesOrderWorkspaceSerializer if workspace else SalesOrderSerializer
+            return serializer(queryset.filter(pk__in=ids), **kwargs)
+
+        data = paginated_data(request, selection, serialize_page,
+                              page=page, page_size=page_size)
+        if workspace:
+            from .order_workspace_filters import workspace_summary
+            if summary_mode == 'true':
+                data['workspace_summary'] = workspace_summary(request, filtered_order_records(request, scoped_orders, ignore_status=True))
+            else:
+                from .order_workspace_filters import visible_authorizations
+                data['workspace_warehouses'] = list({auth.warehouse_id: {
+                    'value': auth.warehouse_id, 'label': f'{auth.warehouse.code} · {auth.warehouse.name}',
+                } for auth in visible_authorizations(request.user)}.values())
+            from .order_warehouse_summary import attach_warehouse_summaries
+            attach_warehouse_summaries(request.user, data['results'])
+            from .order_presentation import attach_event_milestones
+            attach_event_milestones(request.user.tenant_id, data['results'])
         if not request.query_params.get("reminder_id") and request.query_params.get("include_summary", "true").lower() != "false":
             data.update(_sales_page_context(scoped_orders, scoped_refunds))
         else:
@@ -1251,7 +1383,12 @@ class SalesOrderDetailView(APIView):
             )
         )
         order = get_object_or_404(queryset, pk=pk)
-        return success_response(convert_sales_payload(request, SalesOrderDetailSerializer(order).data))
+        data = SalesOrderDetailSerializer(order).data
+        from .order_warehouse_summary import attach_warehouse_summaries
+        attach_warehouse_summaries(request.user, [data])
+        from .order_presentation import attach_event_milestones
+        attach_event_milestones(request.user.tenant_id, [data])
+        return success_response(convert_sales_payload(request, data))
 
 
 class SalesReturnCollectionView(APIView):
@@ -2104,7 +2241,10 @@ class SalesDataQualityView(APIView):
                 "summary_status": "not_requested",
             }
         else:
-            data = _sales_page_context(orders, refunds)
+            data = _sales_page_context(
+                orders, refunds,
+                quality_projection=request.query_params.get("summary_projection") == "quality",
+            )
         data.update({
             "api_status": "connected",
             "issues": DataQualityIssueSerializer(issue_rows, many=True, context={"store_identity_by_ref": store_identity_by_ref}).data,

@@ -243,7 +243,11 @@ async function loadFilterOptions() {
     if (current === filterSequence) filterError.value = reportError(failure.message, '筛选目录读取失败，请重试。');
   } finally { if (current === filterSequence) filterLoading.value = false; }
 }
-onMounted(() => { search(); loadFilterOptions(); });
+onMounted(async () => {
+  const current = sequence;
+  await loadFilterOptions();
+  if (current === sequence) search();
+});
 onBeforeUnmount(() => { sequence++; filterSequence++; });
 defineExpose({ search, data, stock, query, error, stockError });
 </script>

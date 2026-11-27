@@ -26313,6 +26313,41 @@
       "owner": "sales_management"
     },
     {
+      "route": "api/internal/commerce/orders/<int:pk>/events/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.orders.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/orders/<int:pk>/events/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.orders.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/orders/<int:pk>/events/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "route": "api/internal/commerce/orders/<int:pk>/warehouse/",
       "method": "GET",
       "action": "read",
@@ -46264,6 +46299,41 @@
       "owner": "sales_management"
     },
     {
+      "route": "api/internal/sales-management/orders/<int:pk>/events/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.orders.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/orders/<int:pk>/events/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.orders.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/orders/<int:pk>/events/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "route": "api/internal/sales-management/orders/<int:pk>/warehouse/",
       "method": "GET",
       "action": "read",
@@ -60411,5 +60481,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "545ad161a2d8ea5c191533de8bbb2f8e307eee723df9fb3b21f019b741d96d11"
+  "catalog_hash": "e9c72ace3cc5f9b9faa11b71b967e026296b1d0bf8670ea96a35dd13d57848ce"
 }

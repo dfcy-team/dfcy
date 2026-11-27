@@ -10,6 +10,7 @@ from tests.test_supply_chain_v2_costs import calculate
 
 
 @pytest.mark.django_db
+@override_settings(MONTHLY_PRODUCT_COST_ENABLED=True)
 def test_missing_non_goods_inbound_fee_does_not_block_batch_cost(world):
     actor, api, batch, line = setup_batch(world)
     receipt(world, actor, batch, line, 4, 4, 'no-fee')
@@ -55,7 +56,7 @@ def test_daily_job_creates_estimate_without_publishing_received_cost(world):
 
 
 @pytest.mark.django_db
-@override_settings(SUPPLY_MONTHLY_COST_JOBS_ENABLED=True)
+@override_settings(SUPPLY_MONTHLY_COST_JOBS_ENABLED=True, MONTHLY_PRODUCT_COST_ENABLED=True)
 def test_payment_change_appends_audit_version_without_repricing(world):
     from unittest.mock import patch
     actor, api, batch, line = setup_batch(world)

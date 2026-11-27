@@ -5,15 +5,15 @@ describe('inventory operations navigation and evidence contract', () => {
  const workbench = read('../src/views/inventory/InventoryWorkbench.vue');
  const decisions = read('../src/components/inventory/CountryInventoryDecisions.vue');
  const entry = read('../src/views/inventory/InventoryAlertList.vue');
- const alerts = read('../src/views/inventory/InventoryAlertFollowup537.vue');
+ const alerts = read('../src/views/inventory/InventoryWarningRisk537.vue');
  it('defaults to authorized operations and nests legacy views under more analysis', () => {
   expect(workbench).toContain("auth.hasPermission('sales_management.skus.view') ? 'operations' : 'snapshot'");
-  expect(entry).toContain('InventoryAlertFollowup537');
   expect(entry).toContain('InventoryWarningRisk537');
-  expect(workbench).toContain('更多分析'); expect(workbench).toContain("viewMode === 'summary'");
-  expect(alerts).toContain('label="更多分析" name="analysis"');
-  expect(alerts).toContain('label="评估状态" name="assessment"');
-  expect(alerts).toContain('label="待核对数据" name="pending"');
+  expect(entry).toContain('InventoryWarningRisk537');
+  expect(workbench).not.toContain('更多分析'); expect(workbench).toContain("viewMode === 'summary'");
+  expect(alerts).not.toContain('label="更多分析" name="analysis"');
+  expect(alerts).not.toContain('label="评估状态" name="assessment"');
+  expect(alerts).not.toContain('label="待核对数据" name="pending"');
  });
  it('keeps unknown statuses unasserted and exposes row evidence/actions', () => {
   expect(decisions).toContain('暂无销量数据');

@@ -22,6 +22,17 @@ LABELS = {'pending': '等待查询', 'running': '查询中', 'matched': '已关�
           'not_found': '仓库未查到', 'conflict': '多个仓库匹配', 'partial': '查询未完成',
           'blocked': '查询条件未就绪', 'failed': '查询失败', 'not_requested': '尚未查询', 'deferred': '待付款，暂缓查询'}
 
+WAREHOUSE_INTEGRITY_CODES = frozenset(('warehouse_time_invalid', 'warehouse_order_status_invalid', 'warehouse_items_invalid', 'warehouse_provider_unsupported', 'warehouse_order_time_future', 'warehouse_segment_package_duplicate', 'warehouse_order_changed', 'warehouse_country_mismatch', 'warehouse_page_shape_invalid', 'warehouse_page_counts_invalid', 'warehouse_total_changed', 'warehouse_order_identity_mismatch', 'warehouse_code_missing', 'warehouse_package_identity_invalid', 'warehouse_row_count_mismatch', 'warehouse_page_ended_early', 'warehouse_page_limit_exceeded'))
+
+
+def warehouse_validation_code(exc):
+    """Persist only a fixed local code; never stringify provider exceptions."""
+    try:
+        code = exc.get_codes()
+    except Exception:
+        return 'warehouse_response_invalid'
+    return code if isinstance(code, str) and code in WAREHOUSE_INTEGRITY_CODES else 'warehouse_response_invalid'
+
 
 def require_access(actor, order, *, permission_cache=None):
     if (not actor or not actor.is_active or actor.tenant_id != order.tenant_id or
@@ -295,12 +306,16 @@ def synchronize(pk, revision, *, run_guard=None):
                     '仓库令牌已过期或缺少有效期，请刷新仓库授权后重试。'
                     if exc.get_codes() == 'warehouse_token_expired'
                     else '仓库授权、只读权限或网络审批未就绪，请检查接入配置。'))
-            except ValidationError:
+            except ValidationError as exc:
                 # Only locally controlled validation messages are persisted, never upstream bodies or tokens.
+                error_code = warehouse_validation_code(exc)
                 check.update(status='failed', message=('该仓库平台的订单查询尚未适配。'
                     if authorization.provider not in {'jifeng_wms', 'best_ecapi'} else '接口响应未通过订单、包裹或分页完整性核对。'))
+                if error_code:
+                    check['error_code'] = error_code
             except Exception:
                 check.update(status='failed', message='仓库查询异常，请稍后重试。')
+                check['error_code'] = 'warehouse_query_exception'
             checks.append(check)
         if len(matches) > 1:
             state, message = 'conflict', '多个仓库返回该订单，未自动关联。'
