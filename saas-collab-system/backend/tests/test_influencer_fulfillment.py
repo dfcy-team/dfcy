@@ -456,6 +456,35 @@ def sample_warehouse(tenant, suffix):
     )
 
 
+@pytest.mark.parametrize("origin", ["pending", "in_progress"])
+def test_outreach_pause_resumes_to_original_state(origin):
+    tenant = Tenant.objects.create(name="Pause source", code="outreach-pause-source")
+    user, client = user_with_permissions(
+        tenant, "pause-source-user", "influencers.outreach.view", "influencers.outreach.manage",
+    )
+    _, _, task = base_records(tenant, user, "pause-source")
+    url = f"/api/internal/influencers/outreach-tasks/{task.pk}/"
+
+    def edit_status(status, expected_code=200):
+        task.refresh_from_db()
+        response = client.patch(url, {"status": status}, format="json", HTTP_IF_MATCH=f'"{task.version}"')
+        assert response.status_code == expected_code, response.data
+        task.refresh_from_db()
+        return response
+
+    if origin == "in_progress":
+        edit_status(origin)
+    start = task.started_at
+    response = edit_status("paused")
+    assert response.data["data"]["paused_from_pending"] is (origin == "pending")
+    assert task.status == "paused"
+    edit_status("in_progress" if origin == "pending" else "pending", 400)
+    assert task.status == "paused"
+    edit_status(origin)
+    assert task.status == origin
+    assert task.started_at == start and not task.paused_from_pending
+
+
 def test_outreach_task_list_returns_existing_rows():
     tenant = Tenant.objects.create(name="Task list tenant", code="task-list-visible")
     user, client = user_with_permissions(

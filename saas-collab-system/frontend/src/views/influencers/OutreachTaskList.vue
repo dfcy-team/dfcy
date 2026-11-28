@@ -16,21 +16,7 @@
       <div><span>送样记录（接口当前页）</span><strong>{{ displayValue(taskStats.fulfillments) }}</strong></div>
     </div>
     <div class="activity-board">
-    <section class="activity" aria-labelledby="priority-title">
-      <div class="activity-heading"><h2 id="priority-title">重点建联任务</h2></div>
-      <p v-if="activityError || priorityLoadError" class="activity-message" role="status">未能加载重点任务，请刷新动态重试。</p>
-      <p v-else-if="!priorityTasks.urgent.length && !priorityTasks.high.length" class="activity-message">{{ activityLoading ? '正在加载重点任务…' : '暂无紧急或高优先级任务' }}</p>
-      <div v-else class="priority-groups">
-        <div v-for="priority in ['urgent', 'high']" v-show="priorityTasks[priority].length" :key="priority" class="priority-group">
-          <h3><el-tag size="small" :type="priorityTagType(priority)">{{ OUTREACH_PRIORITY_LABELS[priority] }}</el-tag></h3>
-          <ul class="activity-list">
-            <li v-for="task in priorityTasks[priority]" :key="task.id" class="priority-task">
-              <strong>{{ task.task_no }}</strong><span>{{ displayValue(task.task_name) }}</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-    </section>
+    <PriorityTaskCarousel :groups="priorityTasks" :loading="activityLoading" :error="activityError || priorityLoadError" />
     <section class="activity" aria-labelledby="activity-title">
       <div class="activity-heading">
         <h2 id="activity-title">最新运营要求 / 任务动态</h2>
@@ -54,7 +40,6 @@
     </div>
     <p class="metrics-note">下发人和正常任务筛选适用于全部有权查看的记录；除任务总数外，其余指标按当前页统计。</p>
 
-    <PriorityTaskCarousel :groups="priorityTasks" :loading="priorityLoading" :error="priorityError" />
     <el-card class="workspace-card" shadow="never">
       <div class="toolbar">
         <el-input
@@ -497,19 +482,6 @@ const rows = ref([]);
 const recentRequirements = ref([]);
 const priorityTasks = ref({ urgent: [], high: [] });
 const priorityLoadError = ref(false);
-const priorityLoading = ref(false);
-const priorityError = ref(false);
-async function loadPriorityTasks() {
-  priorityLoading.value = true;
-  try {
-    const response = await fetchOutreachTasks({ priority_only: 'true' });
-    const grouped = response.data?.priority_tasks;
-    if (!response.success || !Array.isArray(grouped?.urgent) || !Array.isArray(grouped?.high)) throw new Error('Invalid priority data');
-    priorityTasks.value = grouped;
-    priorityError.value = false;
-  } catch { priorityError.value = true; }
-  finally { priorityLoading.value = false; }
-}
 const activityLoading = ref(false);
 const activityError = ref(false);
 let activityTimer;
@@ -642,14 +614,15 @@ const sampleRecordTargetReached = (row) => Number(row?.target_count || 0) > 0 &&
 const progressLabel = (row) => sampleProgressLabel(row);
 const priorityTagType = (priority) => ({ urgent: 'danger', high: 'warning', low: 'info', normal: 'success' }[priority] || 'info');
 const taskStatusTransitions = {
-  pending: ['in_progress', 'cancelled'],
+  pending: ['in_progress', 'paused', 'cancelled'],
   in_progress: ['paused', 'completed', 'cancelled'],
   paused: ['in_progress', 'cancelled'],
   completed: ['in_progress'],
   cancelled: []
 };
-const taskStatusActionLabel = (status, row) => ({ in_progress: row?.status === 'completed' ? '重新打开任务' : row?.status === 'paused' ? '恢复任务' : '开始任务', paused: '暂停任务', completed: '完成任务', cancelled: '取消任务' }[status] || statusLabel(OUTREACH_STATUS_LABELS, status));
-const nextTaskStatuses = (row) => taskStatusTransitions[row?.status] || [];
+const taskStatusActionLabel = (status, row) => ({ pending: '恢复为待开始', in_progress: row?.status === 'completed' ? '重新打开任务' : row?.status === 'paused' ? '恢复任务' : '开始任务', paused: '暂停任务', completed: '完成任务', cancelled: '取消任务' }[status] || statusLabel(OUTREACH_STATUS_LABELS, status));
+const nextTaskStatuses = (row) => row?.status === 'paused' && row.paused_from_pending
+  ? ['pending', 'cancelled'] : taskStatusTransitions[row?.status] || [];
 const editableTaskStatuses = computed(() => {
   const current = editingTask.value?.status || 'pending';
   return [current, ...nextTaskStatuses(editingTask.value)].filter((value, index, values) => values.indexOf(value) === index);
@@ -1337,13 +1310,6 @@ onUnmounted(() => window.clearInterval(activityTimer));
 .activity-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .activity-heading h2 { margin: 0; font-size: 14px; color: #14594c; }
 .activity-list { margin: 4px 0 0; padding: 0; list-style: none; }
-.priority-groups { display: grid; gap: 5px; margin-top: 5px; }
-.priority-group { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 6px; align-items: start; }
-.priority-group h3 { margin: 3px 0 0; font-size: 12px; }
-.priority-group .activity-list { margin: 0; }
-.priority-task { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; color: #334155; font-size: 12px; }
-.priority-task strong { flex-shrink: 0; font-variant-numeric: tabular-nums; }
-.priority-task span { min-width: 0; overflow-wrap: anywhere; }
 .activity-message { margin: 8px 0; font-size: 12px; color: #64748b; }
 .activity-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 3px; border: 0; border-radius: 5px; background: transparent; color: #334155; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
 .activity-row:hover, .activity-row:focus-visible { background: #f0f7f4; }
