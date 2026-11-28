@@ -6,7 +6,7 @@
     <p class="hint">{{data?.amount_basis}} 预付款抵扣单独展示，不重复计入已付现金。采购未付与发货单未付属于不同业务阶段，不相加。</p>
     <div class="summary-grid" v-loading="loading">
       <section v-for="(label,key) in summaryLabels" :key="key" class="summary-card">
-          <header><h3>{{label}}</h3><div><el-button v-if="key==='supplier'" link type="primary" @click="differencesOpen=true">入库差异</el-button><el-button v-if="key==='supplier'" link type="primary" @click="openGroup('deposit')">采购预付款</el-button><el-button link type="primary" @click="openMonthly(key)">月份对账</el-button><el-button link type="primary" @click="openGroup(key)">查看全部单据 →</el-button></div></header>
+          <header><h3>{{label}}</h3><div><el-button v-if="key==='supplier'" link type="primary" @click="receiptDifferencesOpen=true">入库差异</el-button><el-button v-if="key==='supplier'" link type="primary" @click="openGroup('deposit')">采购预付款</el-button><el-button link type="primary" @click="openMonthly(key)">月份对账</el-button><el-button link type="primary" @click="openGroup(key)">查看全部单据 →</el-button></div></header>
         <template v-if="data?.groups?.[key]">
           <div class="metrics overview-totals">
             <template v-if="key==='supplier'"><span>总采购金额<b>{{money(data.groups[key].purchase_total_amount)}}</b></span><span>总发货金额<b>{{money(data.groups[key].shipment_total_amount)}}</b></span></template>
@@ -27,7 +27,7 @@
             <el-table-column label="剩余应付" min-width="130"><template #default="{row}">{{money(key==='supplier'?row.payable_amount:row.unsettled)}}</template></el-table-column>
             <el-table-column label="付款" min-width="100"><template #default="{row}"><el-button v-if="key!=='deposit' && (row.party_id||row.id)" link @click="goPay(key,row.party_id||row.id,row.name,row.party_type)">去付款</el-button></template></el-table-column>
           </el-table></div></details>
-        </template><p v-else class="hint">暂无该类汇总</p>
+        </template><p v-else class="hint">{{loading?'正在读取该类汇总…':error?'该类汇总未能读取，请点击刷新重试':'暂无该类汇总'}}</p>
       </section>
       <SupplierDepositLedgerV2 class="summary-card" :country-id="country" />
     </div>
@@ -40,11 +40,11 @@
       <p v-if="listSummary" class="hint">以上合计覆盖当前筛选的全部单据，不仅是本页。</p>
       <div v-if="listSummary" class="metrics"><span>对公已付<b>{{money(listSummary.corporate_paid)}}</b></span><span>对私已付<b>{{money(listSummary.personal_paid)}}</b></span><span>未分类已付（含期初）<b>{{money(listSummary.unknown_paid)}}</b></span></div>
       <el-alert v-if="listError" :title="listError" type="error" :closable="false"/>
-      <el-table :data="rows" border v-loading="listLoading" empty-text="当前范围没有单据">
-        <el-table-column label="单号" min-width="180"><template #default="{row}"><el-button link type="primary" @click="emit('open',row)">{{row.number}}</el-button></template></el-table-column>
-        <el-table-column label="单据时间" min-width="175"><template #default="{row}">{{formatDocumentTime(row.document_time)}}</template></el-table-column>
-        <el-table-column prop="country_name" label="国家" min-width="110"/><el-table-column label="供应商 / 货运公司" min-width="150"><template #default="{row}"><el-button v-if="row.party_id" link type="primary" @click="openGroup(queue,{party_id:row.party_id,name:row.party_name})">{{row.party_name}}</el-button><span v-else>{{row.party_name}}</span></template></el-table-column>
-        <el-table-column v-for="f in columns" :key="f.key" :label="f.label" min-width="125"><template #default="{row}">{{money(row[f.key])}}</template></el-table-column>
+      <el-table :data="rows" @sort-change="tableSortChanged" border v-loading="listLoading" empty-text="当前范围没有单据">
+        <el-table-column prop="number" sortable="custom" label="单号" min-width="180"><template #header><span>单号</span></template><template #default="{row}"><el-button link type="primary" @click="emit('open',row)">{{row.number}}</el-button></template></el-table-column>
+        <el-table-column prop="document_time" sortable="custom" label="单据时间" min-width="175"><template #header><span>单据时间</span></template><template #default="{row}">{{formatDocumentTime(row.document_time)}}</template></el-table-column>
+        <el-table-column prop="country_name" sortable="custom" label="国家" min-width="110"><template #header><span>国家</span></template></el-table-column><el-table-column prop="party_name" sortable="custom" label="供应商 / 货运公司" min-width="150"><template #header><span>供应商 / 货运公司</span></template><template #default="{row}"><el-button v-if="row.party_id" link type="primary" @click="openGroup(queue,{party_id:row.party_id,name:row.party_name})">{{row.party_name}}</el-button><span v-else>{{row.party_name}}</span></template></el-table-column>
+        <el-table-column v-for="f in columns" :key="f.key" :prop="f.key" sortable="custom" :label="f.label" min-width="125"><template #header><span>{{f.label}}</span></template><template #default="{row}">{{money(row[f.key])}}</template></el-table-column>
         <el-table-column label="实际付款构成" min-width="185">
           <template #default="{row}">
             <div v-if="isNonzero(row.corporate_paid)">对公 {{money(row.corporate_paid)}}</div>
@@ -66,26 +66,26 @@
     </section>
     <p v-else class="hint">点击汇总金额或“查看全部单据”读取明细；点击单位排行可查看该单位跨单据对账。</p>
     <BatchPaymentsV2 v-if="batchParty || batchRequestId" :party-kind="batchParty?.kind" :party-id="batchParty?.id" :party-name="batchParty?.name" :request-id="batchRequestId" @updated="refreshAfterUpdate"/>
-    <ReceiptDifferencesV2 v-model="differencesOpen" :country-id="country" @open="row=>emit('open',row)" @updated="refreshAfterUpdate"/><MonthlyPayablesV2 v-model="monthlyOpen" :queue="monthlyQueue" :country-id="country" :party-id="monthlyPartyId" :party-name="monthlyPartyName" :party-type="monthlyPartyType" @open="row=>emit('open',row)"/>
+    <ReceiptDifferencesV2 v-model="receiptDifferencesOpen" :country-id="country" @open="row=>emit('open',row)" @updated="refreshAfterUpdate"/>
+    <MonthlyPayablesV2 v-model="monthlyOpen" :queue="monthlyQueue" :country-id="country" :party-id="monthlyPartyId" :party-name="monthlyPartyName" :party-type="monthlyPartyType" @open="row=>emit('open',row)"/>
     <p v-for="note in data?.notices||[]" :key="note" class="hint">{{note}}</p>
   </section>
 </template>
 <script setup>
+import ReceiptDifferencesV2 from './ReceiptDifferencesV2.vue';
 import {formatDocumentTime} from '../../utils/supplyDocumentTime';
 import {computed,onUnmounted,ref,watch} from 'vue';
 import {useRouter,useRoute} from 'vue-router';
 import BatchPaymentsV2 from './BatchPaymentsV2.vue';
 import PaymentRemindersV2 from './PaymentRemindersV2.vue';
 import SupplierDepositLedgerV2 from './SupplierDepositLedgerV2.vue';
-import ReceiptDifferencesV2 from './ReceiptDifferencesV2.vue';
 import MonthlyPayablesV2 from './MonthlyPayablesV2.vue';
 import {fetchDashboard,fetchDashboardQueue} from '../../api/supplyDashboardV2';
 import {useAuthStore} from '../../stores/auth';
 import {cockpitActorKey} from '../../utils/cockpitDraft';
 const props=defineProps({overview:Object,countryId:[String,Number]});
-const differencesOpen=ref(false);
 const emit=defineEmits(['open']);
-const reminders=ref(null);
+const reminders=ref(null),receiptDifferencesOpen=ref(false);
 const monthlyOpen=ref(false),monthlyQueue=ref('supplier'),monthlyPartyId=ref(null),monthlyPartyName=ref(''),monthlyPartyType=ref('');
 const router=useRouter(),route=useRoute(),batchParty=ref(null),batchRequestId=ref(null);
 function goPay(queue,id,name,partyType=''){const partyKind=queue==='supplier'||(queue==='domestic'&&partyType==='supplier')?'supplier':'freight_company';if(props.overview){router.push({path:'/supply-chain/costs',query:{tab:'reconciliation',party_kind:partyKind,party_id:id,party_name:name||''}});return;}batchParty.value={kind:partyKind,id,name};batchRequestId.value=null;}
@@ -94,6 +94,9 @@ const auth=useAuthStore(),localCountry=ref(''),ownData=ref(null),data=computed((
 const labels={supplier:'供应商货款',domestic:'国内运费',carrier:'批次货运费',clearance:'入库清关费用',deposit:'采购预付款'};
 const {deposit: prepaymentLabel, ...summaryLabels}=labels;
 const totalLabels={domestic:'总国内运费',carrier:'总批次货运费',clearance:'总入库清关费',deposit:'总采购金额'};
+const columnFilters=ref({}),tableSort=ref({});
+function tableSortChanged({prop,order}){tableSort.value=order?{sort_by:prop,sort_order:order}:{};resetList();}
+function tableParameters(){return {...tableSort.value};}
 const paymentNature=ref(''),paymentItem=ref(''),itemStatus=ref('');
 const columns=[{key:'due_amount',label:'应付 / 采购金额'},{key:'opening_amount',label:'历史期初已付'},{key:'paid_amount',label:'已付（含期初）'},{key:'applied_amount',label:'预付款抵扣'},{key:'remaining_amount',label:'剩余应付'}];
 const loading=ref(false),error=ref(''),opened=ref(false),queue=ref('supplier'),status=ref('all'),search=ref(''),partyId=ref(null),partyName=ref(''),rows=ref([]),total=ref(0),page=ref(1),listLoading=ref(false),listError=ref(''),listSummary=ref(null);
@@ -105,12 +108,12 @@ function openPayment(row) {
   emit('open', {...row, initialPanel: 'payment'});
 }
 function openMonthly(key,id=null,name='',partyType=''){monthlyQueue.value=key;monthlyPartyId.value=id;monthlyPartyName.value=name;monthlyPartyType.value=partyType;monthlyOpen.value=true;}
-async function reload(keepList=false){const token=++generation;if(!keepList){listGeneration++;opened.value=false;rows.value=[];}loading.value=true;error.value='';ownData.value=null;try{const r=await fetchDashboard({section:'costs',...(country.value?{country_id:country.value}:{})});if(token!==generation)return;if(!r?.success)throw new Error(r?.message||'结算汇总读取失败');ownData.value=r.data;}catch(e){if(token===generation)error.value=e.message;}finally{if(token===generation)loading.value=false;}}
-async function loadList(){const token=++listGeneration;rows.value=[];listSummary.value=null;listLoading.value=true;listError.value='';try{const r=await fetchDashboardQueue({queue:queue.value,status:status.value,...(itemStatus.value?{item_status:itemStatus.value}:{}),search:search.value,...(paymentNature.value?{payment_nature:paymentNature.value}:{}),...(paymentItem.value.trim()?{payment_item:paymentItem.value.trim()}:{}),limit:20,offset:(page.value-1)*20,...(country.value?{country_id:country.value}:{}),...(partyId.value?{party_id:partyId.value}:{}),...(queue.value==='domestic'&&monthlyPartyType.value?{party_type:monthlyPartyType.value}:{})});if(token!==listGeneration)return;if(!r?.success)throw new Error(r?.message||'对账单据读取失败');rows.value=r.data||[];total.value=Number(r.count||0);listSummary.value=r.summary||null;}catch(e){if(token===listGeneration)listError.value=e.message;}finally{if(token===listGeneration)listLoading.value=false;}}
+async function reload(keepList=false){const token=++generation;if(!keepList){listGeneration++;opened.value=false;rows.value=[];}loading.value=true;error.value='';ownData.value={groups:{}};const failures=[];const groups=['supplier','domestic','carrier','clearance'];let cursor=0;async function worker(){while(cursor<groups.length){const group=groups[cursor++];try{const r=await fetchDashboard({section:'costs',costs_group:group,...(country.value?{country_id:country.value}:{})});if(token!==generation)return;if(!r?.success)throw new Error(r?.message||'结算汇总读取失败');ownData.value={...ownData.value,...r.data,notices:[...new Set([...(ownData.value.notices||[]),...(r.data.notices||[])])],groups:{...ownData.value.groups,...r.data.groups}};}catch(e){if(token===generation)failures.push(`${summaryLabels[group]}: ${e.message}`);}}}await Promise.all([worker(),worker()]);if(token===generation){error.value=failures.join('；');loading.value=false;}}
+async function loadList(){const token=++listGeneration;rows.value=[];listSummary.value=null;listLoading.value=true;listError.value='';try{const r=await fetchDashboardQueue({...tableParameters(),queue:queue.value,status:status.value,...(itemStatus.value?{item_status:itemStatus.value}:{}),search:search.value,...(paymentNature.value?{payment_nature:paymentNature.value}:{}),...(paymentItem.value.trim()?{payment_item:paymentItem.value.trim()}:{}),limit:20,offset:(page.value-1)*20,...(country.value?{country_id:country.value}:{}),...(partyId.value?{party_id:partyId.value}:{}),...(queue.value==='domestic'&&monthlyPartyType.value?{party_type:monthlyPartyType.value}:{})});if(token!==listGeneration)return;if(!r?.success)throw new Error(r?.message||'对账单据读取失败');rows.value=r.data||[];total.value=Number(r.count||0);listSummary.value=r.summary||null;}catch(e){if(token===listGeneration)listError.value=e.message;}finally{if(token===listGeneration)listLoading.value=false;}}
 async function refreshAfterUpdate(){await reminders.value?.refresh();if(!props.overview)await reload(true);if(opened.value)await loadList();}
-function openGroup(key,party){queue.value=key;partyId.value=party?.party_id||party?.id||null;partyName.value=party?.name||'';monthlyPartyType.value=party?.party_type||party?.party_kind||'';status.value='all';search.value='';paymentNature.value='';paymentItem.value='';itemStatus.value='';page.value=1;opened.value=true;return loadList();}
+function openGroup(key,party){columnFilters.value={};queue.value=key;partyId.value=party?.party_id||party?.id||null;partyName.value=party?.name||'';monthlyPartyType.value=party?.party_type||party?.party_kind||'';status.value='all';search.value='';paymentNature.value='';paymentItem.value='';itemStatus.value='';page.value=1;opened.value=true;return loadList();}
 function resetList(){page.value=1;return loadList();}
-function changeKind(){paymentNature.value='';paymentItem.value='';itemStatus.value='';partyId.value=null;partyName.value='';return resetList();}
+function changeKind(){columnFilters.value={};paymentNature.value='';paymentItem.value='';itemStatus.value='';partyId.value=null;partyName.value='';return resetList();}
 function clearParty(){partyId.value=null;partyName.value='';return resetList();}
 function changePage(value){if(value===page.value)return;page.value=value;return loadList();}
 watch(()=>[props.countryId,props.overview],()=>{listGeneration++;opened.value=false;rows.value=[];if(!props.overview)reload();},{immediate:true});

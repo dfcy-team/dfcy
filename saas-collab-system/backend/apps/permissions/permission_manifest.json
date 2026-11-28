@@ -4184,6 +4184,22 @@
       "owner": "products"
     },
     {
+      "code": "menu.products.inventory_cost_ledger.view",
+      "name": "库存成本台账",
+      "module": "products",
+      "action": "inventory_cost_ledger.view",
+      "permission_type": "menu",
+      "description": "显示库存成本台账入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/inventory/cost-ledger",
+      "menu_code": "menu.products.inventory_cost_ledger.view",
+      "resource_code": "inventory_cost_ledger",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "products"
+    },
+    {
       "code": "menu.products.products_attributes.view",
       "name": "属性设置",
       "module": "products",
@@ -60481,5 +60497,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "e9c72ace3cc5f9b9faa11b71b967e026296b1d0bf8670ea96a35dd13d57848ce"
+  "catalog_hash": "e84ec3554ae9e5909707f7c81303f4eb71a973ad07979141652669aba1909ce5"
 }

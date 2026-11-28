@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildMenuPermissionRegistry } from '../src/router/menuRegistry';
-import { menuItems, canAccessPath, filterMenuItems, flattenMenuItems } from '../src/router/menu';
+import { menuItems, canAccessPath, filterMenuItems, filterSidebarMenuItems, flattenMenuItems } from '../src/router/menu';
 
 const canonical = { path: '/costs', label: 'Costs', menuPermissions: ['menu.products.costs.view'], permissions: ['products.cost.view'] };
 const alias = { ...canonical, path: '/inventory/costs', menuAlias: '/costs', label: 'Ledger' };
@@ -34,5 +34,30 @@ describe('explicit menu aliases preserve grants without registry collisions', ()
   it('continues to flag ordinary duplicate-code collisions', () => {
     const rows = buildMenuPermissionRegistry([canonical, { ...alias, menuAlias: undefined }]);
     expect(rows[0].metadata.registry_collision).toBe(true);
+  });
+});
+
+const oldCode = 'menu.products.products_costs.view';
+const ledgerCode = 'menu.products.inventory_cost_ledger.view';
+describe('ledger permission revision preserves existing role access', () => {
+  it.each([
+    ['old', [oldCode], [], [], true, true, true],
+    ['new', [ledgerCode], [], [], true, true, false],
+    ['both', [oldCode, ledgerCode], [], [], true, true, true],
+    ['none', [], [], [], false, false, false],
+    ['new hidden', [oldCode, ledgerCode], [ledgerCode], [], false, true, true],
+    ['new inactive', [oldCode, ledgerCode], [], [ledgerCode], false, false, true],
+  ])('%s', (_name, grants, hidden, inactive, sidebar, ledger, costs) => {
+    const user = { user_type: 'internal', menu_permission_codes: grants, action_permission_codes: [], permissions: [], hidden_menu_permission_codes: hidden, inactive_permission_codes: inactive };
+    expect(flattenMenuItems(filterSidebarMenuItems(user)).some(item => item.path === '/inventory/cost-ledger')).toBe(sidebar);
+    expect(canAccessPath(user, '/inventory/cost-ledger')).toBe(ledger);
+    expect(canAccessPath(user, '/products/costs')).toBe(costs);
+  });
+  it('preserves legacy union action access', () => {
+    const user = { user_type: 'internal', permissions: [ledgerCode, 'products.cost.view'] };
+    expect(canAccessPath(user, '/inventory/cost-ledger')).toBe(true);
+    expect(canAccessPath(user, '/products/costs')).toBe(true);
+    user.permissions = [oldCode, 'products.cost.view'];
+    expect(canAccessPath(user, '/inventory/cost-ledger')).toBe(true);
   });
 });

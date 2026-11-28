@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "e9c72ace3cc5f9b9faa11b71b967e026296b1d0bf8670ea96a35dd13d57848ce",
+  "catalog_hash": "e84ec3554ae9e5909707f7c81303f4eb71a973ad07979141652669aba1909ce5",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -753,6 +753,10 @@
     {
       "file": "src/router/menu.js",
       "permission_code": "menu.products.decision_lifecycle_reviews.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.products.inventory_cost_ledger.view"
     },
     {
       "file": "src/router/menu.js",
@@ -1907,5 +1911,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "93abda7e2a35dd5014b423b7e0c086f9d19b9eed12d5f5a50bdb47c1f4677b60"
+  "surface_hash": "bb96c26a971ac8c8e3248f4d0812b633b04e212f8444fb9d8bcae4da8ee2f154"
 }

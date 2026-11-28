@@ -32,13 +32,26 @@ describe('cost and settlement single entry',()=>{
     const wrapper=shallowMount(SupplyCostsV2,{global:{directives:{loading:()=>{}}}});await flushPromises();
     expect(wrapper.vm.kind).toBe('inbound');expect(wrapper.vm.selected).toMatchObject({kind:'inbound',id:11});wrapper.unmount();
   });
+  it('loads the linked document list once and reloads when its kind changes',async()=>{
+    mocks.query={kind:'batch',id:'11'};
+    mocks.targets.mockImplementation(async({kind})=>({...ok([{id:11,number:kind}]),count:1}));
+    const wrapper=shallowMount(SupplyCostsV2,{global:{directives:{loading:()=>{}}}});await flushPromises();
+    expect(mocks.targets).toHaveBeenCalledTimes(1);
+    expect(mocks.targets).toHaveBeenLastCalledWith(expect.objectContaining({kind:'batch',offset:0}));
+    expect(wrapper.vm.targets).toEqual([expect.objectContaining({kind:'batch',number:'batch'})]);
+    Object.assign(mocks.query,{kind:'inbound',id:'12'});wrapper.vm.openLinked();await flushPromises();
+    expect(mocks.targets).toHaveBeenCalledTimes(2);
+    expect(mocks.targets).toHaveBeenLastCalledWith(expect.objectContaining({kind:'inbound',offset:0}));
+    expect(wrapper.vm.targets).toEqual([expect.objectContaining({kind:'inbound',number:'inbound'})]);
+    expect(mocks.context).not.toHaveBeenCalled();expect(mocks.payments).not.toHaveBeenCalled();wrapper.unmount();
+  });
   it('rejects invalid linked IDs without fetching a detail',async()=>{
     mocks.query={kind:'batch',id:'oops'};
     const wrapper=shallowMount(SupplyCostsV2,{global:{directives:{loading:()=>{}}}});await flushPromises();
     expect(mocks.context).not.toHaveBeenCalled();expect(wrapper.vm.selected).toBeNull();wrapper.unmount();
   });
-  it.each(['purchase','domestic_freight'])('opens %s payment process through a direct link',async(kind)=>{
+  it.each(['purchase','domestic_freight','domestic_expense'])('opens %s payment process through a direct link',async(kind)=>{
     mocks.query={kind,id:'12'};const w=shallowMount(SupplyCostsV2,{global:{directives:{loading:()=>{}}}});await flushPromises();
-    expect(mocks.payments).toHaveBeenCalledWith(kind,12);expect(mocks.context).not.toHaveBeenCalled();expect(w.vm.selected).toMatchObject({kind,id:12});w.unmount();
+    expect(mocks.payments).not.toHaveBeenCalled();expect(mocks.context).not.toHaveBeenCalled();expect(w.vm.selected).toMatchObject({kind,id:12});w.unmount();
   });
 });

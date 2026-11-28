@@ -57,7 +57,7 @@
         <ShipmentDomesticExpenses ref="domesticExpenses" :transport-defaults="domesticTransport?.form" hide-save v-if="current.id && !supplier" :key="current.id" :shipment="current"
           :editable="canManage && ['draft','submitted'].includes(current.status)" :disabled="busy" @updated="onDomesticUpdated"/>
         <el-button v-if="current.id && !supplier && canManage && ['draft','submitted'].includes(current.status)" type="primary" :loading="domesticSaving" :disabled="busy" @click="saveDomesticAll">保存运输与费用</el-button>
-        <p v-else class="sub">保存发货草稿后可选择国内承运商和填写运单号。</p>
+        <p v-if="!current.id" class="sub">保存发货草稿后可选择国内承运商和填写运单号。</p>
         <section v-if="current.status==='draft' && canEdit" class="draft-steps" aria-label="发货草稿步骤"><strong>发货流程</strong><span>1 保存草稿</span><i>→</i><span>2 上传全部箱号文件</span><i>→</i><span>3 提交发货</span></section>
         <el-descriptions v-if="current.status==='submitted'" border :column="2" class="notice">
           <el-descriptions-item label="批次物流状态">{{ logisticsText(current.logistics_stage) }}</el-descriptions-item>
@@ -157,7 +157,7 @@ import { useAuthStore } from '../../stores/auth';
 
 const props = defineProps({ supplier: { type: Boolean, default: false } });
 const domesticTransport=ref(null), domesticExpenses=ref(null), domesticSaving=ref(false);
-async function saveDomesticAll(){ if(domesticSaving.value)return;domesticSaving.value=true;try{if(await domesticTransport.value?.save()){await nextTick();await domesticExpenses.value?.save();}}finally{domesticSaving.value=false;} }
+async function saveDomesticAll(){ if(domesticSaving.value)return;domesticSaving.value=true;try{if(!await domesticTransport.value?.save()){ElMessage.error('运输信息未保存，请检查运输区域提示');return;}await nextTick();if(!await domesticExpenses.value?.save()){ElMessage.warning('运输信息已处理，费用未保存；请检查费用区域提示，填写内容仍保留');return;}ElMessage.success('运输与费用已保存');}catch(e){ElMessage.error(e.message||'保存失败，请检查单据状态后重试');}finally{domesticSaving.value=false;} }
 function onDomesticUpdated(data){if(current.value){Object.assign(current.value,data);const row=shipments.value.find(r=>r.id===current.value.id);if(row)Object.assign(row,data);}}
 const route = useRoute();
 const auth=useAuthStore();

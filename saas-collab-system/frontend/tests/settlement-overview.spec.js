@@ -48,3 +48,16 @@ it('shows totals and actual cash before remaining, without adding deposit offset
  expect(text.indexOf('已付款金额')).toBeLessThan(text.indexOf('剩余应付'));
  w.unmount();
 });
+
+describe('group response notices',()=>{
+ it.each([true,false])('preserves accounting notices when supplier arrives first: %s',async(supplierFirst)=>{
+  const pending={};m.fetch.mockReset().mockImplementation(({costs_group})=>new Promise(resolve=>{pending[costs_group]=resolve;}));
+  const w=mount(Overview,{global:{stubs:{PaymentRemindersV2:true,MonthlyPayablesV2:true,SupplierDepositLedgerV2:true,'el-select':true,'el-input':true,'el-button':true,'el-table':true,'el-pagination':true,'el-alert':true},directives:{loading:{}}}});
+  await flushPromises();
+  const reply=group=>pending[group]({success:true,data:{groups:{[group]:{ranking:[]}},notices:group==='supplier'?['Accounting limitation retained']:[]}});
+  if(supplierFirst){reply('supplier');await flushPromises();reply('domestic');}
+  else{reply('domestic');await flushPromises();reply('supplier');}
+  await flushPromises();reply('carrier');reply('clearance');await flushPromises();
+  expect(w.text()).toContain('Accounting limitation retained');expect(m.fetch).toHaveBeenCalledTimes(4);w.unmount();
+ });
+});

@@ -43,7 +43,7 @@ function add(name = '国内运费') {
     payee_type: defaults.domestic_freight_settlement_mode !== 'company_direct' ? 'supplier' : 'carrier',
     payee_id: defaults.domestic_freight_settlement_mode !== 'company_direct'
       ? props.shipment.supplier_id : defaults.domestic_carrier_id,
-    include_in_cost: true, method: 'quantity', notes: '' });
+    include_in_cost: true, method: 'volume', notes: '' });
 }
 async function save() {
   if (loading.value || !loaded.value) { error.value = '费用尚未成功加载，请关闭重开后重试'; return false; }

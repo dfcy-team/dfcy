@@ -37,7 +37,7 @@ export const menuItems = [
     internal: true,
     permissions: ['sales_management.view', 'alerts.view', 'replenishment.view', 'products.cost.view'],
     children: [
-      { menuAlias: '/products/costs', menuPermissions: ['menu.products.products_costs.view'], path: '/inventory/cost-ledger', label: '库存成本台账', permissions: ['products.cost.view'] },
+      { menuPermissions: ['menu.products.inventory_cost_ledger.view'], path: '/inventory/cost-ledger', label: '库存成本台账', permissions: ['products.cost.view'] },
       { menuPermissions: ["menu.sales_management.inventory_workbench.view"], path: '/inventory/workbench', label: '库存工作台', permissions: ['sales_management.view'] },
       { menuPermissions: ['menu.sales_management.warehouse_details.view'], path: '/inventory/warehouse-details', label: '仓库库存明细', permissions: ['sales_management.view'] },
       { menuPermissions: ['menu.sales_management.category_inventory.view'], path: '/inventory/category-query', label: '分类库存查询', sidebarHidden: true, secondaryTo: '/inventory/warehouse-details', permissions: ['sales_management.view'], allPermissions: ['sales_management.skus.view'] },
@@ -374,7 +374,7 @@ export const routeCapabilities = [
   { path: '/analytics/sales', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/inventory', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/inventory/category-query', permissions: ['sales_management.view'], allPermissions: ['sales_management.skus.view'], userTypes: ['internal'] },
-  { path: '/inventory/cost-ledger', permissions: ['products.cost.view'], menuPermissions: ['menu.products.products_costs.view'], userTypes: ['internal'] },
+  { path: '/inventory/cost-ledger', permissions: ['products.cost.view'], menuPermissions: ['menu.products.inventory_cost_ledger.view'], userTypes: ['internal'] },
   { path: '/inventory/workbench', permissions: ['sales_management.view'], userTypes: ['internal'] },
   { path: '/inventory/warehouse-details', permissions: ['sales_management.view'], menuPermissions: ['menu.sales_management.warehouse_details.view'], userTypes: ['internal'] },
   { path: '/inventory/movements', permissions: ['sales_management.view'], allPermissions: ['supply.v2.view'], userTypes: ['internal'] },
@@ -585,11 +585,24 @@ function isViewPermission(code) {
   return String(code || '').endsWith('.view');
 }
 
+// New independent ledger registration; preserve old roles without DB grants.
+// Explicit new-code visibility/retirement decisions take priority over fallback.
+function runtimeMenuCodes(user, capability) {
+  const codes = capability?.menuPermissions?.length ? capability.menuPermissions : menuPermissionCodesForItem(capability);
+  const current = 'menu.products.inventory_cost_ledger.view';
+  const legacy = 'menu.products.products_costs.view';
+  if (capability?.path !== '/inventory/cost-ledger' || !codes.includes(current)) return codes;
+  const grants = new Set(Array.isArray(user?.menu_permission_codes) ? user.menu_permission_codes : (user?.permissions || []));
+  if (grants.has(current) || (user?.hidden_menu_permission_codes || []).includes(current)
+    || (user?.inactive_permission_codes || []).includes(current)) return [current];
+  return grants.has(legacy) ? [legacy] : [current];
+}
+
 function menuGrantedViewPermissions(user, capability) {
   if (!Array.isArray(user?.menu_permission_codes) || !capability?.path) return new Set();
   const entry = findMenuEntry(capability.path);
   const grantedMenus = new Set(user.menu_permission_codes);
-  const menuCodes = new Set(capability.menuPermissions || entry?.menuPermissions || []);
+  const menuCodes = new Set(runtimeMenuCodes(user, capability.menuPermissions?.length ? capability : (entry || capability)));
   return new Set(
     menuPermissionRegistry
       .filter((definition) => menuCodes.has(definition.code) && grantedMenus.has(definition.code))
@@ -602,7 +615,7 @@ function canAccessCapability(user, capability, { menuEntry = false } = {}) {
   const apiManagement = capability.path?.startsWith('/integrations/') && (capability.permissions || []).some(isApiAccessPermission);
   if (apiManagement && capability.path !== '/integrations/developer-apps' && !isApiAccessAdmin(user)) return false;
   const retired = new Set(user.inactive_permission_codes || []);
-  const menuCodes = capability.menuPermissions?.length ? capability.menuPermissions : menuPermissionCodesForItem(capability);
+  const menuCodes = runtimeMenuCodes(user, capability);
   if (menuCodes.length && menuCodes.every((code) => retired.has(code))) return false;
   if (capability.permissions?.length && capability.permissions.every((code) => retired.has(code))) return false;
   if (capability.allPermissions?.some((code) => retired.has(code))) return false;
@@ -627,7 +640,7 @@ function canAccessCapability(user, capability, { menuEntry = false } = {}) {
   const menuPermissions = new Set(hasMenuSurface ? user.menu_permission_codes : (user.permissions || []));
   const actionPermissions = new Set(hasActionSurface ? user.action_permission_codes : (user.permissions || []));
   const requiredMenu = capability.menuPermissions?.length
-    ? capability.menuPermissions
+    ? menuCodes
     : (menuEntry ? menuPermissionCodesForItem(capability) : []);
   const requiredActions = capability.permissions || [];
   const menuViewPermissions = menuEntry ? new Set() : menuGrantedViewPermissions(user, capability);

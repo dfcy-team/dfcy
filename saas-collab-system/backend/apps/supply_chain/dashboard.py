@@ -1,3 +1,4 @@
+from django.db.models.functions import Greatest
 from .shipment_sources import accessible_shipments
 """Read-only, actor-scoped supply cockpit. Aggregate facts before joining owners.
 
@@ -21,7 +22,7 @@ from apps.permissions.services import check_user_permission, get_permission_data
 from apps.sales_management import operating
 from apps.sales_management.operating_models import OperatingOrderLine
 from .cost_models import (FeeRevisionItem, FeeRecord, SettlementRecord, PaymentRecord,
-    PaymentApplication, ShipmentDiscountAdjustment)
+    PaymentApplication, ShipmentDiscountAdjustment, ShipmentPayableTax)
 from .dates import business_date
 from .document_time import document_time
 from .logistics import batches_for
@@ -49,6 +50,24 @@ class Query(serializers.Serializer):
     search = serializers.CharField(required=False, allow_blank=True, max_length=100)
     limit = serializers.IntegerField(min_value=1, max_value=50, default=20)
     offset = serializers.IntegerField(min_value=0, default=0)
+    costs_group = serializers.ChoiceField(choices=('supplier','carrier','domestic','deposit','clearance'), required=False)
+    sort_by = serializers.ChoiceField(choices=('number','document_time','country_name','party_name','due_amount','opening_amount','paid_amount','applied_amount','remaining_amount'), required=False)
+    sort_order = serializers.ChoiceField(choices=('ascending','descending'), required=False)
+    column_number = serializers.CharField(required=False,allow_blank=True,max_length=100)
+    column_country = serializers.CharField(required=False,allow_blank=True,max_length=100)
+    column_party = serializers.CharField(required=False,allow_blank=True,max_length=100)
+    document_from = serializers.DateField(required=False)
+    document_to = serializers.DateField(required=False)
+    due_amount_min = serializers.DecimalField(max_digits=30,decimal_places=4,required=False)
+    due_amount_max = serializers.DecimalField(max_digits=30,decimal_places=4,required=False)
+    opening_amount_min = serializers.DecimalField(max_digits=30,decimal_places=4,required=False)
+    opening_amount_max = serializers.DecimalField(max_digits=30,decimal_places=4,required=False)
+    paid_amount_min = serializers.DecimalField(max_digits=30,decimal_places=4,required=False)
+    paid_amount_max = serializers.DecimalField(max_digits=30,decimal_places=4,required=False)
+    applied_amount_min = serializers.DecimalField(max_digits=30,decimal_places=4,required=False)
+    applied_amount_max = serializers.DecimalField(max_digits=30,decimal_places=4,required=False)
+    remaining_amount_min = serializers.DecimalField(max_digits=30,decimal_places=4,required=False)
+    remaining_amount_max = serializers.DecimalField(max_digits=30,decimal_places=4,required=False)
 
 
 def scope(actor, country_id=None):
@@ -186,8 +205,10 @@ def _money_targets(kind, scoped):
             missing=Subquery(missing, output_field=IntegerField()))
         if kind == 'supplier':
             discounts = ShipmentDiscountAdjustment.objects.filter(shipment_id=OuterRef('pk')).order_by().values('shipment_id').annotate(total=Sum('amount')).values('total')
+            confirmed_taxes = ShipmentPayableTax.objects.filter(
+                shipment_id=OuterRef('pk')).values('added_tax_amount')[:1]
             query = query.annotate(discount_amount=Coalesce(Subquery(discounts, output_field=MONEY), ZERO)).annotate(
-                due=Case(When(missing=0, then=F('known_amount') + Case(When(purchase_contract__status='issued', then=F('purchase_contract__settlement_tax_amount')), default=ZERO, output_field=MONEY) - F('discount_amount')), default=Value(None), output_field=MONEY))
+                due=Case(When(missing=0, then=F('known_amount') + Case(When(purchase_contract__status='issued', then=F('purchase_contract__settlement_tax_amount')), default=Coalesce(Subquery(confirmed_taxes, output_field=MONEY), ZERO), output_field=MONEY) - F('discount_amount')), default=Value(None), output_field=MONEY))
             from .receipt_payable_adjustments import annotate_receipt_shortage
             query = annotate_receipt_shortage(query).annotate(
                 due=Case(
@@ -375,10 +396,11 @@ def _rollup_parties(kind, queryset):
     ))
 
 
-def costs_data(actor, scoped):
+def costs_data(actor, scoped, group=None):
     groups = {}
     grouped_rows = {}
-    for kind in ('supplier', 'carrier', 'domestic', 'deposit', 'clearance'):
+    kinds = ('supplier','deposit') if group == 'supplier' else (group,) if group else ('supplier','carrier','domestic','deposit','clearance')
+    for kind in kinds:
         rows = _rollup_parties(kind, _with_fee_activity(_money_targets(kind, scoped), kind))
         grouped_rows[kind] = rows
         data = {'documents': sum(r['documents'] for r in rows),
@@ -397,6 +419,8 @@ def costs_data(actor, scoped):
         for row, source in zip(data['ranking'], ranking):
             row['cash_paid_amount'] = str(Decimal(row['paid']) - Decimal(row['opening']) - (source['converted'] or Decimal('0')))
         groups[kind] = data
+    if group and group != 'supplier':
+        return {'groups': groups, 'amount_basis': '系统单据金额，未作汇率换算；供应商货款与货运费用分别统计。', 'notices': []}
     # Supplier purchase totals and cash use the same actor/country scope as the
     # purchase ledger. Deposit applications move funds; they are not new cash.
     purchase_parties = {row['_party_id']: row for row in grouped_rows['deposit']}
@@ -450,7 +474,7 @@ class Dashboard(InternalAPI):
             from .dashboard_inventory import inventory_data
             data = inventory_data(request.user, scoped, country_id=values.get('country_id'))
         else:
-            data = (costs_data if values['section'] == 'costs' else operations_data)(request.user, scoped)
+            data = costs_data(request.user, scoped, group=values.get('costs_group')) if values['section'] == 'costs' else operations_data(request.user, scoped)
         if values.get('country_id') and 'countries' in data:
             data['countries'] = [row for row in data['countries'] if row['country_id'] == values['country_id']]
         return Response({'data': {**data, 'country_options': countries, 'country_id': values.get('country_id'),
@@ -479,13 +503,6 @@ class DashboardQueue(InternalAPI):
             records = inbounds.filter(status='draft').select_related('batch__country', 'batch__freight_company')
         else:
             records = _with_fee_activity(_money_targets(kind, scoped), kind)
-            nature = v.get('payment_nature')
-            if nature == 'mixed':
-                records = records.filter(corporate_paid__gt=0, personal_paid__gt=0)
-            elif nature in ('corporate', 'personal'):
-                records = records.filter(**{f'{nature}_paid__gt': 0})
-            elif nature == 'unknown':
-                records = records.filter(Q(unknown_paid__gt=0) | Q(paid_amount=0))
             if v.get('item_status'):
                 if kind not in ('carrier', 'clearance'):
                     raise serializers.ValidationError({'item_status': '费用项目状态仅用于批次货运费及入库清关费用。'})
@@ -517,10 +534,6 @@ class DashboardQueue(InternalAPI):
                     records = records.filter(_party_type=v.get('party_type', 'carrier'))
             if v.get('search'):
                 records = records.filter(Q(number__icontains=v['search']) | Q(_party_name__icontains=v['search']))
-            if v['status'] == 'pending':
-                records = records.filter(Q(due__isnull=True) | Q(remaining_amount__gt=0) | Q(over_recorded__gt=0))
-            elif v['status'] == 'settled':
-                records = records.filter(due__isnull=False, remaining_amount=0, over_recorded=0)
             if kind in ('supplier', 'domestic'):
                 records = records.select_related('order__country', 'order__supplier', 'domestic_carrier')
             elif kind == 'deposit':
@@ -529,21 +542,30 @@ class DashboardQueue(InternalAPI):
                 records = records.select_related('batch__country', 'batch__freight_company')
             else:
                 records = records.select_related('country', 'freight_company')
-        total = records.count()
-        summary = None
-        if kind in ('supplier', 'carrier', 'domestic', 'deposit', 'clearance'):
-            # Avoid shadowing annotations referenced by subsequent aggregate expressions.
-            values = records.aggregate(documents=Count('pk'), unknown_documents=Count('pk', filter=Q(due__isnull=True)),
-                total_due=Sum('due'), total_opening=Sum('opening_amount'), total_paid=Sum('paid_amount'), total_applied=Sum('applied_amount'),
-                total_remaining=Sum('remaining_amount'), total_available=Sum('available_prepayment'),
-                total_corporate=Sum('corporate_paid'), total_personal=Sum('personal_paid'), total_unknown=Sum('unknown_paid'))
-            summary = {'documents': values['documents'], 'unknown_documents': values['unknown_documents'],
-                'due_amount': str(values['total_due'] or Decimal('0')), 'opening_amount': str(values['total_opening'] or Decimal('0')),
-                'paid_amount': str(values['total_paid'] or Decimal('0')), 'applied_amount': str(values['total_applied'] or Decimal('0')),
-                'remaining_amount': str(values['total_remaining'] or Decimal('0')),
-                'available_prepayment': str(values['total_available'] or Decimal('0')),
-                **{f'{name}_paid': str(values[f'total_{name}'] or Decimal('0')) for name in ('corporate', 'personal', 'unknown')}}
-        page = list(records.order_by('-pk')[v['offset']:v['offset'] + v['limit']])
+        if kind in ('supplier','carrier','domestic','deposit','clearance'):
+            from .settlement_table_query import apply_table_query
+            from .settlement_page import financial_page
+            text_values={key:value for key,value in v.items() if key in ('column_number','column_country','column_party')}
+            records,_=apply_table_query(records,kind,text_values)
+            total,summary,page=financial_page(records,kind,v)
+        else:
+            from .settlement_table_query import apply_table_query
+            records, table_order = apply_table_query(records, kind, v)
+            total = records.count()
+            summary = None
+            if kind in ('supplier', 'carrier', 'domestic', 'deposit', 'clearance'):
+                # Avoid shadowing annotations referenced by subsequent aggregate expressions.
+                values = records.aggregate(documents=Count('pk'), unknown_documents=Count('pk', filter=Q(due__isnull=True)),
+                    total_due=Sum('due'), total_opening=Sum('opening_amount'), total_paid=Sum('paid_amount'), total_applied=Sum('applied_amount'),
+                    total_remaining=Sum('remaining_amount'), total_available=Sum('available_prepayment'),
+                    total_corporate=Sum('corporate_paid'), total_personal=Sum('personal_paid'), total_unknown=Sum('unknown_paid'))
+                summary = {'documents': values['documents'], 'unknown_documents': values['unknown_documents'],
+                    'due_amount': str(values['total_due'] or Decimal('0')), 'opening_amount': str(values['total_opening'] or Decimal('0')),
+                    'paid_amount': str(values['total_paid'] or Decimal('0')), 'applied_amount': str(values['total_applied'] or Decimal('0')),
+                    'remaining_amount': str(values['total_remaining'] or Decimal('0')),
+                    'available_prepayment': str(values['total_available'] or Decimal('0')),
+                    **{f'{name}_paid': str(values[f'total_{name}'] or Decimal('0')) for name in ('corporate', 'personal', 'unknown')}}
+            page = list(records.order_by(*table_order)[v['offset']:v['offset'] + v['limit']])
         fee_details = {}
         if kind in ('carrier', 'clearance'):
             owner = 'batch_id' if kind == 'carrier' else 'inbound_id'

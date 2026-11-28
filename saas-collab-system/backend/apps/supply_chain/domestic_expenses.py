@@ -82,7 +82,7 @@ def save(actor, pk, payload, key):
         if not query.filter(pk=pk).exists():
             raise ValidationError('收款单位不存在或不在授权范围。')
         amount = services._price(row.get('amount'))
-        method = row.get('method', 'quantity')
+        method = row.get('method', 'volume')
         if method not in ('quantity', 'volume', 'weight'):
             raise ValidationError('费用分摊方式无效。')
         include = row.get('include_in_cost', True)

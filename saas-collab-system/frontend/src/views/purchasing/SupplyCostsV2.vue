@@ -4,7 +4,7 @@
       <el-tab-pane label="按单据维护" name="documents">
         <section class="cost-flow-guide" aria-label="费用处理顺序"><strong>先维护来源费用，再按批次计算成本</strong><span>发货单：国内费用与货款</span><span>发运批次：运费与批次成本</span><span>入库单：清货费用与收货差异</span></section>
         <section class="filters">
-          <el-select v-model="kind" aria-label="费用单据类型" @change="resetSearch"><el-option label="供应商发货单" value="shipment"/><el-option label="集货发运批次" value="batch"/><el-option label="入库单" value="inbound"/></el-select>
+          <el-select v-model="kind" aria-label="费用单据类型" @change="resetSearch"><el-option label="供应商发货单" value="shipment"/><el-option label="国内运输费用" value="domestic_expense"/><el-option label="集货发运批次" value="batch"/><el-option label="入库单" value="inbound"/></el-select>
           <el-input v-model="search" placeholder="单号 / 供应商 / 运单号" clearable @keyup.enter="resetSearch"/><el-button @click="resetSearch">搜索</el-button><el-button :loading="exporting" :disabled="loading || exporting || !total" @click="exportDocuments">导出单据 Excel</el-button>
         </section>
         <p class="hint">发货单办理国内发货费用及供应商货款结算；发运批次办理货运费用及货运结算；入库单维护清货费用。结算登记保留来源，不执行实际付款。</p>
@@ -17,7 +17,7 @@
       <el-tab-pane label="按商品查询" name="products"><ProductCostLedgerV2 v-if="activeTab==='products'" /></el-tab-pane>
     </el-tabs>
     <el-drawer :model-value="!!selected" :title="selected?.number||'费用与结算'" size="min(1250px,96vw)" @close="selected=null" class="sc2-ui" @update:model-value="v=>{if(!v)selected=null}">
-      <PaymentLedgerV2 v-if="selected && ['purchase','domestic_freight'].includes(selected.kind)" :key="`${selected.kind}-${selected.id}`" :kind="selected.kind" :id="selected.id" @updated="onUpdated"/>
+      <PaymentLedgerV2 v-if="selected && ['purchase','domestic_freight','domestic_expense'].includes(selected.kind)" :key="`${selected.kind}-${selected.id}`" :kind="selected.kind" :id="selected.id" @updated="onUpdated"/>
       <FeeCostPanelV2 v-else-if="selected" :key="`${selected.kind}-${selected.id}`" :kind="selected.kind" :id="selected.id" :version="selected.version" :initial-panel="selected.initialPanel" @updated="onUpdated"/>
     </el-drawer>
   </AppPage>
@@ -68,13 +68,15 @@ async function exportDocuments() {
     if (new Set(rows.map(row => String(row.id))).size !== rows.length || rows.length !== count) {
       throw new Error('单据列表发生变化，请重新导出。');
     }
-    const headers = ['单号', '单据时间', '国家', '供应商'];
+    const headers = ['单号', '单据时间', '国家', requestedKind === 'domestic_expense' ? '收款单位' : '供应商'];
+    if (requestedKind === 'domestic_expense') headers.push('币种');
     if (requestedKind === 'shipment') headers.push('国内承运商');
     headers.push('批次货运公司', '阶段', '应付', '已付');
     if (requestedKind === 'shipment') headers.push('定金抵扣');
     headers.push('剩余应付', '版本');
     const values = rows.map(row => {
       const cells = [row.number, formatDocumentTime(row.document_time), row.country_name || row.country_code, row.supplier_names];
+      if (requestedKind === 'domestic_expense') cells.push(row.currency);
       if (requestedKind === 'shipment') cells.push(row.domestic_carrier_name);
       cells.push(row.freight_company_names, stageLabel(row.stage), row.due_amount ?? '待核对', row.paid_amount ?? '');
       if (requestedKind === 'shipment') cells.push(row.applied_amount ?? '');
@@ -82,7 +84,7 @@ async function exportDocuments() {
       return cells;
     });
     const { downloadWorkbook } = await import('../../utils/bigsellerWorkbook');
-    const label = { shipment: '供应商发货单', batch: '集货发运批次', inbound: '入库单' }[requestedKind] || '单据';
+    const label = { shipment: '供应商发货单', domestic_expense: '国内运输费用', batch: '集货发运批次', inbound: '入库单' }[requestedKind] || '单据';
     downloadWorkbook(`费用与结算-${label}.xlsx`, headers, values, '按单据维护');
   } catch (cause) {
     error.value = cause.message || '导出失败，请重试。';
@@ -92,10 +94,15 @@ async function exportDocuments() {
 }
 function openTarget(row){linkedRequest++;selected.value={...row,kind:row.kind||kind.value};}
 function onUpdated(target){overviewPanel.value?.refreshAfterUpdate();if(selected.value&&target&&selected.value.id===target.id&&selected.value.kind===target.kind)selected.value={...selected.value,...target};loadTargets();}
-async function openLinked(){const token=++linkedRequest;const query=route?.query||{};if(query.tab==='reconciliation'||query.payment_batch_id){selected.value=null;activeTab.value='reconciliation';return;}if(query.kind==null&&query.id==null)return;if(!['shipment','batch','inbound','purchase','domestic_freight'].includes(query.kind)||!/^\d+$/.test(String(query.id))||!Number.isSafeInteger(Number(query.id))||Number(query.id)<1){error.value='关联单据链接无效。';return;}selected.value=null;const paymentOnly=['purchase','domestic_freight'].includes(query.kind);kind.value=paymentOnly?'shipment':query.kind;activeTab.value='documents';page.value=1;loadTargets();try{const result=await (paymentOnly?api.fetchPayments(query.kind,Number(query.id)):api.fetchCostContext(query.kind,Number(query.id)));if(token!==linkedRequest)return;if(!result?.success)throw new Error(result?.message||'关联单据不可用');const target=result.data?.target;if(!target||target.kind!==query.kind||Number(target.id)!==Number(query.id))throw new Error('关联单据不匹配。');selected.value={...target};}catch(e){if(token===linkedRequest)error.value=e.message||'关联单据读取失败';}}
+function openLinked(){linkedRequest++;const query=route?.query||{};if(query.tab==='reconciliation'||query.payment_batch_id){selected.value=null;activeTab.value='reconciliation';return true;}if(query.kind==null&&query.id==null)return false;if(!['shipment','batch','inbound','purchase','domestic_freight','domestic_expense'].includes(query.kind)||!/^\d+$/.test(String(query.id))||!Number.isSafeInteger(Number(query.id))||Number(query.id)<1){selected.value=null;error.value='关联单据链接无效。';return true;}error.value='';kind.value=['purchase','domestic_freight','domestic_expense'].includes(query.kind)?'shipment':query.kind;activeTab.value='documents';page.value=1;
+// The mounted detail owns authorization and its request/error state. Do not fetch the same full context twice.
+selected.value={id:Number(query.id),kind:query.kind,number:'费用与结算'};
+loadTargets();
+return true;}
+
 watch(()=>route?.fullPath,openLinked);
 onUnmounted(()=>{targetRequest++;linkedRequest++;});
-onMounted(()=>{loadTargets();openLinked();});
+onMounted(()=>{if(!openLinked())loadTargets();});
 defineExpose({loadTargets,targets,selected,kind,search,openTarget,openLinked});
 </script>
 <style scoped>.filters{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}.filters :deep(.el-select){width:190px}.filters :deep(.el-input){width:min(320px,100%)}.hint{color:#64748b;font-size:13px;line-height:1.7}@media(max-width:680px){.filters>*{width:100%!important}}</style>

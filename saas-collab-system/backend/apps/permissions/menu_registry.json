@@ -672,6 +672,25 @@
       }
     },
     {
+      "code": "menu.products.inventory_cost_ledger.view",
+      "name": "库存成本台账",
+      "module": "products",
+      "action": "inventory_cost_ledger.view",
+      "description": "显示库存成本台账入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/inventory/cost-ledger",
+        "route": "/inventory/cost-ledger",
+        "resource": "inventory_cost_ledger",
+        "parent": "库存管理",
+        "action_codes": [
+          "products.cost.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.sales_management.inventory_workbench.view",
       "name": "库存工作台",
       "module": "sales_management",
@@ -2866,7 +2885,7 @@
         "products.cost.view"
       ],
       "menuPermissions": [
-        "menu.products.products_costs.view"
+        "menu.products.inventory_cost_ledger.view"
       ],
       "userTypes": [
         "internal"

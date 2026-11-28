@@ -1,7 +1,7 @@
 <template>
   <section class="capture-editor">
     <label>添加截图 <input type="file" accept="image/png,image/jpeg,image/webp" @change="loadFile" /></label>
-    <el-button :disabled="busy" @click="capture">截取屏幕</el-button>
+    <el-button v-if="allowScreenCapture" :disabled="busy" @click="capture">截取屏幕</el-button>
     <p v-if="error" role="alert">{{ error }}</p>
     <template v-if="source">
       <div class="tools">
@@ -16,9 +16,10 @@
 </template>
 <script setup>
 import { computed, nextTick, ref, onBeforeUnmount } from 'vue';
+defineProps({ allowScreenCapture: { type: Boolean, default: true } });
 const emit = defineEmits(['confirmed']);
 const cropRegion = ref(null), confirmed = ref(false), exporting = ref(false);
-defineExpose({ hasUnconfirmed: computed(() => Boolean(source.value && !confirmed.value)) });
+defineExpose({ loadImage: setImage, hasUnconfirmed: computed(() => Boolean(source.value && !confirmed.value)) });
 const canvas = ref(null), source = ref(null), mode = ref('mark'), error = ref(''), busy = ref(false);
 let revision = 0;
 let image = null, origin = null, preview = null, shapes = [], stream = null;
