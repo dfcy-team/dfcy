@@ -485,7 +485,7 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toMatch(/:disabled="!canManage \|\| isTerminal\(activeTask\) \|\| isTargetTerminal\(row\)"/);
     expect(page).toContain("['success', 'rejected', 'no_response', 'blocked']");
     expect(page).toContain('await refreshActiveTask()');
-    expect(page).toContain(':disabled="!canCreateFulfillment || isCancelled(detailTask)"');
+    expect(page).toContain(`isCancelled(detailTask) || detailTask?.status === 'paused'`);
     expect(page).toContain('isCancelled(task)');
     expect(page).not.toContain(':disabled="!canCreateFulfillment || isTerminal(detailTask)"');
 

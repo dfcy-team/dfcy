@@ -170,6 +170,8 @@ def _generate_sample_fulfillment_no(tenant, link_type):
 
 
 def _assert_task_accepts_target(task, *, allow_completed=False):
+    if task.status == OutreachTask.Status.PAUSED:
+        raise ValidationError({"outreach_task": "任务已暂停，请恢复任务后再新增送样或修改建联目标。"}, code="conflict")
     blocked_statuses = {OutreachTask.Status.CANCELLED}
     if not allow_completed:
         blocked_statuses.add(OutreachTask.Status.COMPLETED)
@@ -1474,7 +1476,7 @@ def create_outreach_task(*, user, validated_data):
 
 @transaction.atomic
 def update_outreach_task(*, user, task, validated_data, expected_version):
-    """Safely edit mutable task facts without touching workflow state timestamps."""
+    """Edit task facts atomically; delegate requested status to the workflow."""
     _lock_tenant(user)
     task = _locked_task(user, _pk(task))
     if task.is_deleted:
@@ -1486,6 +1488,11 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         )
 
     data = dict(validated_data)
+    requested_status = data.pop("status", None)
+    if not data and requested_status is not None:
+        if requested_status == task.status:
+            return task
+        return transition_outreach_task(user=user, task=task, status=requested_status, expected_version=expected_version)
     if any(
         field in data
         for field in ("source_owner_name_snapshot", "source_dispatcher_name_snapshot")
@@ -1629,6 +1636,8 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         before=before,
         after=after,
     )
+    if requested_status is not None and requested_status != task.status:
+        task = transition_outreach_task(user=user, task=task, status=requested_status, expected_version=task.version)
     if "target_count" in changes:
         task = recompute_outreach_task_completion(user=user, task=task)
     return task
@@ -2143,7 +2152,8 @@ def transition_outreach_task(*, user, task, status, expected_version):
         raise ValidationError({"status": "Unsupported task status."})
     allowed = {
         OutreachTask.Status.PENDING: {OutreachTask.Status.IN_PROGRESS, OutreachTask.Status.CANCELLED},
-        OutreachTask.Status.IN_PROGRESS: {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED},
+        OutreachTask.Status.IN_PROGRESS: {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED, OutreachTask.Status.PAUSED},
+        OutreachTask.Status.PAUSED: {OutreachTask.Status.IN_PROGRESS, OutreachTask.Status.CANCELLED},
         OutreachTask.Status.COMPLETED: set(),
         OutreachTask.Status.CANCELLED: set(),
     }

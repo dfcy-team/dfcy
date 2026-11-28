@@ -57,6 +57,31 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('offers pause and resume without allowing new samples while paused', async () => {
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    expect(wrapper.vm.nextTaskStatuses({ status: 'in_progress' })).toContain('paused');
+    expect(wrapper.vm.nextTaskStatuses({ status: 'paused' })).toEqual(['in_progress', 'cancelled']);
+    expect(wrapper.vm.taskStatusActionLabel('in_progress', { status: 'paused' })).toBe('恢复任务');
+    expect(wrapper.vm.OUTREACH_STATUS_LABELS.paused).toBe('已暂停');
+    const before = request.mock.calls.length;
+    await wrapper.vm.openSampleCreate({ ...task, status: 'paused' });
+    expect(request.mock.calls.length).toBe(before);
+    wrapper.unmount();
+  });
+
+  it('sends a status-only patch when pausing from the edit dialog', async () => {
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    await wrapper.vm.openEdit(task);
+    wrapper.vm.form.status = 'paused';
+    await wrapper.vm.submitEdit();
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0].data).toEqual({ status: 'paused' });
+    expect(messages.success).toHaveBeenCalledWith('任务已修改');
+    wrapper.unmount();
+  });
+
   it.each(['task', 'standalone'])('passes the selected store for country-scoped nickname creation (%s)', async (kind) => {
     const wrapper = render(kind === 'task' ? OutreachTaskList : SampleFulfillmentList);
     await flushPromises();

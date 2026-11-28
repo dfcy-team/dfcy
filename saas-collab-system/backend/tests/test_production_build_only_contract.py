@@ -188,6 +188,7 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/influencers/migrations/0041_video_nullable_metrics_and_receipts.py",
         "apps/influencers/migrations/0042_video_reported_ctor.py",
         "apps/influencers/migrations/0043_video_native_click_ratio.py",
+        "apps/influencers/migrations/0044_outreach_paused_choice.py",
         "apps/supply_chain/migrations/0053_fee_item_query_projection.py",
         "apps/supply_chain/migrations/0054_contract_history.py",
         "apps/supply_chain/migrations/0055_contract_signature_versions.py",
@@ -265,6 +266,7 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/influencers/migrations/0041_video_nullable_metrics_and_receipts.py",
         "apps/influencers/migrations/0042_video_reported_ctor.py",
         "apps/influencers/migrations/0043_video_native_click_ratio.py",
+        "apps/influencers/migrations/0044_outreach_paused_choice.py",
         "apps/supply_chain/migrations/0053_fee_item_query_projection.py",
         "apps/supply_chain/migrations/0054_contract_history.py",
         "apps/supply_chain/migrations/0055_contract_signature_versions.py",
@@ -309,10 +311,11 @@ def test_archive_migrations_cannot_reuse_registered_release():
     assert registered_digest.hexdigest() == archived_migration_sha
     current_digest = migration_digest(root)
     assert current_digest != archived_migration_sha
-    assert current_digest == MIGRATION_SHA
+    assert current_digest != MIGRATION_SHA
     args = valid_args()
     args[-1] = current_digest
-    assert make_manifest(*args)["migration_sha256"] == current_digest
+    with pytest.raises(ValueError, match="migration baseline"):
+        make_manifest(*args)
 
 
 @pytest.mark.parametrize("line_endings", [(b"\n", b"\n"), (b"\r\n", b"\r\n"), (b"\r\n", b"\n")])

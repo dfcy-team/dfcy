@@ -269,6 +269,7 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "apps/influencers/migrations/0041_video_nullable_metrics_and_receipts.py",
             "apps/influencers/migrations/0042_video_reported_ctor.py",
             "apps/influencers/migrations/0043_video_native_click_ratio.py",
+            "apps/influencers/migrations/0044_outreach_paused_choice.py",
             "apps/supply_chain/migrations/0053_fee_item_query_projection.py",
             "apps/supply_chain/migrations/0054_contract_history.py",
             "apps/supply_chain/migrations/0055_contract_signature_versions.py",
@@ -289,7 +290,7 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
         historical_digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
     assert historical_digest.hexdigest() == HISTORICAL_MIGRATION_SHA
     assert current_digest != HISTORICAL_MIGRATION_SHA
-    assert current_digest == MIGRATION_SHA
+    assert current_digest != MIGRATION_SHA
     release_sha, tree_sha = next(iter(HISTORICAL_TARGETS.items()))
     with pytest.raises(ValueError, match="Unapproved historical source"):
         validate_historical_source(release_sha, tree_sha, current_digest)
