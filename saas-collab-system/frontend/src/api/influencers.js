@@ -218,6 +218,10 @@ export const fetchInfluencers = (params = {}) => requestWithMockFallback(
   'influencers.list'
 );
 
+export const searchInfluencersByContact = (params, contact) => requestApi({
+  method: 'post', url: `${API_ROOT}/contact-search/`, params, data: contact
+});
+
 const emptyPerformance = () => ({
   success: true,
   code: 'OK',

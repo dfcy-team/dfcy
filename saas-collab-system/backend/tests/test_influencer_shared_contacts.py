@@ -160,6 +160,11 @@ def test_restricted_reader_cannot_see_hidden_sibling_contacts_or_replace_them():
     r.scope.save()
     assert [c['value'] for c in form(r, r.a)['contacts']] == ['visible@example.test']
     assert r.client.get(f'/api/internal/influencers/{r.b.pk}/contacts/').status_code == 404
+    for email, expected in [('visible@example.test', [r.a.pk]), ('hidden@example.test', [])]:
+        response = r.client.post('/api/internal/influencers/contact-search/',
+                                 {'channel': 'email', 'value': email}, format='json')
+        assert response.status_code == 200
+        assert [row['id'] for row in response.data['data']['results']] == expected
     before = list(InfluencerContact.objects.values())
     assert patch(r, r.a, []).status_code == 403
     assert list(InfluencerContact.objects.values()) == before

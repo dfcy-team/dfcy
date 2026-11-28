@@ -21,6 +21,30 @@ beforeEach(() => {
 });
 async function render() { const w=mount(Library,{global:{stubs}}); await flushPromises();return w; }
 
+it('sends contact searches in the request body and clears them on reset', async () => {
+  const w = await render();
+  try {
+    w.vm.filters.profile_notes = 'campaign';
+    w.vm.filters.contact_channel = 'email';
+    w.vm.filters.contact_value = '  contact@example.test  ';
+    w.vm.applyFilters();
+    await flushPromises();
+    expect(api.direct).toHaveBeenCalledExactlyOnceWith({
+      method: 'post',
+      url: '/api/internal/influencers/contact-search/',
+      params: expect.objectContaining({ profile_notes: 'campaign', page: 1 }),
+      data: { channel: 'email', value: 'contact@example.test' }
+    });
+    w.vm.resetFilters();
+    await flushPromises();
+    expect(api.direct).toHaveBeenCalledTimes(1);
+    expect(api.list).toHaveBeenCalledTimes(2);
+    expect(w.vm.filters.contact_value).toBe('');
+  } finally {
+    w.unmount();
+  }
+});
+
 describe('single archive recoverable deletion', () => {
   it('deletes the selected archive only with current version and explicit scope confirmation',async () => {
     const w=await render();await w.vm.changeArchiveDeletion(row);

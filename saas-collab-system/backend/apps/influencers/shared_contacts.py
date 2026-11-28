@@ -2,13 +2,63 @@
 
 from collections import defaultdict
 from datetime import timedelta
+import re
 
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet, Value
+from django.db.models.functions import Replace
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 
 from apps.audit.services import write_operation_log
 from .models import InfluenceArchiveGroup, InfluenceArchiveMembership, Influencer, InfluencerContact
 from .scopes import filter_queryset, require_object
+
+CONTACT_SEARCH_CHANNELS = frozenset({
+    "email", "phone", "whatsapp", "wechat", "telegram", "tiktok",
+    "instagram", "messenger", "line", "viber", "other",
+})
+PHONE_SEPARATORS = " +-()."
+
+
+def parse_contact_search(data):
+    channel = data.get("channel") if hasattr(data, "get") else None
+    value = data.get("value", "") if hasattr(data, "get") else None
+    if not isinstance(channel, str) or channel not in CONTACT_SEARCH_CHANNELS:
+        raise ValidationError({"channel": "请选择有效的联系渠道。"})
+    if not isinstance(value, str) or len(value) > 240:
+        raise ValidationError({"value": "联系方式最多 240 个字符。"})
+    value = value.strip()
+    if value and channel == "phone" and not re.fullmatch(r"[0-9]{5,20}", value.translate(str.maketrans("", "", PHONE_SEPARATORS))):
+        raise ValidationError({"value": "请输入完整手机号，可包含区号。"})
+    return {"channel": channel, "value": value}
+
+
+def filter_by_contact(queryset, *, user, permission_code, channel, value):
+    # Search only contacts the same scoped user can read from a detail view.
+    visible = filter_queryset(user, Influencer.objects.filter(tenant_id=user.tenant_id), permission_code)
+    contacts = InfluencerContact.objects.filter(
+        tenant_id=user.tenant_id, influencer_id__in=visible.order_by().values("pk"),
+        channel=channel, is_active=True,
+    ).exclude(value="")
+    if value:
+        phone = value.translate(str.maketrans("", "", PHONE_SEPARATORS))
+        if channel in {"phone", "whatsapp", "viber"} and re.fullmatch(r"[0-9]{5,20}", phone):
+            sql_value = "value"
+            for separator in PHONE_SEPARATORS:
+                sql_value = Replace(sql_value, Value(separator), Value(""))
+            contacts = contacts.alias(_contact_digits=sql_value).filter(_contact_digits=phone)
+        elif channel == "email":
+            contacts = contacts.filter(value__iexact=value)
+        else:
+            account = value.removeprefix("@")
+            contacts = contacts.filter(Q(value__iexact=account) | Q(value__iexact=f"@{account}"))
+    matches = contacts.order_by().values("influencer_id")
+    memberships = InfluenceArchiveMembership.objects.filter(
+        tenant_id=user.tenant_id, group__tenant_id=user.tenant_id, influencer__tenant_id=user.tenant_id,
+    ).order_by()
+    matching_groups = memberships.filter(influencer_id__in=matches).values("group_id")
+    shared = memberships.filter(group_id__in=matching_groups).values("influencer_id")
+    return queryset.filter(Q(pk__in=matches) | Q(pk__in=shared))
 
 
 def contact_member_ids(influencer):
