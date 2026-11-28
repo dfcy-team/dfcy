@@ -537,3 +537,14 @@ it('新响应按服务端来源总数翻页，不重新生成汇总',async()=>{
  expect(api.fetchFinanceSummaryDetail).toHaveBeenLastCalledWith(1,expect.objectContaining({flow_page:2}),expect.anything());
  expect(w.findAll('.source-records tbody tr')).toHaveLength(1);expect(api.fetchFinanceSummaryTable).toHaveBeenCalledTimes(1);w.unmount();
 });
+
+it('当前页金额与费率读取随汇总返回的构成，不再请求独立任务',async()=>{
+ const data=table(),parts={title:'订单销售额 · 构成',amount:'119410',sales:'119410',rate:'100.00%',parts:[{label:'已汇总商品金额',amount:'119410',rate:'100.00%'}],records:[],records_total:200,records_page:1,records_page_size:50};
+ data.rows[0].compositions={sales:parts};api.fetchFinanceSummaryTable.mockResolvedValue(good(data));const w=render();await flushPromises();
+ await w.find('.summary-table [data-field="sales"] .amount').trigger('click');await flushPromises();expect(w.text()).toContain('已汇总商品金额');expect(api.fetchFinanceSummaryDetail).not.toHaveBeenCalled();expect(api.fetchFinanceSummaryJob).not.toHaveBeenCalled();
+ const disclosure=w.find('.source-records');disclosure.element.open=true;await disclosure.trigger('toggle');await flushPromises();expect(api.fetchFinanceSummaryDetail).toHaveBeenCalledTimes(1);expect(api.fetchFinanceSummaryDetail.mock.calls[0][1].include_records).toBe(1);w.unmount();
+});
+it('费率模式使用同一构成，不显示金额和原始来源，也不新增任务',async()=>{
+ const data=table();data.rows[0].compositions={sales:{title:'销售构成',amount:'119410',rate:'100.00%',parts:[{label:'已汇总费率子项',amount:'119410',rate:'100.00%'}],records:[],records_total:200}};api.fetchFinanceSummaryTable.mockResolvedValue(good(data));const w=render();await flushPromises();
+ await w.findAll('button').find(b=>b.text()==='费率／利润率').trigger('click');await w.find('.summary-table [data-field="sales"] .amount').trigger('click');await flushPromises();expect(w.text()).toContain('已汇总费率子项');expect(api.fetchFinanceSummaryDetail).not.toHaveBeenCalled();expect(w.find('.source-records').exists()).toBe(false);w.unmount();
+});

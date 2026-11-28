@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 import uuid
@@ -51,7 +52,7 @@ def write_document(path, template, source):
         else:
             yield packed(value)
     digest = hashlib.sha256()
-    with path.open('wb') as file, gzip.GzipFile(filename='', fileobj=file, mode='wb', mtime=0) as compressed:
+    with path.open('wb') as file, gzip.GzipFile(filename='', fileobj=file, mode='wb', mtime=0, compresslevel=1) as compressed:
         def write(text):
             raw = text.encode('utf-8')
             digest.update(raw)
@@ -169,9 +170,10 @@ def materialize_source(user, dataset, spec, path, token):
     from .summary_database import collect
     from .summary_service import document_path
     proof = path.with_suffix('.json')
-    started = timezone.now()
+    started = time.monotonic()
     with source_budget():
         source = collect(user, spec['scope'], allow_legacy_zero=False, native=True)
+    collected = time.monotonic()
     # Encode repeated fee evidence once; the native engine restores the exact objects.
     pool, indexes = [], {}
     for fact in source.get('facts', []):
@@ -193,7 +195,10 @@ def materialize_source(user, dataset, spec, path, token):
         temporary.unlink(missing_ok=True)
     info = {'sha256': digest, 'read_at': source['read_at'],
             'source_rows_read': source.get('source_counts', {}).get('platform_finance'),
-            'read_ms': round((timezone.now()-started).total_seconds()*1000, 2)}
+            'read_ms': round((time.monotonic()-started)*1000, 2),
+            'collect_ms': round((collected-started)*1000, 2),
+            'document_bytes': path.stat().st_size}
+    info['document_ms'] = round(info['read_ms']-info['collect_ms'], 2)
     temporary = proof.with_suffix('.tmp-' + token)
     temporary.write_text(json.dumps(info), encoding='utf-8')
     os.replace(temporary, proof)
@@ -205,7 +210,9 @@ def launch_source_worker(request):
             input=json.dumps(request), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, encoding='utf-8', timeout=600, cwd=str(Path(__file__).resolve().parents[2]))
         reply = json.loads(result.stdout) if result.returncode == 0 else {}
-    except (OSError, ValueError, subprocess.TimeoutExpired):
+    except subprocess.TimeoutExpired:
+        raise SourceReadTimeout() from None
+    except (OSError, ValueError):
         raise ValidationError('来源读取未完成，请重试；未更改账务数据。') from None
     if not isinstance(reply, dict):
         reply = {}
@@ -222,6 +229,7 @@ def execute(dataset, user, payload):
     key = calculation_key(dataset, 'query', {'_database_query': spec})
     path = private_root() / ('read-query-' + key + '.html.gz')
     proof = path.with_suffix('.json')
+    materialized = False
     if not path.exists() or not proof.exists():
         lock_key = 'finance-read-query:' + key
         token = uuid.uuid4().hex
@@ -233,6 +241,7 @@ def execute(dataset, user, payload):
                     launch_source_worker({'user': user.pk, 'tenant': user.tenant_id,
                         'document_file': dataset.document_file, 'scope': spec['scope'],
                         'filename': path.name, 'token': token})
+                    materialized = True
                 if not path.is_file() or not proof.is_file():
                     raise ValidationError('来源读取未完成，请重试；未更改账务数据。')
         finally:
@@ -246,5 +255,6 @@ def execute(dataset, user, payload):
         document_file=path.name, metadata={'database_scope': spec['scope'], 'direct_query': True}, accounting_state=state)
     result = query(derived, {k: v for k, v in payload.items() if k != '_database_query'})
     result.update(direct_query=True, source_read_at=info['read_at'], source_read_ms=info['read_ms'],
-                  source_rows_read=info.get('source_rows_read'))
+                  source_rows_read=info.get('source_rows_read'), source_cache_reused=not materialized,
+                  source_collect_ms=info.get('collect_ms'), source_document_ms=info.get('document_ms'))
     return result
