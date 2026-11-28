@@ -27,6 +27,17 @@ from .readonly_clients import ReadonlyConfigurationError
 
 
 VERSION = AFFILIATE_CONTRACT_VERSION
+
+
+def _can_replace_creator(current, values, account, observed_at):
+    return bool(
+        current.store_id == values["store_id"] and account
+        and account == values["creator_username_normalized"]
+        and current.source_updated_at and observed_at
+        and current.source_updated_at < values["source_updated_at"] <= observed_at
+    )
+
+
 SITE_COUNTRIES = {"PH": "PH", "MY": "MY", "TH": "TH",
                   "\u83f2\u5f8b\u5bbe": "PH", "\u9a6c\u6765": "MY", "\u9a6c\u6765\u897f\u4e9a": "MY", "\u6cf0\u56fd": "TH"}
 SCOPES = {"seller.authorization.info", "seller.affiliate_collaboration.read", "seller.order.info"}
@@ -296,6 +307,10 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
                         or row.get("quantity") != 1):
                     row["payment"] = {"amount": None, "currency": store.currency.upper()}
                 self.normalize_record(row)
+            self.page_platform_creators = {
+                (row["order_id"], row["sku_id"]): (normalize_account(row["creator_username"]),
+                    parse_datetime(str(row["affiliate_observed_at"]))) for row in rows
+            }
             self.verified_day_digest = digest_bytes(canonical_bytes([
                 _order_values(AffiliateOrderSnapshot(**self.normalize_record(row))) for row in rows]))
         except DatasetError as exc:
@@ -350,12 +365,19 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
                 if current:
                     if (current.store_id not in (None, values["store_id"]) or SITE_COUNTRIES.get(current.site) != SITE_COUNTRIES.get(values["site"])
                             or current.data_time.date() != values["data_time"].date() or current.product_id != values["product_id"]
-                            or current.creator_username_normalized != values["creator_username_normalized"]):
+                            ):
+                        raise ReadonlyConfigurationError("AFFILIATE_PROTECTED_IDENTITY_CONFLICT")
+                    changed_creator = current.creator_username_normalized != values["creator_username_normalized"]
+                    account, observed_at = self.page_platform_creators.get((values["order_id"], values["sku_id"]), ("", None))
+                    if changed_creator and not _can_replace_creator(current, values, account, observed_at):
                         raise ReadonlyConfigurationError("AFFILIATE_PROTECTED_IDENTITY_CONFLICT")
                     incoming = {**values, "source": current.source, "source_row_key": current.source_row_key,
                         "data_time": current.data_time, "site": current.site, "shop_name": current.shop_name,
                         "product_name": current.product_name, "creator_username": current.creator_username,
                         "store_id": current.store_id}
+                    if changed_creator:
+                        incoming["creator_username"] = values["creator_username"]
+                        incoming["source_updated_at"] = observed_at
                     for field in (*MONEY_FIELDS.values(), "payment_amount", "settlement_status"):
                         if incoming[field] is None:
                             incoming[field] = getattr(current, field)
