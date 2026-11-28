@@ -1538,10 +1538,12 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
             queryset = queryset.filter(store_id__in=stores)
         owner_id = request.query_params.get("owner", "").strip()
         if owner_id:
-            if not owner_id.isdigit() or int(owner_id) < 1:
-                raise ValidationError({"owner": "owner must be a positive integer."})
+            owners = {value.strip() for value in owner_id.split(",")}
+            if any(not value.isascii() or not value.isdecimal() or len(value) > 19
+                   or not 0 < int(value) < 2**63 for value in owners):
+                raise ValidationError({"owner": "Expected positive owner IDs."})
             queryset = queryset.filter(
-                owner_id=int(owner_id),
+                owner_id__in=owners,
                 owner__tenant=request.user.tenant,
             )
         search = request.query_params.get("search", "").strip()

@@ -854,6 +854,12 @@ def test_sample_fulfillment_list_filters_by_owner_and_options_are_tenant_scoped(
 
     assert filtered.status_code == 200
     assert [row["fulfillment_no"] for row in filtered.data["data"]["results"]] == ["SAMPLE-OWNER-B"]
+    combined = client.get(url, {"owner": f"{user.pk},{other_owner.pk},{foreign_owner.pk}", "page_size": 1})
+    assert combined.status_code == 200
+    assert combined.data["data"]["count"] == 2
+    assert len(combined.data["data"]["results"]) == 1
+    assert client.get(url, {"owner": foreign_owner.pk}).data["data"]["count"] == 0
+    assert client.get(url, {"owner": f"{user.pk},invalid"}).status_code == 400
     assert invalid.status_code == 400
     assert options.status_code == 200
     assert {owner["id"] for owner in options.data["data"]["owners"]} == {user.pk, other_owner.pk}
