@@ -19,12 +19,24 @@ def test_invalid_adjustment_month_is_rejected(adjustment):
 
 def test_pre_fix_ready_and_queued_direct_results_are_never_served_or_executed(context, monkeypatch):
     import gzip,hashlib,json
+    from django.test import override_settings
     from django.utils import timezone
     from unittest.mock import Mock
     from apps.finance.summary_models import FinanceSummaryCalculation
     from apps.finance.summary_jobs import calculation_key,run_calculation
     from tests.test_finance_summary import URL
     client,user,dataset,state=context
+    with override_settings(FINANCE_SUMMARY_SCHEDULED_READS_ENABLED=False):
+        _assert_pre_fix_results_are_rejected(client, user, state, monkeypatch)
+
+
+def _assert_pre_fix_results_are_rejected(client, user, state, monkeypatch):
+    import gzip,hashlib,json
+    from django.utils import timezone
+    from unittest.mock import Mock
+    from apps.finance.summary_models import FinanceSummaryCalculation
+    from apps.finance.summary_jobs import calculation_key,run_calculation
+    from tests.test_finance_summary import URL
     run=Mock(return_value={'rows':[{'amount':'incorrect-old-cache'}]})
     monkeypatch.setattr('apps.finance.summary_read_query.execute',run)
     reply=client.get(URL+'query/',{'filter_month':'2026-10'})

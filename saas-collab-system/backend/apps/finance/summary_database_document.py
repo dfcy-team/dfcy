@@ -32,7 +32,7 @@ def warehouse_profit_rules(code):
 
 def render(template, source, *, encode=packed):
     """Template contributes algorithms and markup only, never source values."""
-    database = {key: source[key] for key in ['schema', 'facts', 'shares', 'rates', 'order_dates', 'cost_flows', 'raw_flows', 'native_components'] if key in source}
+    database = {key: source[key] for key in ['schema', 'facts', 'shares', 'rates', 'order_dates', 'cost_flows', 'raw_flows', 'native_components', 'native_finance_fields', 'native_cost_components'] if key in source}
     snapshot = {'snapshot_at': source['read_at'], 'database': database, 'raw': source['raw'], 'facts': [],
         'coverage': [], 'wide': {}, 'wide_rows': [], 'shopee_income': source['shopee_income'],
         'primary_collection': {'orders': [], 'rows': [], 'names': [], 'dates': [], 'matches': []},

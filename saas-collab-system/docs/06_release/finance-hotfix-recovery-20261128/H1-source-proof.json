@@ -1,0 +1,65 @@
+{
+  "package_sha256": "b713bb1776ec4d422cacd35f98ff0c39549674d8488191f9b8ad070d27ade037",
+  "files": [
+    {
+      "path": "backend/apps/finance/summary_composition.js",
+      "deployed_source_sha256": "9c1ba6a2e991511ef978709e23df1ea8dd2aca0532089de6e9076f270bc050d4"
+    },
+    {
+      "path": "backend/apps/finance/summary_database.py",
+      "deployed_source_sha256": "127b50697685c152bb60357f2942269d13a5bece6cd821b91c89fd773ad827db"
+    },
+    {
+      "path": "backend/apps/finance/summary_native.cjs",
+      "deployed_source_sha256": "2ff2cc004c974bb241d67e73075ce266fdc67983c241cef73b851772aede1302"
+    },
+    {
+      "path": "backend/apps/finance/summary_native.py",
+      "deployed_source_sha256": "095dfe6ccc457cc0389c15b89814a22e970daa9a39990cbffddafa07454d4294"
+    },
+    {
+      "path": "backend/apps/finance/summary_read_query.py",
+      "deployed_source_sha256": "18514a08aaf75a4bcfb4dc1aaafd7e7974e4adee7281ddf9c45562726f50cec6"
+    },
+    {
+      "path": "backend/apps/finance/summary_views.py",
+      "deployed_source_sha256": "af06f85fc66e4afd735cd9937df6fd003ff09d7f49e1481caba845085cd01046"
+    },
+    {
+      "path": "backend/tests/test_finance_memory_runtime.py",
+      "deployed_source_sha256": "31a97cdfe815f4bddd101bcd6d78316bf7883ca56ef1663e6e5a0523209ee0f7"
+    },
+    {
+      "path": "backend/tests/test_finance_native_isolation.py",
+      "deployed_source_sha256": "fdedd60f58b8da7ed85d07ca00970a929df3718c78a2f9871fddafc8ca0b1e01"
+    },
+    {
+      "path": "backend/tests/test_finance_native_pagination.py",
+      "deployed_source_sha256": "0bccd700f9ab5a68d8423a825c54005035add8121b0df3c5d5eb4c8588e20250"
+    },
+    {
+      "path": "backend/tests/test_finance_read_query.py",
+      "deployed_source_sha256": "256bf6bcdf82232df51d8ce570bdebf29e0d3f90b105455093f875016d5c9dbf"
+    },
+    {
+      "path": "backend/tests/test_finance_shipped_cost.py",
+      "deployed_source_sha256": "49f054fc876a44515ffa676dbc137834a1b3ef530a77ff342d187d30a1d5ff22"
+    },
+    {
+      "path": "frontend/src/views/finance/FinanceSummaryNative.vue",
+      "deployed_source_sha256": "2140a679057a8b5adffe209349820e1172d317eaa39beef8a8bbce18802f46f4"
+    },
+    {
+      "path": "frontend/tests/finance-summary-composition.spec.js",
+      "deployed_source_sha256": "7af7b083f9278d1d129966e3a604b7a34cd18cd3479755d92962133b48c04ef8"
+    },
+    {
+      "path": "frontend/tests/finance-summary-native.spec.js",
+      "deployed_source_sha256": "a150ecf6b522dbd04a1954251804d1c3268502f80b032de57e54742b63a21b57"
+    },
+    {
+      "path": "frontend/tests/finance-summary-pagination.spec.js",
+      "deployed_source_sha256": "2c32a4ae2246cbb1c2d5eaecd61463de32c92739a641bd920772641fa5b2bd4f"
+    }
+  ]
+}

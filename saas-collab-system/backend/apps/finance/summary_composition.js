@@ -107,7 +107,10 @@
   visit('');
   return ordered;
  }
- function fromEntries(entries,target){return finish(entries.flatMap(sourceRows),target);}
+ function fromEntries(entries,target){
+  function* rows(){for(const entry of entries)yield* sourceRows(entry);}
+  return finish(rows(),target);
+ }
  function build(data,kind){
   const ad=['operations','finance'].includes(kind),key=ad?'advertising':kind,group=ad?data[kind]:data.group,target=data.fees[kind]?.amount;
   if(!data.sku){

@@ -35,6 +35,55 @@ def test_query_uses_budget_and_returns_unchanged_result(calculator, monkeypatch)
     assert '--max-old-space-size=700' in spawn.call_args.args[0]
 
 
+def test_successful_query_releases_only_idle_vm(calculator, monkeypatch):
+    process = Mock()
+    process.poll.return_value = None
+    process.stdin = io.StringIO()
+    process.stdout = io.StringIO('{"ok":true,"result":{"amount":"123.45"}}\n')
+    monkeypatch.setattr(native.subprocess, 'Popen', Mock(return_value=process))
+    timer = Mock()
+    schedule = Mock(return_value=timer)
+    monkeypatch.setattr(native.threading, 'Timer', schedule)
+    assert native.query(calculator, {'action': 'table'})['amount'] == '123.45'
+    process.kill.assert_not_called()
+    assert schedule.call_args.args[0] == 60 and timer.daemon is True
+    timer.start.assert_called_once()
+    schedule.call_args.args[1]()
+    process.kill.assert_called_once()
+    assert native._process is None and native._session_key is None
+
+
+def test_expired_idle_callback_cannot_interrupt_new_request(calculator, monkeypatch):
+    import threading
+    process = Mock()
+    process.poll.return_value = None
+    monkeypatch.setattr(native, '_process', process)
+    timers, callbacks = [], []
+    def schedule(seconds, callback):
+        timer = Mock()
+        timers.append(timer)
+        callbacks.append(callback)
+        return timer
+    monkeypatch.setattr(native.threading, 'Timer', schedule)
+    with native._lock:
+        native._release_when_idle()
+        started = threading.Event()
+        def expire():
+            started.set()
+            callbacks[0]()
+        thread = threading.Thread(target=expire)
+        thread.start()
+        assert started.wait(timeout=1)
+        process.kill.assert_not_called()
+        native._release_when_idle()
+    thread.join(timeout=2)
+    assert not thread.is_alive()
+    timers[0].cancel.assert_called_once()
+    process.kill.assert_not_called()
+    callbacks[1]()
+    process.kill.assert_called_once()
+
+
 def test_insufficient_memory_never_starts_vm(calculator, monkeypatch):
     spawn = Mock()
     monkeypatch.setattr(native.subprocess, 'Popen', spawn)

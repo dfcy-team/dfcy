@@ -1,16 +1,16 @@
 // Read-only, version-scoped calculation process. No network and no posting APIs.
 const readline=require('node:readline'),vm=require('node:vm'),fs=require('node:fs');
-const {createEngine,plain}=require('./summary_engine.cjs'),sessions=new Map();
+const {createEngine,plain,readDocument}=require('./summary_engine.cjs'),sessions=new Map();
 const {costDetail}=require('./summary_cost_detail.cjs');
 const {orderLedger,itemMembers,groupMembers,groupLinks,orderAttribution,attributionTotals,itemAttribution}=require('./summary_order_ledger.cjs');
 const {flowAmounts,flowInclusion,flowState,flowStatus,flowEditBlock}=require('./summary_flow_view.cjs');
 const {periodOptions,periodRange,periodFilter,datedFact}=require('./summary_periods.cjs');
 const feeKinds=['sales','refund','order_fee','adjustment','shop_adjustment','operations','finance','product_cost','gcash','promotion','warehouse_order','warehouse_other'];
 const flowDate=f=>Object.hasOwn(f,'period_date')?f.period_date:Object.hasOwn(f,'statistics_date')?f.statistics_date:f.date;
-function open(request,timings){
+function open(request,timings,documentBuffer){
  if(sessions.has(request.key))return sessions.get(request.key);
  sessions.clear();
- const s=createEngine(request.path,request.input,{memo:true,timings,retainSource:false}),{c}=s,directoryStarted=performance.now();
+ const s=createEngine(request.path,request.input,{memo:true,timings,retainSource:false,documentBuffer}),{c}=s,directoryStarted=performance.now();
  s.sourceScope=request.input.sourceScope;
  // Valid only for this immutable batch/settings session; never cache fee amounts.
  s.itemMatches=new Map();s.itemCostIndexes=new WeakMap();
@@ -108,8 +108,8 @@ function calculate(s,view,filters,mode,scope='store'){
 }
 function cell(s,g,kind,sku){
  const value=s.rates.read(g,kind,sku),entries=sku?[]:g?.cells[kind]?.entries||[];
- if(entries.length&&entries.every(f=>f.amount==null||kind==='product_cost'&&f.cost_calculation?.components?.length&&f.cost_calculation.components.every(c=>Object.hasOwn(c,'unit_cost')&&c.unit_cost==null||c.reasons?.length)))return{amount:0n,partial:true};
- return value.partial&&value.amount==null?{amount:0n,partial:true}:value;
+ if(entries.length&&entries.every(f=>f.amount==null||kind==='product_cost'&&f.cost_calculation?.components?.length&&f.cost_calculation.components.every(c=>Object.hasOwn(c,'unit_cost')&&c.unit_cost==null||c.reasons?.length)))return{amount:null,partial:true};
+ return value;
 }
 function summaryRatio(s,value,sales){
  value=s.rates.displayAmount(value);sales=s.rates.displayAmount(sales);
@@ -123,7 +123,11 @@ function fieldIssues(s,g,kind,sku){
  for(const f of entries){
   const components=f.cost_calculation?.components||[];
   if(f.status==='reference'||f.ledger_disabled)continue;
-  if(f.amount==null||f.status==='pending'||f.fx_pending||f.cost_calculation?.state==='pending')reasons.add(f.description||f.allocation_reason||(f.fx_pending?'原币折算汇率缺失':'来源金额或核算依据未完整获取'));
+  if(f.amount==null||f.status==='pending'||f.fx_pending||f.cost_calculation?.state==='pending'){
+   const specific=f.cost_calculation?.reasons||[];
+   if(specific.length)for(const reason of specific)reasons.add(String(reason));
+   else reasons.add(f.description||f.allocation_reason||(f.fx_pending?'原币折算汇率缺失':'来源金额或核算依据未完整获取'));
+  }
   for(const component of components)for(const reason of component.reasons||[])reasons.add(String(reason));
   if(f.statistics_date_reason)reasons.add(f.statistics_date_reason);
  }
@@ -132,14 +136,21 @@ function fieldIssues(s,g,kind,sku){
  return [...reasons].slice(0,8);
 }
 function amount(s,value){return value==null?null:s.p.fixed(value);}
+function confirmedProfit(s,g,sku){
+ if(!g)return null;
+ const kinds=feeKinds.filter(k=>!['operations','finance'].includes(k)).concat('advertising');
+ if(kinds.some(kind=>{const value=cell(s,g,kind,sku);return value.partial||value.amount==null;}))return null;
+ return s.rates.profit(g,sku);
+}
 function summaryTotals(s,groups,operations,finance,sku){
  const totals=new Map();
  for(const [i,g]of groups.entries()){
-  const key=rowKey(g,i),currency=g.currency;if(!totals.has(currency))totals.set(currency,{currency,sales:0n,operations:0n,finance:0n,partial:false});
-  const row=totals.get(currency),sales=cell(s,g,'sales',sku),cost=cell(s,g,'product_cost',sku),op=s.rates.profit(operations.get(key),sku),fin=s.rates.profit(finance.get(key),sku);
+  const key=rowKey(g,i),currency=g.currency;if(!totals.has(currency))totals.set(currency,{currency,sales:0n,operations:0n,finance:0n,known:{sales:false,operations:false,finance:false},partial:false});
+  const row=totals.get(currency),sales=cell(s,g,'sales',sku),cost=cell(s,g,'product_cost',sku),op=confirmedProfit(s,operations.get(key),sku),fin=confirmedProfit(s,finance.get(key),sku);
+  row.known.sales ||= sales.amount!=null;row.known.operations ||= op!=null;row.known.finance ||= fin!=null;
   row.sales+=sales.amount||0n;row.operations+=op||0n;row.finance+=fin||0n;row.partial ||= !!g.pending||sales.partial||cost.partial||sales.amount==null||op==null||fin==null||feeKinds.some(kind=>{const group=kind==='operations'?operations.get(key):kind==='finance'?finance.get(key):g,r=cell(s,group,['operations','finance'].includes(kind)?'advertising':kind,sku);return r.partial||r.amount==null;});
  }
- return [...totals.values()].map(row=>({...row,sales:amount(s,row.sales),operations:amount(s,row.operations),finance:amount(s,row.finance)}));
+ return [...totals.values()].map(({known,...row})=>({...row,sales:known.sales?amount(s,row.sales):null,operations:known.operations?amount(s,row.operations):null,finance:known.finance?amount(s,row.finance):null}));
 }
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function factHtml(s,f,filters={}){
@@ -156,6 +167,19 @@ function identity(s,g,view){
  const member=g.members?.[0],fact=Object.values(g.cells||{}).flatMap(x=>x.entries)[0],store=g.store_id||member?.store||g.store;
  return{country:s.countries[g.country]||g.country,platform:g.platform||member?.platform||fact?.platform||'',store:store?String(store):'',shop:g.shop||g.store_code||(g.shops?[...g.shops].join('、'):fact?.store_code)||'待归属店铺',currency:g.currency,order:g.external_order_id||'',sku:g.code||'',title:g.title||g.reason||g.code||'',product_id:g.product_id||'',url:g.url||'',sku_count:g.skus?.length||0};
 }
+function pendingAdvertising(s,filters,mode){
+ const type=filters.period_type||'month',within=periodFilter(type,filters.period),out=new Map();
+ const local={...filters,month:type==='week'&&filters.period&&filters.period!=='undated'?'':filters.month};
+ for(const f of s.ledgers.get(type+'|'+mode)||[]){
+  if(f.kind!=='advertising'||!f.store_id||!orderAttribution(s,f)||!scopeMatches(filters,f)||!s.p.matches(f,local)||!within(f))continue;
+  if(!s.counted(f)&&f.amount!=null)continue;
+  const key=String(f.store_id)+'|'+f.currency;
+  if(!out.has(key))out.set(key,{amount:0n,known:0,unknown:0,reasons:new Set()});
+  const row=out.get(key);if(f.amount==null)row.unknown++;else{row.known++;row.amount+=s.p.micro(f.amount);}
+  row.reasons.add(orderAttribution(s,f));
+ }
+ return new Map([...out].map(([key,row])=>[key,{known_amount:row.known?amount(s,row.amount):null,unknown_rows:row.unknown,reasons:[...row.reasons]}]));
+}
 function table(s,input){
  const {view,filters={},mode='operations',scope='store',page=1,page_size=20}=input,sku=['sku','product_link'].includes(view);
  const range=filters.period_type&&filters.period_type!=='month'&&filters.period&&filters.period!=='undated'?periodRange(filters.period_type,filters.period):null;
@@ -167,6 +191,8 @@ function table(s,input){
  const stats=s.tableStats.get(statsKey);
  s.tableStats.delete(statsKey);s.tableStats.set(statsKey,stats);
  const ops=query(s,view,filters,view==='detail'?mode:'operations',scope),fin=view==='detail'?[]:query(s,view,filters,'finance',scope),opMap=view==='detail'?null:new Map(ops.map((g,i)=>[rowKey(g,i),g])),finMap=view==='detail'?null:new Map(fin.map((g,i)=>[rowKey(g,i),g]));
+ if(view==='store'&&!stats.pendingAdvertising)stats.pendingAdvertising={operations:pendingAdvertising(s,filters,'operations'),finance:pendingAdvertising(s,filters,'finance')};
+ const unallocatedAds=stats.pendingAdvertising;
  const base=view==='detail'?ops:[...new Map((mode==='finance'?fin.concat(ops):ops.concat(fin)).map((g,i)=>[rowKey(g,i),g])).values()];
  if(!stats.summary_totals){
  if(view==='detail'){
@@ -183,13 +209,18 @@ function table(s,input){
   }
   const operation=opMap.get(key),finance=finMap.get(key),values={},partial={},field_issues={};
   for(const kind of feeKinds){const isAd=['operations','finance'].includes(kind),group=isAd?(kind==='operations'?operation:finance):g,sourceKind=isAd?'advertising':kind,r=cell(s,group,sourceKind,sku);values[kind]=amount(s,r.amount);partial[kind]=r.partial;field_issues[kind]=fieldIssues(s,group,sourceKind,sku);if(boundary)field_issues[kind].push('本周期超出已接入日期范围，当前仅为已载入部分');}
-  const profits={operations:s.rates.profit(operation,sku),finance:s.rates.profit(finance,sku)},sales=cell(s,g,'sales',sku),cost=cell(s,g,'product_cost',sku),denominator=sales.amount,rates={};
+  const pending_advertising={};
+  for(const mode of ['operations','finance']){const pending=unallocatedAds?.[mode].get(String(g.store_id||g.store)+'|'+g.currency);if(!pending)continue;pending_advertising[mode]=pending;field_issues[mode].push((pending.known_amount==null?'广告来源金额尚未确认':'已知广告来源 '+pending.known_amount+' '+g.currency)+'；'+pending.reasons.join('；')+'；未分摊部分不计入本行利润');}
+  const profits={operations:confirmedProfit(s,operation,sku),finance:confirmedProfit(s,finance,sku)},sales=cell(s,g,'sales',sku),cost=cell(s,g,'product_cost',sku),denominator=sales.partial?null:sales.amount,rates={};
   const labeledIssues=keys=>[...new Set(keys.flatMap(k=>field_issues[k].map(reason=>(s.labels[k]||k)+'：'+reason)))];
   field_issues.gross_margin=labeledIssues(['sales','product_cost']);
   for(const mode of ['operations','finance'])field_issues['profit_'+mode]=labeledIssues(feeKinds.filter(k=>!['operations','finance'].includes(k)||k===mode));
-  for(const [kind]of s.rates.fields)rates[kind]=summaryRatio(s,kind==='gross_margin'?sales.amount==null?null:s.rates.displayAmount(sales.amount)+s.rates.displayAmount(cost.amount||0n):kind.startsWith('profit_')?profits[kind.slice(7)]:values[kind]==null?null:s.p.micro(values[kind]),denominator);
+  for(const [kind]of s.rates.fields)rates[kind]=summaryRatio(s,kind==='gross_margin'?sales.partial||cost.partial||sales.amount==null||cost.amount==null?null:s.rates.displayAmount(sales.amount)+s.rates.displayAmount(cost.amount):kind.startsWith('profit_')?profits[kind.slice(7)]:values[kind]==null?null:s.p.micro(values[kind]),denominator);
   for(const kind of feeKinds)if(!Object.hasOwn(rates,kind))rates[kind]=summaryRatio(s,values[kind]==null?null:s.p.micro(values[kind]),denominator);
-  return{key,identity:identity(s,g,view),values,partial,field_issues,profits:{operations:amount(s,profits.operations),finance:amount(s,profits.finance)},rates,pending:boundary||!!g.pending||Object.values(values).some(x=>x==null)||Object.values(partial).some(Boolean)};
+  const compositions={};
+  for(const kind of [...feeKinds,'gross_margin','profit_operations','profit_finance','rate:product_cost'])compositions[kind]=detail(s,{...input,row_key:key,kind,source_key:undefined,cost_page:1,flow_page:1,composition_only:true},{operations:opMap,finance:finMap});
+  for(const [mode,pending]of Object.entries(pending_advertising)){compositions[mode].pending_allocation=pending;compositions[mode].note+=' '+field_issues[mode].join('；');}
+  return{key,identity:identity(s,g,view),values,partial,field_issues,pending_advertising,compositions,profits:{operations:amount(s,profits.operations),finance:amount(s,profits.finance)},rates,pending:boundary||!!g.pending||Object.values(values).some(x=>x==null)||Object.values(partial).some(Boolean)};
  });
  if(!stats.attribution){
  stats.undated=query(s,'detail',{...filters,from:'',to:'',kind:'warehouse_order',status:'',keyword:'',editable:''},mode).filter(f=>f.statistics_date_reason).length;
@@ -216,14 +247,15 @@ function table(s,input){
  if(view!=='detail')for(const row of rows)if(itemGaps.some(g=>row.identity.shop===g.store||view==='country'&&s.options.stores.some(shop=>shop.code===g.store&&s.countries[shop.country]===row.identity.country)))row.pending=true;
  return{view,mode,rows,total:base.length,page:current,page_size,summary_totals,options:scopedOptions(s,filters),labels:s.labels,rate_fields:s.rates.fields,attribution,allocation_version:'order-ledger-v3',period_warning:boundary?`本周期超出已接入范围（${s.sourceScope.from} — ${s.sourceScope.to}），仅计算已载入部分，不认定完整周期；未自动补采数据。`:'',period_note:'正式汇总共用已归属订单明细。未关联／未分摊的仓库处理费及仓库其他费不参与本次汇总，也不进入待核对；原登记保留不动。无订单的订单调整、公共订单费用及店铺调整按同店同币种所选月／自然周／半月的有效结算销售额分摊，直接关联订单的调整不重摊。其他来源确实缺金额、日期或同期分母时才保留待核对；订单内缺商品依据仍明确标记。已关联仓库费用、成本及汇率规则不变。',date_warning:undated?`${undated}笔已关联出库处理费缺少唯一发货／揽收日期，金额保留在原账期及待归期，不混入未关联费用待核对区。已关联仓库其他费沿用对应订单归期。`:''};
 }
-function detail(s,input){
- const {view,filters={},scope='store',mode='operations',row_key,kind}=input,sku=['sku','product_link'].includes(view),rows=query(s,view,filters,mode,scope),g=rows.find((x,i)=>rowKey(x,i)===row_key);
+function detail(s,input,groups){
+ const {view,filters={},scope='store',mode='operations',row_key,kind}=input,sku=['sku','product_link'].includes(view),g=groups?groups[mode]?.get(row_key):query(s,view,filters,mode,scope).find((x,i)=>rowKey(x,i)===row_key);
  if(!g)throw Error('该行已变化，请刷新后重试。');
+ if(groups)s.c.HTML2_STORE_HIERARCHY.setMode(mode);
  if(view==='detail')return{title:(s.labels[g.kind]||g.kind)+' · 来源及核算依据',html:factHtml(s,g,filters),records:[]};
  const isRate=kind.startsWith('rate:'),k=isRate?kind.slice(5):kind,ad=['operations','finance'].includes(k),targetKind=ad?'advertising':k;
- if(ad&&mode!==k)return detail(s,{...input,mode:k});
- if(k.startsWith('profit_')&&mode!==k.slice(7))return detail(s,{...input,mode:k.slice(7)});
- const read=cell(s,g,targetKind,sku),sales=cell(s,g,'sales',sku),cost=cell(s,g,'product_cost',sku),net=k.startsWith('profit_'),gross=k==='gross_margin',target=gross?(sales.amount==null||cost.amount==null?null:s.rates.displayAmount(sales.amount)+s.rates.displayAmount(cost.amount)):net?s.rates.profit(g,sku):read.amount;
+ if(ad&&mode!==k)return detail(s,{...input,mode:k},groups);
+ if(k.startsWith('profit_')&&mode!==k.slice(7))return detail(s,{...input,mode:k.slice(7)},groups);
+ const read=cell(s,g,targetKind,sku),sales=cell(s,g,'sales',sku),cost=cell(s,g,'product_cost',sku),net=k.startsWith('profit_'),gross=k==='gross_margin',target=gross?(sales.partial||cost.partial||sales.amount==null||cost.amount==null?null:s.rates.displayAmount(sales.amount)+s.rates.displayAmount(cost.amount)):net?confirmedProfit(s,g,sku):read.amount;
  if(k==='product_cost'&&!isRate){
   let entries=sku?(g.members||g.skus?.flatMap(x=>x.members)||[]).filter(m=>m.fact?.kind==='product_cost').map((m,i)=>({
    ...m.fact,amount:m.amounts.product_cost==null?null:s.p.fixed(m.amounts.product_cost),currency:g.currency,
@@ -244,6 +276,7 @@ function detail(s,input){
  }
  let parts=[],records=[],recordsTotal=0,recordsPage=1;const recordsSize=50;
  function sourceRecords(items,record){
+  if(input.composition_only){recordsTotal=items.length;return [];}
   if(!input.flow_page)return items.map(record);
   recordsTotal=items.length;recordsPage=Math.max(1,Math.min(input.flow_page,Math.max(1,Math.ceil(recordsTotal/recordsSize))));
   const offset=(recordsPage-1)*recordsSize;return items.slice(offset,offset+recordsSize).map((item,index)=>record(item,offset+index));
@@ -264,11 +297,15 @@ function detail(s,input){
  }
  const rounded=parts.map(r=>({...r,amount:s.rates.displayAmount(r.amount)})),total=s.rates.displayAmount(target),sum=rounded.filter(r=>r.included!==false).reduce((n,r)=>n+(r.amount||0n),0n);
  if(total!=null&&sum!==total)rounded.push({label:'显示精度／来源待细分差额',amount:total-sum});
- const denom=sales.amount;
+ const denom=sales.partial?null:sales.amount;
  return{title:(isRate?s.rates.fields.find(x=>x[0]===k)?.[1]:s.labels[targetKind]||k)+' · 构成',amount:amount(s,total),sales:amount(s,denom),rate:summaryRatio(s,total,denom),parts:rounded.map(r=>({label:r.label,level:r.level||2,subtotal:r.leaf===false,included:r.included!==false,status:r.status,source:r.source||'',amount:amount(s,r.amount),rate:r.amount==null||r.status==='reference'?'—':summaryRatio(s,r.amount,denom)})),records,...(input.flow_page?{records_total:recordsTotal,records_page:recordsPage,records_page_size:recordsSize}:{}),note:'金额与费率共用相同构成；分类小计不重复计入合计，仅核对项目不计入金额和费率。分母为本行订单销售额，不扣退款。'+(sku?'子项按本行已分摊金额拆分，不是平台直接返回的SKU费用。':'')};
 }
 async function dispatch(request,timings){
- const started=performance.now(),s=open(request,timings),input=request.input;
+ const started=performance.now();let documentBuffer;
+ if(!sessions.has(request.key))documentBuffer=await readDocument(request.path);
+ const readMs=performance.now()-started;
+ const s=open(request,timings,documentBuffer),input=request.input;documentBuffer=null;
+ timings.read_decode_ms=(timings.read_decode_ms||0)+readMs;
  timings.open_ms=performance.now()-started;
  const calculateStarted=performance.now();
  try{

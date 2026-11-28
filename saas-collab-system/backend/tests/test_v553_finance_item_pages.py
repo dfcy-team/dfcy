@@ -27,4 +27,5 @@ def test_item_pages_include_201_original_rows_exclude_later_insert():
     assert [next(iterator).pk for _ in range(200)] == list(range(1,201))
     rows.append(SimpleNamespace(pk=202))
     assert [r.pk for r in iterator] == [201]
-    assert sizes == [200,1,0]
+    # The frozen upper PK is reached without an extra empty query.
+    assert sizes == [200,1]

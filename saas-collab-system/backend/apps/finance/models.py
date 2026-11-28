@@ -358,3 +358,4 @@ class FinanceAuditLog(models.Model):
 from .platform_wallet_models import PlatformApiWithdrawal, PlatformWalletSync, PlatformWalletCursor  # noqa: E402,F401
 
 from .summary_models import FinanceSummaryDataset, FinanceSummaryState, FinanceSummaryInput, FinanceSummaryCalculation, FinanceSummaryAutomationCheck  # noqa: E402,F401
+from .summary_models import FinanceSummarySnapshot, FinanceSummaryBuildLease  # noqa: E402,F401
