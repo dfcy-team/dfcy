@@ -262,6 +262,13 @@ jobs:
           ref: ${{ github.sha }}
           path: .v557-cumulative-control
           persist-credentials: false
+      - name: Check out protected V561 cumulative release control
+        if: inputs.action == 'deploy' && inputs.release_sha == '178d4ce1878c81e3e32dcd0ca84209347b0565ed'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .v561-cumulative-control
+          persist-credentials: false
       - name: Check out protected V554 cumulative release control
         if: inputs.action == 'deploy' && inputs.release_sha == '71faab0aee2b5e1c32204c6859a0022661ac46da'
         uses: actions/checkout@v4
@@ -461,6 +468,8 @@ jobs:
             python .v518-cumulative-control/saas-collab-system/deploy/production-control/ci/verify_v518_cumulative_source.py
           elif [[ "$action" = deploy && "$release_sha" = ea40fc102015ece64157a7ff88e69fcf8be99818 ]]; then
             python .v557-cumulative-control/saas-collab-system/deploy/production-control/ci/verify_v557_cumulative_source.py
+          elif [[ "$action" = deploy && "$release_sha" = 178d4ce1878c81e3e32dcd0ca84209347b0565ed ]]; then
+            python .v561-cumulative-control/saas-collab-system/deploy/production-control/ci/verify_v561_cumulative_source.py
           elif [[ "$action" = deploy && "$release_sha" = 71faab0aee2b5e1c32204c6859a0022661ac46da ]]; then
             python .v554-cumulative-control/saas-collab-system/deploy/production-control/ci/verify_v554_cumulative_source.py
           elif [[ "$action" = deploy && "$release_sha" = 3d977af50a0064d455f7c5e35baacc29f7c6278c ]]; then
@@ -574,6 +583,19 @@ jobs:
           notes=json.loads(Path('saas-collab-system/frontend/src/data/releaseNotes.json').read_bytes())
           today=datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).date().isoformat()
           assert os.environ['GITHUB_RUN_ATTEMPT']=='1' and notes[0]['version']=='2.44.557' and notes[0]['date']==today=='2026-11-27', 'V557 crossed its frozen release date or reused an attempt; prepare fresh notes/source/control'
+          PY
+      - name: Enforce V561 frozen date before building images
+        if: needs.validate.outputs.release_sha == '178d4ce1878c81e3e32dcd0ca84209347b0565ed'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import datetime,json,os
+          from pathlib import Path
+          from datetime import timedelta,timezone
+          notes=json.loads(Path('saas-collab-system/frontend/src/data/releaseNotes.json').read_bytes())
+          today=datetime.datetime.now(timezone(timedelta(hours=8))).date().isoformat()
+          if os.environ.get('GITHUB_RUN_ATTEMPT')!='1' or notes[0].get('version')!='2.44.561' or notes[0].get('date')!=today or today!='2026-11-28':
+            raise RuntimeError('V561 frozen release date or attempt gate failed; prepare a fresh source/control')
           PY
       - name: Enforce V554 frozen date before building images
         if: needs.validate.outputs.release_sha == '71faab0aee2b5e1c32204c6859a0022661ac46da'
@@ -749,6 +771,13 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $today = [DateTimeOffset]::UtcNow.ToOffset([TimeSpan]::FromHours(8)).ToString('yyyy-MM-dd')
           if ($env:GITHUB_RUN_ATTEMPT -ne '1' -or $today -ne '2026-11-27') { throw 'V557 crossed its frozen release date or reused an attempt; prepare fresh notes/source/control.' }
+      - name: Enforce V561 frozen date immediately before VM deployment
+        if: env.RELEASE_SHA == '178d4ce1878c81e3e32dcd0ca84209347b0565ed'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $today = [DateTimeOffset]::UtcNow.ToOffset([TimeSpan]::FromHours(8)).ToString('yyyy-MM-dd')
+          if ($env:GITHUB_RUN_ATTEMPT -ne '1' -or $today -ne '2026-11-28') { throw 'V561 frozen release date or attempt gate failed; prepare a fresh source/control.' }
       - name: Enforce V554 frozen date immediately before VM deployment
         if: env.RELEASE_SHA == '71faab0aee2b5e1c32204c6859a0022661ac46da'
         shell: pwsh
