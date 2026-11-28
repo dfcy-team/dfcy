@@ -21,7 +21,7 @@ def test_gmv_max_read_uses_latest_success_audit_for_reused_content(monkeypatch):
     # A was first stored before B, then observed again after B (A -> B -> A).
     audits = [SimpleNamespace(pk=10, created_at=now.replace(minute=2), masked_detail={'raw_payload_id':1})]
     class RawManager:
-        def filter(self, *args, **kwargs): return RawQuery([b, a])
+        def filter(self, *args, **kwargs): return RawQuery([b, a]).filter(**kwargs)
     class AuditManager:
         def filter(self, *args, **kwargs): return RawQuery(audits)
     monkeypatch.setattr(gmv_max_read.SharedAdvertisingRawPayload, 'objects', RawManager())
@@ -45,7 +45,7 @@ def test_gmv_max_read_keeps_created_at_order_when_history_has_no_audit(monkeypat
                      'metrics':{'cost':cost,'gross_revenue':cost,'orders':1}}]}]})
     older, newer = snapshot(1, 1, '1'), snapshot(2, 2, '2')
     class RawManager:
-        def filter(self, *args, **kwargs): return RawQuery([older, newer])
+        def filter(self, *args, **kwargs): return RawQuery([older, newer]).filter(**kwargs)
     class AuditManager:
         def filter(self, *args, **kwargs): return RawQuery([])
     monkeypatch.setattr(gmv_max_read.SharedAdvertisingRawPayload, 'objects', RawManager())
@@ -57,9 +57,20 @@ def test_gmv_max_read_keeps_created_at_order_when_history_has_no_audit(monkeypat
 
 
 class RawQuery(list):
+    def annotate(self, **kwargs): return self
+    def filter(self, **kwargs):
+        if 'pk__in' in kwargs:
+            return RawQuery([x for x in self if x.pk in kwargs['pk__in']])
+        return self
+    def values_list(self, *fields):
+        def get(item, name):
+            if name.startswith('key_'): return item.payload[name[4:]]
+            if name == 'raw_id': return item.masked_detail['raw_payload_id']
+            return getattr(item, name)
+        return RawQuery([tuple(get(item, name) for name in fields) for item in self])
     def only(self, *args): return self
     def order_by(self, *args): return self
-    def iterator(self): return iter(self)
+    def iterator(self, **kwargs): return iter(self)
 
 
 def test_video_run_day_reloads_deactivated_actor_before_request_or_commit(monkeypatch):
