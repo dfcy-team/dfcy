@@ -91,3 +91,31 @@ it('页尾构成复用汇总分组，不为每个科目重新扫描全部行',()
  for(const [kind,parts] of Object.entries(result.rows[19].compositions))expect(parts).toEqual(detail(s,{
   view:'store',filters,row_key:'group:499',kind,flow_page:1,cost_page:1,composition_only:true}));
 });
+
+it('全部来源金额未知保留null和具体缺项，部分已知不丢金额',()=>{
+ const s=session(),filters={month:'2026-09'};
+ const group={key:'pending',currency:'PHP',store_id:1,country:'PH',cells:{sales:{amount:0n,entries:[{amount:null,description:'结算字段缺失：original_price'}]},product_cost:{amount:0n,entries:[{amount:null,cost_calculation:{state:'pending',reasons:['缺成本归属月份业务汇率']}}]}}};
+ s.rates.read.mockImplementation((g,k)=>({amount:g?.cells[k]?.amount??null,partial:['sales','product_cost'].includes(k)}));
+ s.rates.profit=()=>null;s.queryGroup=JSON.stringify(['store',filters,'store']);
+ for(const mode of ['operations','finance'])s.queries.set(JSON.stringify(['store',filters,mode,'store']),[group]);
+ const result=table(s,{view:'store',filters,page:1,page_size:20}).rows[0];
+ expect(result.values.sales).toBeNull();expect(result.values.product_cost).toBeNull();
+ expect(result.field_issues.sales).toContain('结算字段缺失：original_price');
+ expect(result.field_issues.product_cost).toContain('缺成本归属月份业务汇率');
+ expect(result.compositions.gross_margin.amount).toBeNull();
+});
+
+it('已知广告待分摊保留来源金额和原因，不计入店铺或利润且不泄漏其他店铺',()=>{
+ const s=session(),filters={month:'2026-09',_stores:['1']};
+ const group={key:'pending',currency:'PHP',store_id:1,country:'PH',cells:{sales:{amount:0n,entries:[{amount:null}]}}};
+ for(const mode of ['operations','finance']){s.ledgers.set('month|'+mode,[...s.ledgers.get('month|'+mode)]);s.ledgers.get('month|'+mode).push({store_id:1,country:'PH',kind:'advertising',external_order_id:'',currency:'PHP',amount:'-10',date:'2026-09-01',month:'2026-09',allocation_reason:'结算分母不完整'});}
+ s.ledgers.get('month|operations').push({store_id:2,country:'PH',kind:'advertising',external_order_id:'',currency:'PHP',amount:'-999',date:'2026-09-01',month:'2026-09'});
+ s.rates.read.mockImplementation((g,k)=>({amount:g?.cells[k]?.amount??null,partial:k==='sales'}));
+ s.queryGroup=JSON.stringify(['store',filters,'store']);for(const mode of ['operations','finance'])s.queries.set(JSON.stringify(['store',filters,mode,'store']),[group]);
+ const value=table(s,{view:'store',filters,page:1,page_size:20}),r=value.rows[0];
+ expect(r.values.operations).toBeNull();expect(r.pending_advertising.operations.known_amount).toBe('-10.000000');
+ expect(r.pending_advertising.operations.reasons).toContain('结算分母不完整');
+ expect(r.compositions.operations.pending_allocation).toEqual(r.pending_advertising.operations);
+ expect(r.profits.operations).toBeNull();expect(value.summary_totals[0].sales).toBeNull();
+ expect(JSON.stringify(r)).not.toContain('-999');
+});

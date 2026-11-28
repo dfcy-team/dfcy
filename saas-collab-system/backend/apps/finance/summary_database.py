@@ -48,6 +48,47 @@ def posted_income(rows, envelope_id):
             'platform_finance_fields': evidence, 'basis': 'posted_provider_fields'} if income else None
 
 
+def shopee_settlement(income, net):
+    """Select an evidenced provider field schema; never infer absent amounts as zero."""
+    refund = Decimal(income['seller_return_refund']) if income.get('seller_return_refund') is not None else None
+    complete_fields = [('voucher_from_seller', -1), ('seller_coin_cash_back', -1),
+        ('buyer_paid_shipping_fee', 1), ('shipping_fee_discount_from_3pl', 1), ('shopee_shipping_rebate', 1),
+        ('actual_shipping_fee', -1), ('reverse_shipping_fee', -1), ('seller_shipping_discount', 1), ('final_return_to_seller_shipping_fee', -1)]
+    complete_fields += [(k, -1) for k in ('commission_fee', 'service_fee', 'seller_transaction_fee',
+        'order_ams_commission_fee', 'seller_order_processing_fee', 'withholding_tax', 'cross_border_tax',
+        'escrow_tax', 'fbs_fee', 'ads_escrow_top_up_fee_or_technical_support_fee', 'campaign_fee', 'sspl_fee',
+        'sales_tax_on_lvg', 'shipping_fee_sst', 'return_handling_fee', 'overseas_return_service_fee',
+        'shipping_seller_protection_fee_amount', 'lff_seller_protection_fee_amount', 'reverse_shipping_fee_sst',
+        'return_to_seller_shipping_fee_sst', 'final_product_vat_tax', 'final_shipping_vat_tax')]
+    legacy_fields = [(k, -1) for k in ('voucher_from_seller', 'commission_fee', 'seller_transaction_fee',
+        'order_ams_commission_fee', 'seller_order_processing_fee', 'ads_escrow_top_up_fee_or_technical_support_fee',
+        'actual_shipping_fee', 'reverse_shipping_fee')]+[('buyer_paid_shipping_fee', 1), ('shopee_shipping_rebate', 1)]
+    schemas = [('provider_original_discount', ['original_price', 'seller_discount'], complete_fields),
+               ('provider_selling_price', ['order_selling_price'], legacy_fields)]
+    matches, failures = [], []
+    for schema, prices, fields in schemas:
+        missing = [key for key in [*prices, 'seller_return_refund', *(key for key, _ in fields)] if income.get(key) is None]
+        components = [{'field': key, 'label': key,
+                       'amount': text(Decimal(income[key])*sign) if income.get(key) is not None else None}
+                      for key, sign in fields]
+        if missing:
+            failures.append((missing, components))
+            continue
+        merchandise = Decimal(income['original_price'])-Decimal(income['seller_discount']) if len(prices) == 2 else Decimal(income['order_selling_price'])
+        sales = merchandise-refund
+        fees = sum((Decimal(c['amount']) for c in components), ZERO)
+        if sales+refund+fees == net:
+            matches.append((sales, fees, components, schema))
+        else:
+            failures.append(([], components))
+    if matches and len({(sales, fees) for sales, fees, _, _ in matches}) == 1:
+        sales, fees, components, schema = matches[0]
+        return sales, refund, fees, components, '', schema
+    missing, components = min(failures, key=lambda item: len(item[0])) if failures else ([], [])
+    reason = '多个结算字段结构的核算结果不一致' if matches else '结算字段缺失：'+ '、'.join(missing) if missing else '结算字段构成与净结算额不一致'
+    return None, refund, None, components, reason, ''
+
+
 def split_amount(amount, weights):
     """Largest remainder in micro-units; deterministic and exactly conserved."""
     weights = [(str(k), Decimal(str(v))) for k, v in weights if Decimal(str(v)) > 0]
@@ -61,6 +102,19 @@ def split_amount(amount, weights):
     added = {k for k, _, _ in order[:remainder]}
     sign = -1 if Decimal(str(amount)) < 0 else 1
     return {k: Decimal(v + (k in added)) * SIX * sign for k, v, _ in rows}
+
+
+def prior_settlement_keys(prior, first):
+    """Bound historical lookups to this store's cost-bearing orders."""
+    by_store = defaultdict(list)
+    for store_id, external in first:
+        by_store[store_id].append(external)
+    keys = set()
+    for store_id, orders in by_store.items():
+        for offset in range(0, len(orders), 500):
+            keys.update(prior.filter(store_id=store_id, external_order_id__in=orders[offset:offset+500])
+                        .order_by().values_list('store_id', 'external_order_id').distinct())
+    return keys
 
 
 def shipping_dates(orders, shipments):
@@ -413,37 +467,15 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
         if native and source:
             income = {key: text_pool.setdefault(value, value) for key, value in income.items()}
             source = {**source, 'income': income}
-        components = []
-        if store.code.startswith('SPKJ'):
-            fields = [('voucher_from_seller', -1), ('seller_coin_cash_back', -1),
-                ('buyer_paid_shipping_fee', 1), ('shipping_fee_discount_from_3pl', 1), ('shopee_shipping_rebate', 1),
-                ('actual_shipping_fee', -1), ('reverse_shipping_fee', -1), ('seller_shipping_discount', 1), ('final_return_to_seller_shipping_fee', -1)]
-            fields += [(k, -1) for k in ('commission_fee', 'service_fee', 'seller_transaction_fee',
-                'order_ams_commission_fee', 'seller_order_processing_fee', 'withholding_tax', 'cross_border_tax',
-                'escrow_tax', 'fbs_fee', 'ads_escrow_top_up_fee_or_technical_support_fee', 'campaign_fee', 'sspl_fee',
-                'sales_tax_on_lvg', 'shipping_fee_sst', 'return_handling_fee', 'overseas_return_service_fee',
-                'shipping_seller_protection_fee_amount', 'lff_seller_protection_fee_amount', 'reverse_shipping_fee_sst',
-                'return_to_seller_shipping_fee_sst', 'final_product_vat_tax', 'final_shipping_vat_tax')]
-            merchandise = None if any(income.get(k) is None for k in ['original_price', 'seller_discount']) else Decimal(income['original_price'])-Decimal(income['seller_discount'])
-        else:
-            fields = [(k, -1) for k in ('voucher_from_seller', 'commission_fee', 'seller_transaction_fee',
-                'order_ams_commission_fee', 'seller_order_processing_fee', 'ads_escrow_top_up_fee_or_technical_support_fee',
-                'actual_shipping_fee', 'reverse_shipping_fee')]+[('buyer_paid_shipping_fee', 1), ('shopee_shipping_rebate', 1)]
-            merchandise = Decimal(income['order_selling_price']) if income.get('order_selling_price') is not None else None
-        refund = Decimal(income['seller_return_refund']) if income.get('seller_return_refund') is not None else None
-        for name, sign in fields:
-            value = text(Decimal(income[name])*sign) if income.get(name) is not None else None
-            component = {'field': name, 'label': name, 'amount': value}
-            if native and value in (None, '0.000000', '-0.000000'):
-                component = component_pool.setdefault((name, value), component)
-            components.append(component)
-        fees = None if any(c['amount'] is None for c in components) else sum((Decimal(c['amount']) for c in components), ZERO)
-        sales = None if merchandise is None or refund is None else merchandise-refund
-        reconciled = sales is not None and fees is not None and refund is not None and sales+fees+refund == net_row.raw_amount
+        sales, refund, fees, components, settlement_reason, settlement_schema = shopee_settlement(income, net_row.raw_amount)
+        if native:
+            components = [component_pool.setdefault((c['field'], c['amount']), c)
+                          if c['amount'] in (None, '0.000000', '-0.000000') else c for c in components]
         prefix = 'html2:sp6th:settlement:'+order if store.code == 'SP6TH' else 'preview:'+'|'.join(['shopee', str(store_id), order, day, currency])
-        for kind, amount in [('sales', sales if reconciled else None), ('refund', refund), ('order_fee', fees if reconciled else None)]:
+        for kind, amount in [('sales', sales), ('refund', refund), ('order_fee', fees)]:
             add(store, kind, amount, day, order, prefix+':'+kind, source_proof=source and {k: source[k] for k in ['envelope_id', 'response_index', 'platform_finance_fields', 'basis'] if k in source},
-                sp6th_components=components if kind == 'order_fee' else None, description='SaaS保存的官方订单结算响应；构成必须与净结算额对平。')
+                sp6th_components=components if kind == 'order_fee' else None, settlement_schema=settlement_schema,
+                description=settlement_reason if kind != 'refund' and settlement_reason else 'SaaS保存的官方订单结算响应；构成必须与净结算额对平。')
         if source:shopee_income.append({'store_id': store_id, 'order': order, 'date': day, 'currency': currency, **source})
 
     financial_fact_count = len(facts) if native else 0
@@ -464,8 +496,7 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
         business_date__lt=start, raw_amount__gt=0).filter(Q(raw_fee_name__iexact='Item Price Credit') | Q(raw_fee_name='order_selling_price') | Q(raw_fee_name='escrow_amount'))
     if native:
         # Historical settlement matters only for orders receiving a cost in this scope.
-        prior = prior.filter(external_order_id__in={key[1] for key in first}).order_by()
-        prior_keys = set(prior.values_list('store_id', 'external_order_id').distinct())
+        prior_keys = prior_settlement_keys(prior, first)
     else:
         prior_keys = set(prior.values_list('store_id', 'external_order_id'))
     registrations = None

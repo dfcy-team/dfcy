@@ -42,6 +42,26 @@ function prepareSource(html,native=false,{retainJSON=true}={}){
  const compact=native&&html.includes('// SAAS_DATABASE_ENTRIES')&&snapshot.database;
  if(compact){
   const database=snapshot.database,pool=database.native_components;
+  if(database.native_cost_components){
+   const components=database.native_cost_components;if(!Array.isArray(components))throw Error('Invalid cost component dictionary');
+   for(const record of [...database.facts,...(database.cost_flows||[]),...(database.raw_flows||[])]){
+    const calculation=record.cost_calculation;if(!Array.isArray(calculation?.components))continue;
+    calculation.components=calculation.components.map(index=>{
+     if(!Number.isInteger(index)||index<0||index>=components.length||!components[index]||typeof components[index]!=='object')throw Error('Invalid cost component reference');
+     return components[index];
+    });
+   }
+  }
+  if(database.native_finance_fields){
+   const fields=database.native_finance_fields;if(!Array.isArray(fields))throw Error('Invalid financial evidence dictionary');
+   for(const record of [...database.facts,...(snapshot.shopee_income||[])]){
+    const proof=Object.hasOwn(record,'source_proof')?record.source_proof:record;
+    if(!proof||!Object.hasOwn(proof,'platform_finance_fields'))continue;
+    const index=proof.platform_finance_fields;
+    if(!Number.isInteger(index)||index<0||index>=fields.length||fields[index]===null||typeof fields[index]!=='object')throw Error('Invalid financial evidence reference');
+    proof.platform_finance_fields=fields[index];
+   }
+  }
   if(pool){
    if(!Array.isArray(pool))throw Error('Invalid financial component dictionary');
    for(const fact of database.facts)if(Array.isArray(fact.sp6th_components))fact.sp6th_components=fact.sp6th_components.map(index=>{
@@ -50,6 +70,11 @@ function prepareSource(html,native=false,{retainJSON=true}={}){
    });
   }
   if(database.raw_flows)database.raw_flows=database.raw_flows.map(flow=>{
+   if(Object.hasOwn(flow,'native_cost_index')){
+    const index=flow.native_cost_index;
+    if(!Number.isInteger(index)||index<0||!Array.isArray(database.cost_flows)||index>=database.cost_flows.length)throw Error('Invalid cost source reference');
+    return database.cost_flows[index];
+   }
    if(!Object.hasOwn(flow,'native_fact_index'))return flow;
    const index=flow.native_fact_index;
    if(!Number.isInteger(index)||index<0||index>=database.facts.length)throw Error('Invalid financial source reference');
@@ -81,11 +106,31 @@ function warehouseProfitRules(code){
   .replace('const date=first.get(identity(f));',"// SAAS_WAREHOUSE_SETTLEMENT\n   const warehouse=['warehouse_order','warehouse_other'].includes(f.kind);\n   const date=warehouse?f.warehouse_settlement_date:first.get(identity(f));\n   if(warehouse&&!date)continue;")
   .replace("accounting_basis:'首次有效销售结算（已载入历史）'","accounting_basis:warehouse?'关联订单有效结算日（不要求正向销售额）':'首次有效销售结算（已载入历史）'");
 }
-function createEngine(path,input,{memo=false,timings=null,retainSource=true}={}){
+async function readDocument(path){
+ const fd=fs.openSync(path,'r');let length;
+ try{
+  const tail=Buffer.alloc(4),size=fs.fstatSync(fd).size;
+  if(size<18||fs.readSync(fd,tail,0,4,size-4)!==4)throw Error('Invalid financial document');
+  length=tail.readUInt32LE(0);
+  if(!length||length>1024**3)throw Error('Financial document exceeds read budget');
+ }finally{fs.closeSync(fd);}
+ const input=fs.createReadStream(path),unzip=zlib.createGunzip();
+ input.on('error',error=>unzip.destroy(error));
+ try{
+  const output=Buffer.allocUnsafe(length);let offset=0;
+  for await(const chunk of input.pipe(unzip)){
+   if(chunk.length>length-offset)throw Error('Invalid financial document length');
+   chunk.copy(output,offset);offset+=chunk.length;
+  }
+  if(offset!==length)throw Error('Invalid financial document length');
+  return output;
+ }finally{input.destroy();unzip.destroy();}
+}
+function createEngine(path,input,{memo=false,timings=null,retainSource=true,documentBuffer=null}={}){
  const stat=fs.statSync(path),stamp=path+'|'+stat.mtimeMs+'|'+stat.size+'|'+input.sourceHash+'|'+memo;
  let snapshot,data,engineSource;
  if(!retainSource||source?.stamp!==stamp){
-  let started=performance.now(),html=zlib.gunzipSync(fs.readFileSync(path));if(!memo||retainSource)html=html.toString('utf8');
+  let started=performance.now(),html=documentBuffer||zlib.gunzipSync(fs.readFileSync(path));if(!memo||retainSource)html=html.toString('utf8');
   if(timings)timings.read_decode_ms=performance.now()-started;
   started=performance.now();
   if(input.sourceHash&&crypto.createHash('sha256').update(html).digest('hex')!==input.sourceHash)throw Error('财务批次来源校验失败，未执行计算或保存。');
@@ -122,4 +167,4 @@ function createEngine(path,input,{memo=false,timings=null,retainSource=true}={})
  if(timings)timings.vm_ms=performance.now()-vmStarted;
  return {c,p:c.PREVIEW_TEST,storage,writes,proposed,feeKey,plain};
 }
-module.exports={createEngine,plain,warehouseProfitRules,accountingCode,prepareSource};
+module.exports={createEngine,plain,warehouseProfitRules,accountingCode,prepareSource,readDocument};

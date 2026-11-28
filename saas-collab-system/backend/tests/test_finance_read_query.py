@@ -12,6 +12,29 @@ from tests.test_finance_summary import context, URL
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
+def test_native_evidence_transport_preserves_distinct_proofs_and_shared_costs():
+    from apps.finance.summary_read_query import compact_native_evidence
+    fields = {'original_price': 1, 'commission_fee': 2, 'seller_return_refund': 3}
+    other = [{'id': 2, 'amount': None, 'currency': 'MYR'}]
+    component = {'quantity': '2', 'unit_cost': None, 'reasons': ['pending']}
+    cost = {'source_id': 'cost:1', 'amount': None, 'cost_calculation': {'components': [component], 'reasons': ['pending']}}
+    independent = dict(cost)
+    source = {'facts': [{'source_proof': {'envelope_id': 1, 'platform_finance_fields': fields}},
+                        {'source_proof': {'envelope_id': 1, 'platform_finance_fields': fields}},
+                        {'source_proof': {'envelope_id': 2, 'platform_finance_fields': other}, 'cost_calculation': {'components': [component]}}],
+              'shopee_income': [{'platform_finance_fields': fields}],
+              'cost_flows': [cost], 'raw_flows': [cost, independent, {'native_fact_index': 0}]}
+    compact_native_evidence(source)
+    assert source['native_finance_fields'] == [fields, other]
+    assert [f['source_proof']['platform_finance_fields'] for f in source['facts']] == [0, 0, 1]
+    assert source['shopee_income'][0]['platform_finance_fields'] == 0
+    assert source['raw_flows'] == [{'native_cost_index': 0}, independent, {'native_fact_index': 0}]
+    assert source['cost_flows'][0] is cost
+    assert source['native_cost_components'] == [component]
+    assert source['facts'][2]['cost_calculation']['components'] == [0]
+    assert source['cost_flows'][0]['cost_calculation']['components'] == [0]
+
+
 def test_raw_payload_queries_are_sql_bounded_and_preserve_scope_and_all_rows(context):
     from django.db import connection
     from django.test.utils import CaptureQueriesContext

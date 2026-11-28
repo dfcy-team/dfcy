@@ -187,6 +187,7 @@ def materialize_source(user, dataset, spec, path, token):
             refs.append(indexes[key])
         fact['sp6th_components'] = refs
     source['native_components'] = pool
+    compact_native_evidence(source)
     temporary = path.with_suffix('.tmp-' + token)
     try:
         digest = write_document(temporary, gzip.decompress(document_path(dataset).read_bytes()).decode('utf-8'), source)
@@ -202,6 +203,40 @@ def materialize_source(user, dataset, spec, path, token):
     temporary = proof.with_suffix('.tmp-' + token)
     temporary.write_text(json.dumps(info), encoding='utf-8')
     os.replace(temporary, proof)
+
+
+def compact_native_evidence(source):
+    """Transport shared evidence once; restore it before any rule executes."""
+    fields, indexes = [], {}
+    for record in source.get('facts', []) + source.get('shopee_income', []):
+        proof = record.get('source_proof') if 'source_proof' in record else record
+        if not isinstance(proof, dict):continue
+        value = proof.get('platform_finance_fields')
+        if not isinstance(value, (dict, list)):continue
+        identity = id(value)
+        if identity not in indexes:
+            indexes[identity] = len(fields)
+            fields.append(value)
+        proof['platform_finance_fields'] = indexes[identity]
+    source['native_finance_fields'] = fields
+    components, component_indexes, calculations = [], {}, set()
+    for record in source.get('facts', []) + source.get('cost_flows', []) + source.get('raw_flows', []):
+        calculation = record.get('cost_calculation')
+        if not isinstance(calculation, dict) or not isinstance(calculation.get('components'), list):continue
+        if id(calculation) in calculations:continue
+        calculations.add(id(calculation))
+        refs = []
+        for component in calculation['components']:
+            identity = id(component)
+            if identity not in component_indexes:
+                component_indexes[identity] = len(components)
+                components.append(component)
+            refs.append(component_indexes[identity])
+        calculation['components'] = refs
+    source['native_cost_components'] = components
+    costs = {id(flow): index for index, flow in enumerate(source.get('cost_flows', []))}
+    source['raw_flows'] = [{'native_cost_index': costs[id(flow)]} if id(flow) in costs else flow
+                           for flow in source.get('raw_flows', [])]
 
 
 def launch_source_worker(request):

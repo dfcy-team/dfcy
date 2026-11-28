@@ -473,3 +473,66 @@ if(localFact(f).amount!=='-40')throw Error('Existing conversion behavior changed
 '''
     result=subprocess.run([node,'-e',script],capture_output=True,text=True,timeout=10)
     assert result.returncode==0, 'Flow date must not alter exchange-rate attribution'
+
+
+def settlement_fields():
+    from apps.finance.summary_database import INCOME_FIELDS
+    return {**{k: '0' for k in INCOME_FIELDS if k not in ('order_selling_price', 'currency')},
+            'original_price': '100', 'seller_discount': '10', 'seller_return_refund': '-5', 'commission_fee': '10'}
+
+
+def test_provider_original_discount_schema_does_not_depend_on_store_code():
+    from apps.finance.summary_database import shopee_settlement
+    income = settlement_fields()
+    sales, refund, fees, parts, reason, schema = shopee_settlement(income, Decimal('80'))
+    assert (sales, refund, fees) == (Decimal('95'), Decimal('-5'), Decimal('-10'))
+    assert sales+refund+fees == Decimal('80')
+    assert schema == 'provider_original_discount' and not reason
+    assert sum(Decimal(p['amount']) for p in parts) == fees
+
+
+def test_provider_legacy_schema_keeps_explicit_zero_and_refund_sign():
+    from apps.finance.summary_database import shopee_settlement
+    income = settlement_fields()
+    income.pop('original_price'); income.pop('seller_discount')
+    income['order_selling_price'] = '90'
+    assert shopee_settlement(income, Decimal('80'))[:3] == (Decimal('95'), Decimal('-5'), Decimal('-10'))
+    income['seller_return_refund'] = '0'; income['order_selling_price'] = '0'; income['commission_fee'] = '0'
+    assert shopee_settlement(income, Decimal('0'))[:3] == (Decimal('0'), Decimal('0'), Decimal('0'))
+
+
+def test_provider_missing_or_mismatched_fields_do_not_become_zero():
+    from apps.finance.summary_database import shopee_settlement
+    income = settlement_fields(); income.pop('commission_fee')
+    result = shopee_settlement(income, Decimal('80'))
+    assert result[0] is None and result[2] is None and result[1] == Decimal('-5')
+    assert 'commission_fee' in result[4]
+    result = shopee_settlement(settlement_fields(), Decimal('81'))
+    assert result[0] is None and result[2] is None and '不一致' in result[4]
+
+
+def test_provider_ambiguous_reconciled_schemas_are_not_silently_selected():
+    from apps.finance.summary_database import shopee_settlement
+    income = {**settlement_fields(), 'order_selling_price': '80', 'service_fee': '10'}
+    result = shopee_settlement(income, Decimal('70'))
+    assert result[0] is None and result[2] is None and '多个' in result[4]
+
+
+def test_prior_settlement_lookups_are_bounded_and_store_specific():
+    from apps.finance.summary_database import prior_settlement_keys
+    from unittest.mock import Mock
+    prior = Mock();calls=[]
+    def select(**filters):
+        calls.append(filters)
+        result=Mock();result.order_by.return_value.values_list.return_value.distinct.return_value=[
+            (filters['store_id'], order) for order in filters['external_order_id__in'] if order.endswith('0')]
+        return result
+    prior.filter.side_effect=select
+    first={(1, str(i)):'2026-11-01' for i in range(1001)}
+    first[(2,'0')]='2026-11-01'
+    keys=prior_settlement_keys(prior,first)
+    assert len(calls)==4 and max(len(c['external_order_id__in']) for c in calls)<=500
+    assert all(c['store_id'] in [1,2] for c in calls)
+    assert {(c['store_id'],o) for c in calls for o in c['external_order_id__in']}==set(first)
+    assert keys=={(sid,o) for sid,o in first if o.endswith('0')}
+    calls.clear();assert prior_settlement_keys(prior,{})==set();assert not calls
