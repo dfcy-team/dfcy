@@ -57,6 +57,32 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('combines multiple task statuses with store/search and clears them on reset', async () => {
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    const statusSelect = wrapper.findComponent('[aria-label="任务状态（可多选）"]');
+    expect(statusSelect.attributes('multiple')).toBeDefined();
+    Object.assign(wrapper.vm.filters, { status: ['pending', 'in_progress'], store: 3, search: 'Synthetic' });
+    wrapper.vm.page = 4;
+    wrapper.vm.applyFilters();
+    await flushPromises();
+    const lastTaskRequest = () => request.mock.calls.map(([config]) => config)
+      .filter((config) => config.url.endsWith('/outreach-tasks/')).at(-1);
+    expect(lastTaskRequest().params).toMatchObject({ status: 'pending,in_progress', store: 3, search: 'Synthetic', page: 1 });
+    wrapper.vm.filters.status = [];
+    wrapper.vm.applyFilters();
+    await flushPromises();
+    expect(lastTaskRequest().params).not.toHaveProperty('status');
+    expect(lastTaskRequest().params.store).toBe(3);
+    wrapper.vm.filters.status = ['pending'];
+    wrapper.vm.resetFilters();
+    await flushPromises();
+    expect(wrapper.vm.filters.status).toEqual([]);
+    expect(lastTaskRequest().params).not.toHaveProperty('store');
+    expect(lastTaskRequest().params).not.toHaveProperty('search');
+    wrapper.unmount();
+  });
+
   it.each(['task', 'standalone'])('passes the selected store for country-scoped nickname creation (%s)', async (kind) => {
     const wrapper = render(kind === 'task' ? OutreachTaskList : SampleFulfillmentList);
     await flushPromises();
