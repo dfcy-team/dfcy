@@ -12,6 +12,13 @@ from tests.test_finance_summary import context, URL
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
+@pytest.fixture(autouse=True)
+def legacy_refresh_mode(settings):
+    """Compatibility coverage; the new default mode has its own schedule suite."""
+    settings.FINANCE_SUMMARY_SCHEDULED_READS_ENABLED = False
+
+
+
 def test_native_evidence_transport_preserves_distinct_proofs_and_shared_costs():
     from apps.finance.summary_read_query import compact_native_evidence
     fields = {'original_price': 1, 'commission_fee': 2, 'seller_return_refund': 3}

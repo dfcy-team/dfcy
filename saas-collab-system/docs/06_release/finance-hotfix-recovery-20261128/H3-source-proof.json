@@ -1,0 +1,59 @@
+{
+  "package_sha256": "ef5a82c8dc2fb46a72cf5022f1d848fe6f714d4e614ac429a52f80f84f4e8f6f",
+  "files": [
+    {
+      "path": "backend/apps/finance/summary_jobs.py",
+      "deployed_source_sha256": "60e2dcbe6eca71cdbfccdbb1f975bda6a4442a97c9ce898412951f30f9b9ab87"
+    },
+    {
+      "path": "backend/apps/finance/summary_maintenance.py",
+      "deployed_source_sha256": "a069f7eeff2f0c082eacbd57b29d4dfbcdb65fa025c8479f049c884d35817b7c"
+    },
+    {
+      "path": "backend/apps/finance/summary_models.py",
+      "deployed_source_sha256": "bb1e207ad0e74959a1660d5cd67263e1e18aa259e1512629c764e64bbaa03f07"
+    },
+    {
+      "path": "backend/apps/finance/summary_read_query.py",
+      "deployed_source_sha256": "03dbe79f0a19740a7a92d87e153697e13a95b4578ffe0a27d5a589e8d0b8ead2"
+    },
+    {
+      "path": "backend/apps/finance/summary_schedule.py",
+      "deployed_source_sha256": "533ef1ab63919b10c6af68de858de2d08c23acf304c6eb77439dbcc818097af0"
+    },
+    {
+      "path": "backend/apps/finance/summary_views.py",
+      "deployed_source_sha256": "a9da71244b905c2ab984fa55fd42355dc76e8c395ee4f5abc437e4fb44eae40d"
+    },
+    {
+      "path": "backend/apps/finance/migrations/0021_scheduled_summary_snapshots.py",
+      "deployed_source_sha256": "7aedbab6fd231153a4f24b5ae3ecff8d363b89a8712c06dd11337689e4b47597"
+    },
+    {
+      "path": "backend/tests/test_finance_read_query.py",
+      "deployed_source_sha256": "0c9b9a5876a7ace828b577fbceb5137f40c50341652f77d928941a98cedb7f51"
+    },
+    {
+      "path": "backend/tests/test_finance_summary_jobs.py",
+      "deployed_source_sha256": "8eabd0125506fa5af586276d07f2c79b6e12fbaa1a10c766233842f75367d756"
+    },
+    {
+      "path": "backend/tests/test_finance_summary_maintenance.py",
+      "deployed_source_sha256": "3f4c4dbc05de20ac8a2db7a78ac2d04df56e4136a21505d39b7c3f289c14f649"
+    },
+    {
+      "path": "backend/tests/test_finance_summary_schedule.py",
+      "deployed_source_sha256": "aca52eb0a7f838a90ea224203095a835c0b6bc7704c6bc9705efe65d464311b2"
+    },
+    {
+      "path": "frontend/src/views/finance/FinanceSummaryNative.vue",
+      "deployed_source_sha256": "386098ba4b905b185e7287d906b48391a4736be73f4468295032c4ecd239e119"
+    }
+  ],
+  "integration_changes": [
+    "models.py: only add snapshot/lease imports; existing checkpoint index retained",
+    "base.py: append the two deployed schedule settings",
+    "0020 checkpoint migration already existed in base; unchanged content verified against cumulative source 178d4ce1"
+  ],
+  "0020_sha256": "0442bd7ad533604318bc5db373fafc889056697b702bb594eb1ed7a704b50d0c"
+}

@@ -61,7 +61,7 @@ def calculation_key(dataset, kind, payload):
         'summary_native.py', 'summary_native.cjs', 'summary_flow_view.cjs', 'summary_engine.cjs', 'summary_participation.js', 'summary_accounting_rules.json', 'summary_runtime.js', 'summary_composition.js',
         'summary_periods.cjs', 'summary_allocation.cjs', 'summary_order_ledger.cjs',
         'summary_cost_detail.cjs', 'summary_database.py', 'summary_database_document.py', 'summary_read_query.py', 'summary_source_worker.py', 'summary_cost_classification.py',
-        'summary_composition.py', 'summary_shipped_items.py', 'summary_raw_flows.py', 'summary_return_costs.py', 'summary_recent.py', 'summary_rebuild.py', 'summary_service.py', 'summary_worker.cjs')] + [code.parent / 'masterdata' / 'monthly_exchange_rates.py']
+        'summary_composition.py', 'summary_shipped_items.py', 'summary_raw_flows.py', 'summary_return_costs.py', 'summary_recent.py', 'summary_rebuild.py', 'summary_service.py', 'summary_worker.cjs', 'summary_schedule.py')] + [code.parent / 'masterdata' / 'monthly_exchange_rates.py']
     stamps = []
     for file in files:
         stat = file.stat()
@@ -138,8 +138,8 @@ def current_dataset(row):
         from .summary_read_query import settings_version
         spec = row.request['_database_query']
         interval = 60 if spec.get('refresh') else 300
-        source_expired = timezone.now().timestamp()-spec['generation']*interval > 3600+interval
-        if source_expired or row.created_at < timezone.now()-timedelta(hours=1) or not dataset or not dataset.metadata.get('query_template') or spec['settings'] != settings_version(row.tenant_id):
+        source_expired = not spec.get('snapshot') and (timezone.now().timestamp()-spec['generation']*interval > 3600+interval or row.created_at < timezone.now()-timedelta(hours=1))
+        if source_expired or not dataset or not dataset.metadata.get('query_template') or spec['settings'] != settings_version(row.tenant_id):
             return None
     if bootstrap and dataset and not dataset.metadata.get('bootstrap_template'):
         return None
@@ -169,6 +169,8 @@ def job_data(row, user):
             if hashlib.sha256(raw).hexdigest() != row.result_hash:
                 raise ValueError()
             result = json.loads(raw)
+            if row.request.get('_snapshot_build'):
+                result['summary_completed_at'] = row.finished_at.isoformat()
         except (ValueError, TypeError, OSError):
             FinanceSummaryCalculation.objects.filter(pk=row.pk).update(status='failed', error_code='RESULT_INTEGRITY_FAILED')
             raise ValidationError('财务计算结果校验失败，请重新查询；未使用损坏结果。') from None
@@ -195,7 +197,12 @@ def run_calculation(pk):
         row.error_code = ''
         row.save(update_fields=['status', 'lease', 'running_until', 'error_code'])
     status, error, result, result_dataset = 'ready', '', None, None
+    snapshot_build = bool(row.request.get('_snapshot_build'))
+    source_info = None
     try:
+        if snapshot_build:
+            from .summary_schedule import acquire_build
+            if not acquire_build(row, lease):raise CalculationBusy()
         user = row.actor
         if not user.is_active or user.user_type != 'internal' or user.tenant_id != row.tenant_id:
             raise PermissionDenied()
@@ -229,7 +236,11 @@ def run_calculation(pk):
             from .summary_native import query
             if '_database_query' in row.request:
                 from .summary_read_query import execute
-                result = execute(dataset, user, logical_payload(row.request))
+                if snapshot_build:
+                    result = execute(dataset, user, logical_payload(row.request), snapshot_job_id=row.pk)
+                    source_info = result.pop('_prepared_source_info')
+                else:
+                    result = execute(dataset, user, logical_payload(row.request))
                 result['query_context'] = row.pk
             else:
                 result = query(dataset, logical_payload(row.request))
@@ -246,6 +257,9 @@ def run_calculation(pk):
             if row.kind == 'query' and not current_dataset(row):
                 status, error, result = 'superseded', 'VERSION_CHANGED', None
             if result is not None and status == 'ready':
+                if snapshot_build:
+                    from .summary_schedule import publish
+                    publish(locked, source_info)
                 raw = encoded(result)
                 locked.result, locked.result_hash = gzip.compress(raw), hashlib.sha256(raw).hexdigest()
                 locked.result_dataset = result_dataset
@@ -263,6 +277,10 @@ def run_calculation(pk):
     except Exception:
         # Provider exceptions and raw inputs must never enter task logs/results.
         status, error = 'failed', 'CALCULATION_FAILED'
+    finally:
+        if snapshot_build:
+            from .summary_schedule import release_build
+            release_build(row.pk, lease)
     if error:
         fields = {}
         if error=='CALCULATOR_BUSY':
@@ -293,7 +311,9 @@ def dispatch_calculations():
         if dispatched >= 100:
             break
     try:
-        schedule_changed_summaries()
+        from .summary_schedule import enabled, dispatch_due_summaries
+        if enabled():dispatch_due_summaries()
+        else:schedule_changed_summaries()
     except Exception:
         logger.error('Finance dispatch stage failed: automatic_check')
     try:
@@ -314,6 +334,10 @@ def prune_expired_results(now=None):
     obsolete=FinanceSummaryCalculation.objects.filter(expired, kind='query',
         status__in=['ready','failed','blocked','superseded'],result__isnull=False
         ).exclude(dataset__active=True,revision=F('dataset__accounting_state__revision'))
+    from .summary_models import FinanceSummarySnapshot
+    protected = FinanceSummarySnapshot.objects.filter(active_job__isnull=False).values_list('active_job_id', flat=True)
+    obsolete = obsolete.exclude(pk__in=protected).exclude(Q(request___database_query__has_key='snapshot') &
+        Q(request___database_query__snapshot=True, finished_at__gte=now-timedelta(days=30)))
     selected=list(obsolete.order_by('pk').annotate(blob_bytes=Length('result')).values_list('pk','blob_bytes')[:500])
     ids=[pk for pk,_ in selected]
     cleared=FinanceSummaryCalculation.objects.filter(expired, pk__in=ids,kind='query',
@@ -324,6 +348,14 @@ def prune_expired_results(now=None):
     cutoff = (now-timedelta(hours=2)).timestamp()
     for path in private_root().glob('read-query-*'):
         if re.fullmatch(r'read-query-[a-f0-9]{64}\.html\.(gz|json)', path.name) and path.is_file() and path.stat().st_mtime < cutoff:
+            path.unlink(missing_ok=True)
+    # Keep every successful head; remove only retired source versions after 30 days.
+    retired = FinanceSummaryCalculation.objects.filter(kind='query',
+        status__in=['expired','failed','blocked','superseded'],finished_at__lt=now-timedelta(days=30)).exclude(pk__in=protected)
+    for path in private_root().glob('scheduled-source-*.html.gz'):
+        match = re.fullmatch(r'scheduled-source-(\d+)\.html\.gz',path.name)
+        if (match and path.is_file() and path.stat().st_mtime < (now-timedelta(days=30)).timestamp()
+                and retired.filter(pk=int(match[1])).exists()):
             path.unlink(missing_ok=True)
     if selected:
         logger.info('Finance derived cache cleanup: expired_query_rows=%s selected_query_bytes=%s',cleared,sum(size or 0 for _,size in selected))
