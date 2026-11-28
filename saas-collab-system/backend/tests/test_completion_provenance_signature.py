@@ -17,10 +17,10 @@ def test_completion_marker_exact_identity_and_tampering():
     assert parse('api_video_verified_v2:bad') is None
 
 def test_maximum_external_id_fits_and_key_rotation_fails_closed():
-    with override_settings(SECRET_KEY='old-purpose-key',SECRET_KEY_FALLBACKS=[]):reason=make('x'*160)
+    with override_settings(SECRET_KEY='test-old-purpose-key',SECRET_KEY_FALLBACKS=[]):reason=make('x'*160)
     assert len(reason)<=240
-    with override_settings(SECRET_KEY='new-purpose-key',SECRET_KEY_FALLBACKS=['old-purpose-key']):assert parse(reason)[-1] is True
-    with override_settings(SECRET_KEY='new-purpose-key',SECRET_KEY_FALLBACKS=[]):assert parse(reason)[-1] is False
+    with override_settings(SECRET_KEY='test-new-purpose-key',SECRET_KEY_FALLBACKS=['test-old-purpose-key']):assert parse(reason)[-1] is True
+    with override_settings(SECRET_KEY='test-new-purpose-key',SECRET_KEY_FALLBACKS=[]):assert parse(reason)[-1] is False
 
 
 import pytest
@@ -51,6 +51,6 @@ def test_real_writer_issues_bound_marker_and_legacy_is_explicitly_unverified(dat
     event.reason=original;event.actor=CustomUser.objects.create_user(username='different-evidence-actor',tenant=data.tenant);event.save(update_fields=['reason','actor'])
     assert evidence()['kind']=='linked'
     event.actor=data.actor;event.save(update_fields=['actor'])
-    with override_settings(SECRET_KEY='rotated-purpose-key',SECRET_KEY_FALLBACKS=[]):assert evidence()['kind']=='linked'
+    with override_settings(SECRET_KEY='test-rotated-purpose-key',SECRET_KEY_FALLBACKS=[]):assert evidence()['kind']=='linked'
     event.reason=f'api_video_verified:{data.video.pk}:{external_id}';event.save(update_fields=['reason'])
     assert evidence()['kind']=='linked'
