@@ -10,6 +10,11 @@
         <div v-if="kind==='purchase'||kind==='shipment'"><small>{{kind==='purchase'?'已抵扣':'预付款抵扣'}}</small><strong>{{display(data.summary.applied_amount)}}</strong></div>
         <div><small>{{kind==='purchase'?'预付款余额':'剩余应付'}}</small><strong>{{display(kind==='purchase'?data.summary.available_prepayment:data.summary.remaining_amount)}}</strong></div>
       </div>
+      <section v-if="kind==='shipment'" class="hint" aria-label="关联采购预付款">
+        <p>关联采购可用预付款：{{display(data.summary.available_prepayment)}} · 本单已抵扣：{{display(data.summary.applied_amount)}}</p>
+        <p>{{prepaymentStatus}}可用余额不代表已抵扣，也不是新增付款；请勿重复登记付款。</p>
+        <el-button v-if="Number(data.summary.available_prepayment)>0" :disabled="!editable||loading||busy||disabled" @click="openPrepaymentApplication">前往抵扣采购预付款</el-button>
+      </section>
       <p v-if="kind==='shipment' && Number(data.summary.contract_tax_amount)>0" class="hint">应付已包含对公合同新增税费 {{data.summary.contract_tax_amount}}；其中计入商品成本 {{data.summary.contract_cost_tax_amount || '0.0000'}}（按合同退税／免税选择）。</p>
       <p v-if="kind==='shipment' && data.summary.corporate_payment" class="hint">
         供应商税点 {{data.summary.corporate_payment.supplier_tax_rate == null ? '未维护' : data.summary.corporate_payment.supplier_tax_rate+'%'}}
@@ -44,7 +49,7 @@
         <PaymentPlansPanelV2 :kind="kind" :id="id" :disabled="busy||disabled" />
       </details>
       <PaymentTermsPanelV2 v-if="!['purchase','domestic_expense'].includes(kind)" :kind="kind" :id="id" :disabled="busy||disabled" :refresh-version="data.version" @updated="emit('updated')"/>
-      <details class="payment-section"><summary>{{kind==='purchase'?'直接登记预付款':kind==='shipment'?'直接登记已发生付款 / 预付款抵扣':'直接登记已发生付款'}}</summary>
+      <details ref="paymentEntryDetails" class="payment-section"><summary>{{kind==='purchase'?'直接登记预付款':kind==='shipment'?'直接登记已发生付款 / 预付款抵扣':'直接登记已发生付款'}}</summary>
       <p class="hint">下方用于直接登记已发生的转账；通过上方付款申请确认入账的款项请勿重复登记。不执行实际转账，也不改变商品成本。对公／对私由收款账户带入。</p>
       <p class="hint">已提交且未入账的付款申请会占用可登记额度。若本次转账对应已有申请，请进入该申请的系统审批页上传凭证并核对付款，审批通过后自动入账；补录其他转账与已有申请冲突时，请先核对并处理原申请。</p>
       <el-alert v-if="kind==='shipment' && accounts.find(a=>a.id===form.payee_account_id)?.nature==='corporate'" title="本次为对公付款，请核对是否已签订采购合同；未签订请及时补签，当前付款登记仍可继续。" type="warning" :closable="false" />
@@ -60,12 +65,12 @@
         <PayeeSettlementFieldsV2 :kind="kind" :id="id" manager-only :editable="editable" :disabled="busy||disabled" @accounts-changed="loadAccounts(true)" />
         <el-button type="primary" :disabled="busy||disabled" :loading="busy" @click="save">{{kind==='purchase'?'登记本次预付款':'登记本次付款'}}</el-button>
         <p class="hint">保存付款后，在该笔记录中上传 PDF / JPG / PNG 凭证；未上传会显示“待上传凭证”。</p>
-        <section v-if="kind==='shipment' && (data.available_prepayments?.length || data.cross_prepayments?.length)" class="application">
+        <section ref="applicationSection" v-if="kind==='shipment' && (data.available_prepayments?.length || data.cross_prepayments?.length)" class="application">
           <h4>抵扣采购预付款</h4>
           <el-checkbox v-if="data.cross_prepayments?.length" v-model="application.cross_order" :disabled="busy||disabled" @change="resetApplicationSource">使用同一供应商其他采购单的预付款</el-checkbox>
           <p v-if="application.cross_order" class="hint">跨采购单抵扣会占用所选目标采购单的预付款额度，请核对付款来源和当前发货单。</p>
           <div class="payment-form">
-            <el-select v-model="application.payment_id" :disabled="busy||disabled" :placeholder="application.cross_order?'选择其他采购单的可用预付款':'选择可用预付款'"><el-option v-for="p in applicationPrepayments" :key="p.id" :value="p.id" :label="`${p.purchase_order_number ? p.purchase_order_number + ' · ' : ''}${p.reference_number || p.id} · 可用 ${p.available_amount}`"/></el-select>
+            <el-select ref="applicationPaymentSelect" v-model="application.payment_id" :disabled="busy||disabled" :placeholder="application.cross_order?'选择其他采购单的可用预付款':'选择可用预付款'"><el-option v-for="p in applicationPrepayments" :key="p.id" :value="p.id" :label="`${p.purchase_order_number ? p.purchase_order_number + ' · ' : ''}${p.reference_number || p.id} · 可用 ${p.available_amount}`"/></el-select>
             <el-select v-if="application.cross_order" v-model="application.target_purchase_order_id" :disabled="busy||disabled" placeholder="选择本次抵扣归属采购单"><el-option v-for="p in crossTargets" :key="p.purchase_order_id" :value="p.purchase_order_id" :label="`${p.purchase_order_number} · 可用应付额度 ${p.available_amount}`"/></el-select>
             <el-input v-model="application.amount" :disabled="busy||disabled" inputmode="decimal" placeholder="本次抵扣金额" />
             <el-date-picker v-model="application.date" :disabled="busy||disabled" type="date" value-format="YYYY-MM-DD" placeholder="抵扣日期" />
@@ -117,7 +122,7 @@ import PaymentTermsPanelV2 from './PaymentTermsPanelV2.vue';
 import PaymentPlansPanelV2 from './PaymentPlansPanelV2.vue';
 import PaymentCurrencyV2 from './PaymentCurrencyV2.vue';
 import PaymentClassificationV2 from './PaymentClassificationV2.vue';
-import {computed,onUnmounted,reactive,ref,watch} from 'vue';
+import {computed,nextTick,onUnmounted,reactive,ref,watch} from 'vue';
 import {ElMessage,ElMessageBox} from 'element-plus';
 import {useAuthStore} from '../../stores/auth';
 import * as api from '../../api/supplyCostsV2';
@@ -128,7 +133,7 @@ const props=defineProps({kind:{type:String,required:true},id:{type:[String,Numbe
 const emit=defineEmits(['updated']);
 const auth=useAuthStore(),editable=computed(()=>!auth.authorizationStale&&auth.hasPermission('supply.v2.manage'));
 const historyPage=ref(1);
-const data=ref(null),error=ref(''),loading=ref(false),busy=ref(false),accounts=ref([]);
+const data=ref(null),error=ref(''),loading=ref(false),busy=ref(false),accounts=ref([]),paymentEntryDetails=ref(null),applicationSection=ref(null),applicationPaymentSelect=ref(null);
 const currencyTarget=ref(null);
 function openCurrency(row){currencyTarget.value={type:row.entry_type,label:row.reference_number||`记录 ${row.id}`,id:row.entry_type==='opening'?Number(String(row.id).replace(/^opening-/,'')):row.id};}
 const classificationTarget=ref(null),classificationFilter=ref('all');
@@ -145,6 +150,8 @@ const crossTargets=computed(()=>{const source=applicationPrepayments.value.find(
 let generation=0,documentGeneration=0,accountGeneration=0,accountsLoaded=false,attempt=null,uploadAttempt=null,previewGeneration=0;
 const voucherPreviewOpen=ref(false),voucherPreviewUrl=ref(''),voucherPreviewType=ref('');
 const display=v=>v==null?'待核对':v;
+const prepaymentStatus=computed(()=>{const available=data.value?.summary?.available_prepayment,applied=data.value?.summary?.applied_amount;if(available==null)return '可用余额待核对。';if(Number(available)>0)return Number(applied)>0?'本单已有抵扣记录，另有关联采购可用余额。':'尚未抵扣。';return '当前无关联采购可用预付款。';});
+function openPrepaymentApplication(){if(!editable.value||loading.value||busy.value||props.disabled)return;application.cross_order=false;application.payment_id=null;application.target_purchase_order_id=null;application.amount='';if(paymentEntryDetails.value)paymentEntryDetails.value.open=true;nextTick(()=>{const section=applicationSection.value;applicationPaymentSelect.value?.focus?.();section?.scrollIntoView?.({block:'center'});});}
 function unwrap(r){if(!r?.success){const details=r?.data;throw new Error(`${r?.message||'付款数据读取失败'}${details?'：'+JSON.stringify(details):''}`);}return r.data;}
 function message(e){const details=e.response?.data?.data;return details?`${e.response?.data?.message||e.message}：${JSON.stringify(details)}`:e.message;}
 async function load(){const token=++generation,kind=props.kind,id=props.id;loading.value=true;error.value='';try{const result=unwrap(await api.fetchPayments(kind,id));if(!result?.summary)throw new Error('付款接口未返回汇总信息，请确认后端版本');if(token===generation){data.value=result;if(!form.currency)form.currency=result.currency||'';}}catch(e){if(token===generation)error.value=message(e);}finally{if(token===generation)loading.value=false;}}
