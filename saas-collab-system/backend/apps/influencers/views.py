@@ -332,6 +332,9 @@ class InfluencerCollectionView(ScopedInfluencerView):
     write_permission_code = "influencers.manage"
 
     def get(self, request):
+        return self._list(request)
+
+    def _list(self, request, *, contact=None):
         require_scope(request.user, self.read_permission_code)
         include_nickname_id = _nickname_read_requested(request)
         blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
@@ -405,6 +408,9 @@ class InfluencerCollectionView(ScopedInfluencerView):
             raise ValidationError({"ordering": "Unsupported ordering field."})
         queryset = queryset.order_by(ordering, "-id")
         queryset = filter_queryset(request.user, queryset, self.read_permission_code)
+        if contact:
+            from .shared_contacts import filter_by_contact
+            queryset = filter_by_contact(queryset, user=request.user, permission_code=self.read_permission_code, **contact)
         page, page_size = _pagination(request)
         return success_response(paginated_data(
             request,
@@ -437,6 +443,16 @@ class InfluencerCollectionView(ScopedInfluencerView):
             after_data={"code": instance.code, "status": instance.status},
         )
         return success_response(InfluencerPublicSerializer(instance).data, status=201)
+
+
+class InfluencerContactSearchView(InfluencerCollectionView):
+    http_method_names = ["post", "options"]
+    # POST keeps contact values out of URLs; this endpoint cannot write.
+    write_permission_code = "influencers.view"
+
+    def post(self, request):
+        from .shared_contacts import parse_contact_search
+        return self._list(request, contact=parse_contact_search(request.data))
 
 
 class InfluencerRelatedArchivesView(ScopedInfluencerView):

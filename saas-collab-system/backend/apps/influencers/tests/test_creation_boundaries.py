@@ -388,6 +388,49 @@ def test_influencer_contacts_support_multiple_platforms():
     assert {item["channel"] for item in fetched.data["data"]} == {"whatsapp", "instagram"}
 
 
+def test_contact_search_combines_filters_without_exposing_private_values():
+    tenant, user, _, influencer = _records("contact-search")
+    other_tenant, other_user, _, foreign = _records("contact-search-foreign")
+    _grant_all_scope(user.user_roles.get().role, "influencers.view")
+    peer = Influencer.objects.create(tenant=tenant, code="linked", name="Linked", platform="instagram")
+    group = influencer_models.InfluenceArchiveGroup.objects.create(tenant=tenant, created_by=user, updated_by=user)
+    for archive in (influencer, peer):
+        influencer_models.InfluenceArchiveMembership.objects.create(
+            tenant=tenant, group=group, influencer=archive, created_by=user,
+        )
+    for owner, creator, archive, channel, value, active in (
+        (tenant, user, influencer, "phone", "+63 (917) 555-0123", True),
+        (tenant, user, influencer, "email", "Contact@example.test", True),
+        (tenant, user, influencer, "wechat", "@creator_test", True),
+        (tenant, user, influencer, "wechat", "@disabled", False),
+        (other_tenant, other_user, foreign, "phone", "+639175550123", True),
+    ):
+        influencer_models.InfluencerContact.objects.create(
+            tenant=owner, created_by=creator, influencer=archive, channel=channel, value=value, is_active=active,
+        )
+    client = APIClient()
+    url = "/api/internal/influencers/contact-search/"
+    client.force_authenticate(user)
+    for channel, value in (("phone", "+639175550123"), ("email", "contact@example.test"),
+                           ("wechat", "creator_test"), ("email", "")):
+        response = client.post(url, {"channel": channel, "value": value}, format="json")
+        assert response.status_code == 200, response.data
+        rows = response.data["data"]["results"]
+        assert {row["id"] for row in rows} == {influencer.pk, peer.pk}
+        assert all("contacts" not in row and "contact_email" not in row and "contact_phone" not in row for row in rows)
+        assert b"@example.test" not in response.content
+    response = client.post(url + "?platform=instagram", {"channel": "email"}, format="json")
+    assert [row["id"] for row in response.data["data"]["results"]] == [peer.pk]
+    response = client.post(url + "?page_size=1", {"channel": "phone", "value": "+639175550123"}, format="json")
+    assert response.data["data"]["count"] == 2
+    assert "639175550123" not in response.data["data"]["next"]
+    response = client.post(url, {"channel": "wechat", "value": "disabled"}, format="json")
+    assert response.data["data"]["count"] == 0
+    assert client.post(url, {"channel": "phone", "value": "0123"}, format="json").status_code == 400
+    client.force_authenticate(other_user)
+    assert client.post(url, {"channel": "email"}, format="json").status_code == 403
+
+
 def test_duplicate_tiktok_handle_shares_blacklist_identity_and_blocks_sampling():
     tenant, user, store, blocked = _records("canonical-blacklist")
     blocked.handle = " @MHAINE_94 "

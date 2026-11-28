@@ -11,6 +11,10 @@
       <div class="toolbar">
         <el-input v-model="filters.search" clearable placeholder="搜索昵称 ID、账号昵称、数字 ID 或达人备注" @keyup.enter="applyFilters" />
         <el-input v-model="filters.profile_notes" clearable placeholder="达人备注（模糊搜索）" aria-label="达人备注搜索" @keyup.enter="applyFilters" />
+        <el-select v-model="filters.contact_channel" clearable placeholder="联系渠道" aria-label="联系渠道" @change="filters.contact_value = ''">
+          <el-option v-for="(label, value) in INFLUENCER_CONTACT_CHANNEL_LABELS" :key="value" :label="value === 'phone' ? '手机号' : label" :value="value" />
+        </el-select>
+        <el-input v-if="filters.contact_channel" v-model="filters.contact_value" clearable :maxlength="240" aria-label="联系方式搜索" :placeholder="contactPlaceholder" @keyup.enter="applyFilters" />
         <el-select v-model="filters.platform" clearable placeholder="全部平台"><el-option v-for="(label, value) in INFLUENCER_PLATFORM_LABELS" :key="value" :label="label" :value="value" /></el-select>
         <el-select v-model="filters.status" clearable placeholder="全部状态"><el-option label="启用（含身份待补全）" value="active" /><el-option label="停用" value="inactive" /></el-select>
         <el-select v-model="filters.cooperation_status" clearable placeholder="合作分层"><el-option v-for="(label, value) in INFLUENCER_COOPERATION_STATUS_LABELS" :key="value" :label="label" :value="value" /></el-select>
@@ -168,6 +172,7 @@ import {
   fetchInfluencerBlacklistHistory,
   fetchInfluencerContacts,
   fetchInfluencers,
+  searchInfluencersByContact,
   formatInfluencerError,
   saveInfluencerForm,
   deleteInfluencerArchive,
@@ -189,7 +194,8 @@ let editRequestId = 0;
 let detailRequestId = 0; let formSnapshot = '';
 const creatorSnapshots = ref([]); const creatorStores = ref([]); const creatorStoreId = ref(null); const creatorError = ref(''); const creatorLoading = ref(false);
 const blankProfile = () => ({ display_name: '', external_influencer_id: '', level: '', tier: '', average_video_views: 0, average_live_views: 0, is_active: true, market: '', platforms: '', content_types: '', profile_url: '', duplicate_reason: '', product_cooperation_count: 0, first_cooperation_at: null, cooperation_count: 0, completed_cooperation_count: 0, fulfilled_cooperation_count: 0, fulfillment_rate: null, content_completion_rate: null, historical_gmv: '0.0000', historical_orders: 0, historical_performance: {}, profile_notes: '' });
-const filters = reactive({ search: '', profile_notes: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' });
+const filters = reactive({ search: '', profile_notes: '', contact_channel: '', contact_value: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' });
+const contactPlaceholder = computed(() => ({ phone: '输入完整手机号（可含区号）', email: '输入完整邮箱' }[filters.contact_channel] || '输入完整通讯账号'));
 const blankContact = () => ({ key: `contact-${Date.now()}-${Math.random()}`, channel: 'email', value: '', label: '', is_primary: false });
 const profileForm = (profile = {}) => ({ ...blankProfile(), ...profile, platforms: Array.isArray(profile.platforms) ? profile.platforms.join(', ') : (profile.platforms || ''), content_types: Array.isArray(profile.content_types) ? profile.content_types.join(', ') : (profile.content_types || '') });
 const blankForm = () => ({ code: '', nickname_id: '', account_nickname: '', platform: '', category: '', follower_count: 0, cooperation_status: 'prospect', profile: profileForm(), contacts: [blankContact()] });
@@ -227,12 +233,15 @@ async function load() {
   loading.value = true; listError.value = '';
   const params = { page: page.value, page_size: pageSize.value, include_nickname_id: 'true', ordering: filters.ordering, ...(filters.search.trim() ? { search: filters.search.trim() } : {}), ...(filters.profile_notes.trim() ? { profile_notes: filters.profile_notes.trim() } : {}), ...(filters.status ? { status: filters.status } : {}), ...(filters.platform ? { platform: filters.platform } : {}), ...(filters.cooperation_status ? { cooperation_status: filters.cooperation_status } : {}), ...(filters.level ? { level: filters.level } : {}), ...(filters.market.trim() ? { market: filters.market.trim() } : {}), ...(filters.tier.trim() ? { tier: filters.tier.trim() } : {}), ...(filters.is_blacklisted ? { is_blacklisted: filters.is_blacklisted } : {}) };
   if (deletedOnly.value) params.deleted_only = 'true';
-  const response = await fetchInfluencers(params); loading.value = false;
+  const response = filters.contact_channel
+    ? await searchInfluencersByContact(params, { channel: filters.contact_channel, value: filters.contact_value.trim() })
+    : await fetchInfluencers(params);
+  loading.value = false;
   if (!response?.success) { rows.value = []; total.value = null; listError.value = response?.message || '达人档案加载失败，请稍后重试'; return; }
   rows.value = collectionRows(response.data); total.value = collectionTotal(response.data);
 }
 function applyFilters() { page.value = 1; load(); }
-function resetFilters() { deletedOnly.value = false; Object.assign(filters, { search: '', profile_notes: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' }); applyFilters(); }
+function resetFilters() { deletedOnly.value = false; Object.assign(filters, { search: '', profile_notes: '', contact_channel: '', contact_value: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' }); applyFilters(); }
 function changePageSize() { page.value = 1; load(); }
 function resetForm() { editRequestId += 1; editLoading.value = false; createOutcomeUncertain.value = false; editing.value = null; relatedSource.value = null; Object.assign(form, blankForm()); formSnapshot = JSON.stringify(form); }
 async function confirmDraftSwitch() {
