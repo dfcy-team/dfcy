@@ -27,6 +27,75 @@ beforeEach(() => {
 });
 
 describe('warehouse fee registration', () => {
+  it('creates either fee type in the compact dialog and returns saved drafts to that list', async () => {
+    const wrapper = shallowMount(WarehouseFees, { global: { stubs: {
+      AppPage: { template:'<div><slot /></div>' },
+      ElDialog: { template:'<div><slot name="header" /><slot /></div>' },
+      ElForm: { template:'<form><slot /></form>' },
+      ElFormItem: { props:['label'], template:'<label>{{ label }}<slot /></label>' },
+    } } });
+    await flushPromises(); wrapper.vm.newFee(); await flushPromises();
+    const dialog = wrapper.find('.warehouse-create-dialog');
+    expect(dialog.attributes('width')).toBe('min(600px, calc(100vw - 32px))');
+    expect(dialog.text()).toContain('费用类型');
+    expect(dialog.text()).toContain('订单号／预约单号／包裹号');
+    expect(dialog.text()).not.toContain('费用归属');
+    expect(dialog.text()).not.toContain('备注');
+    wrapper.vm.form.external_order_id = 'PACKAGE001';
+    wrapper.vm.form.kind = 'other'; wrapper.vm.changeNewFeeKind(); await flushPromises();
+    expect(dialog.text()).toContain('费用名称');
+    expect(dialog.text()).not.toContain('订单号／预约单号／包裹号');
+    expect(wrapper.vm.form.external_order_id).toBe('');
+    Object.assign(wrapper.vm.form, {country:'PH',warehouse_id:1,fee_item:'仓储费',amount:'6',bill_month:'2026-10'});
+    await wrapper.vm.save();
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({ method:'post', url:base, data:expect.objectContaining({kind:'other',fee_item:'仓储费',external_order_id:'',amount:'6'}) }));
+    expect(wrapper.vm.editor).toBe(false);
+    expect(wrapper.vm.kind).toBe('other');
+    expect(wrapper.vm.filters.status).toBe('draft');
+    wrapper.unmount();
+  });
+  it('opens original-file parsing by default, without requiring a template', async () => {
+    const wrapper = shallowMount(WarehouseFees, { global: { stubs:{ AppPage:{template:'<div><slot /><slot name="action" /></div>'}, ElDialog:{template:'<div class="batch-dialog"><slot name="header" /><slot /></div>'} } } }); await flushPromises();
+    wrapper.vm.openImport();
+    await flushPromises();
+    expect(wrapper.vm.importVisible).toBe(true);
+    expect(wrapper.find('.warehouse-batch-dialog').attributes('fullscreen')).not.toBe('true');
+    expect(wrapper.find('.warehouse-batch-dialog').attributes('width')).toBe('min(1200px, calc(100vw - 32px))');
+    expect(wrapper.find('warehouse-bill-upload-stub').exists()).toBe(true);
+    expect(wrapper.find('.batch-dialog').text()).not.toContain('简化登记模板');
+    expect(wrapper.find('el-radio-group-stub').exists()).toBe(false);
+    wrapper.vm.showBatch({results:[{status:'created',row:2}]}); await flushPromises();
+    expect(wrapper.find('warehouse-bill-upload-stub').exists()).toBe(false);
+    expect(wrapper.find('.warehouse-batch-dialog').text()).toContain('本次新增1条草稿');
+    wrapper.vm.openImport(); await flushPromises();
+    expect(wrapper.find('warehouse-bill-upload-stub').exists()).toBe(true);
+    wrapper.unmount();
+  });
+  it('submits only simple fields and keeps its retry identity', async () => {
+    const wrapper = shallowMount(WarehouseFees); await flushPromises();
+    wrapper.vm.newFee();
+    Object.assign(wrapper.vm.form, { country: 'PH', warehouse_id: 1, external_order_id: 'PACKAGE001', amount: '30', bill_month: '2026-10' });
+    const reference = wrapper.vm.form.reference;
+    request.mockImplementation(async config => config.method ? { success: false, message: '网络失败' } : { success: true, data: row });
+    await wrapper.vm.save(); await wrapper.vm.save();
+    const writes = request.mock.calls.map(([c]) => c).filter(c => c.method === 'post');
+    expect(writes).toHaveLength(2);
+    expect(writes[0].data).toMatchObject({ registration_mode: 'cny_simple', amount: '30', reference, external_order_id: 'PACKAGE001' });
+    expect(writes[0].data).not.toHaveProperty('store_id');
+    expect(writes[0].data).not.toHaveProperty('exchange_rate');
+    expect(writes[1].data.reference).toBe(reference);
+    wrapper.unmount();
+  });
+  it('restores original CNY amount through the audited correction API', async () => {
+    const wrapper = shallowMount(WarehouseFees); await flushPromises();
+    wrapper.vm.selected = { ...row, status: 'registered', amount: '10', source: { registration_mode: 'cny_simple', registration_original_amount: '30' } };
+    wrapper.vm.beginEdit(); wrapper.vm.restoreOriginalAmount();
+    await wrapper.vm.save();
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({ url: base + '1/correct/', data: {
+      expected_version: 1, changes: { amount: '30', note: '' }, reason: '恢复原登记金额',
+    } }));
+    wrapper.unmount();
+  });
   it('uses an independent menu grant and route', () => {
     const user = { user_type: 'internal', permissions: ['finance.warehouse_fees.view'] };
     expect(canAccessPath(user, '/finance/warehouse-fees')).toBe(true);
@@ -85,17 +154,33 @@ describe('warehouse fee registration', () => {
   });
   it('exposes both fee types and explicit preview/confirmation semantics', () => {
     const source = readFileSync('src/views/finance/WarehouseFees.vue', 'utf8');
-    for (const text of ['订单处理费', '仓库其他处理费', '导入记录', '校验预览（不导入）', '确认导入草稿', '不代表已付款', '国家级费用', 'YYYY-MM-DD']) expect(source).toContain(text);
+    for (const text of ['label="仓库处理费"', 'label="其他处理费"', '导入记录', '不代表已经付款', '国家级费用', 'YYYY-MM-DD']) expect(source).toContain(text);
     expect(source).not.toContain('保存成功即付款');
   });
-  it('protects unfinished original-bill edits when closing or changing the upload mode', async () => {
+  it('protects unfinished original-bill edits when closing the workbench', async () => {
     const wrapper = shallowMount(WarehouseFees); await flushPromises();
     const canLeave = vi.fn().mockResolvedValue(false), done = vi.fn();
     wrapper.vm.originalBill = { canLeave };
     await wrapper.vm.beforeImportClose(done); expect(done).not.toHaveBeenCalled();
-    await wrapper.vm.changeImportMode('template'); expect(wrapper.vm.importMode).toBe('original');
     canLeave.mockResolvedValue(true); await wrapper.vm.beforeImportClose(done); expect(done).toHaveBeenCalledOnce();
-    await wrapper.vm.changeImportMode('template'); expect(wrapper.vm.importMode).toBe('template');
+    wrapper.unmount();
+  });
+  it('blocks missing warehouses and system supplements from manual actions', async () => {
+    const wrapper = shallowMount(WarehouseFees); await flushPromises();
+    expect(wrapper.vm.canRegister({ ...row, kind:'other', warehouse_id:null })).toBe(false);
+    wrapper.vm.selected = { ...row, match_status:'matched', source:{type:'warehouse_file_supplement'} };
+    request.mockClear();
+    wrapper.vm.beginEdit(); await wrapper.vm.save(); await wrapper.vm.singleAction('void');
+    expect(wrapper.vm.canRegister(wrapper.vm.selected)).toBe(false);
+    expect(request).not.toHaveBeenCalled(); wrapper.unmount();
+  });
+  it('requires a correction reason and preserves six decimal places for new file fees', async () => {
+    const wrapper = shallowMount(WarehouseFees); await flushPromises();
+    wrapper.vm.selected = { ...row, source:{registration_mode:'file_settlement_v2',registration_original_amount:'2.123456'} };
+    wrapper.vm.beginEdit(); wrapper.vm.form.note = '核对备注'; request.mockClear();
+    await wrapper.vm.save(); expect(request).not.toHaveBeenCalled();
+    wrapper.vm.correctionReason = '保留金额，仅补充备注'; await wrapper.vm.save();
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({data:expect.objectContaining({changes:{amount:'2.400000',note:'核对备注'}})}));
     wrapper.unmount();
   });
 });

@@ -25,8 +25,11 @@ def fields_for(kind):
     return [pair for pair in SCHEMA if kind == 'order' or pair[0] not in {'store_code', 'external_order_id'}]
 
 
-def read_upload(user, kind, uploaded):
+def read_upload(user, kind, uploaded, *, simple=False):
     fields = fields_for(kind)
+    if simple:
+        from .warehouse_fee_simple_import import fields_for_simple
+        fields = fields_for_simple(kind)
     if not uploaded or not uploaded.name.lower().endswith('.xlsx'):
         raise ValidationError('请选择标准xlsx登记模板；原始仓库大账单不使用此入口。')
     raw = uploaded.read(5 * 1024 * 1024 + 1)
@@ -73,54 +76,67 @@ def read_upload(user, kind, uploaded):
                 value = value.date().isoformat()
             elif isinstance(value, date):
                 value = value.isoformat()
+            if simple and isinstance(value, str):
+                value = value.strip()
             data[key] = value
-        for key in ['occurred_on', 'original_amount', 'exchange_rate', 'rate_date']:
+        for key in ([] if simple else ['occurred_on', 'original_amount', 'exchange_rate', 'rate_date']):
             if data.get(key) in (None, ''):
                 data[key] = None
-        for key in ['original_currency', 'rate_source', 'note']:
+        for key in ([] if simple else ['original_currency', 'rate_source', 'note']):
             data[key] = data.get(key) or ''
         store_code = data.pop('store_code', '') or ''
         warehouse_code = data.pop('warehouse_code', '') or ''
         warehouse = WarehouseMaster.objects.filter(tenant=user.tenant, code=warehouse_code).first()
         store = StoreMaster.objects.filter(tenant=user.tenant, code=store_code).first() if store_code else None
-        if not warehouse or (kind == 'order' and not store):
+        if not warehouse or (not simple and kind == 'order' and not store):
             error = '仓库或店铺编码不存在于当前租户，请使用系统标准编码。'
         data.update(kind=kind, warehouse_id=warehouse.pk if warehouse else None, store_id=store.pk if store else None)
+        if simple:
+            data.pop('store_id')
+            data['reference'] = f"FILE:{hashlib.sha256(raw).hexdigest()}:{number}"
         inputs.append((number, data, error))
     if not inputs:
         raise ValidationError('模板没有登记数据。')
     return raw, inputs
 
 
-def import_fees(user, kind, uploaded, *, confirm=False, expected_hash='', valid_only=False):
+def import_fees(user, kind, uploaded, *, confirm=False, expected_hash='', valid_only=False, simple=False):
     require(user, 'import')
-    raw, inputs = read_upload(user, kind, uploaded)
+    raw, inputs = read_upload(user, kind, uploaded, simple=simple)
     file_hash = hashlib.sha256(raw).hexdigest()
     if confirm and expected_hash != file_hash:
         raise ValidationError('文件与预览不一致，请重新预览。')
     results, valid, seen = [], [], set()
+    lookup = None
+    if simple:
+        from .warehouse_bill_matching import LocalOrderLookup
+        from .warehouse_fee_registration import prepare_registration
+        lookup = LocalOrderLookup(user, [(data, {'lookup_numbers': True}) for _, data, error in inputs
+                                         if not error and isinstance(data.get('external_order_id', ''), str)])
     for number, data, error in inputs:
         record = {'row': number, 'reference': data.get('reference'), 'order_number': data.get('external_order_id', '')}
         try:
             if error:
                 raise ValidationError(error)
-            _, key = validate_input(user, data, 'import')
+            source = {'type': 'xlsx', 'file_name': Path(uploaded.name).name, 'sha256': file_hash, 'row': number}
+            if simple:
+                data, source = prepare_registration(user, data, source, lookup)
+            _, key = validate_input(user, data, 'import', allow_unmatched=simple)
             if key in seen:
                 raise ValidationError('文件内同一费用重复，请先核对来源费用编号。')
             seen.add(key)
-            row, created = create_fee(user, data, action='import', preview=True)
+            row, created = create_fee(user, data, action='import', preview=True, source=source)
             results.append({**record, 'status': 'valid' if created else 'existing', 'id': row.pk,
-                            'match_status': row.match_status, 'error': ''})
-            valid.append((len(results) - 1, data))
+                            'match_status': row.match_status, 'amount': str(row.amount), 'currency': row.currency, 'error': ''})
+            valid.append((len(results) - 1, data, source))
         except APIException as exc:
             results.append({**record, 'status': 'error', 'error': str(exc.detail)})
     if confirm:
         if any(r['status'] == 'error' for r in results) and not valid_only:
             raise ValidationError('存在错误记录；请修正或明确选择仅导入有效记录。')
         with transaction.atomic():
-            for index, data in valid:
-                row, created = create_fee(user, data, action='import', source={
-                    'type': 'xlsx', 'file_name': Path(uploaded.name).name, 'sha256': file_hash, 'row': results[index]['row']})
+            for index, data, source in valid:
+                row, created = create_fee(user, data, action='import', source=source)
                 results[index].update(id=row.pk, status='created' if created else 'existing')
             batch, _ = WarehouseFeeImportBatch.objects.update_or_create(tenant=user.tenant, imported_by=user,
                 kind=kind, file_hash=file_hash, defaults={'file_name': Path(uploaded.name).name[:191], 'results': results})
