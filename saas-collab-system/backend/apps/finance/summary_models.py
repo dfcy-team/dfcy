@@ -73,3 +73,26 @@ class FinanceSummaryAutomationCheck(models.Model):
     dataset = models.OneToOneField(FinanceSummaryDataset, on_delete=models.CASCADE, primary_key=True)
     checked_at = models.DateTimeField()
     code = models.CharField(max_length=32)
+
+
+class FinanceSummarySnapshot(models.Model):
+    """Last successful source version and the one pending replacement per scope."""
+    tenant = models.ForeignKey('tenants.Tenant', on_delete=models.PROTECT)
+    scope_key = models.CharField(max_length=64)
+    scope = models.JSONField()
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    active_job = models.ForeignKey(FinanceSummaryCalculation, null=True, on_delete=models.PROTECT, related_name='+')
+    pending_job = models.ForeignKey(FinanceSummaryCalculation, null=True, on_delete=models.PROTECT, related_name='+')
+    scheduled_slot = models.CharField(max_length=32, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['tenant', 'scope_key'], name='uniq_fin_summary_snapshot')]
+
+
+class FinanceSummaryBuildLease(models.Model):
+    """Cross-process lease for the expensive scheduled/manual source build."""
+    key = models.CharField(max_length=16, primary_key=True)
+    job = models.ForeignKey(FinanceSummaryCalculation, null=True, on_delete=models.SET_NULL)
+    token = models.UUIDField(null=True)
+    expires_at = models.DateTimeField(null=True)

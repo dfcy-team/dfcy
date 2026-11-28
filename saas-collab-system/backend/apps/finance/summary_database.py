@@ -48,6 +48,47 @@ def posted_income(rows, envelope_id):
             'platform_finance_fields': evidence, 'basis': 'posted_provider_fields'} if income else None
 
 
+def shopee_settlement(income, net):
+    """Select an evidenced provider field schema; never infer absent amounts as zero."""
+    refund = Decimal(income['seller_return_refund']) if income.get('seller_return_refund') is not None else None
+    complete_fields = [('voucher_from_seller', -1), ('seller_coin_cash_back', -1),
+        ('buyer_paid_shipping_fee', 1), ('shipping_fee_discount_from_3pl', 1), ('shopee_shipping_rebate', 1),
+        ('actual_shipping_fee', -1), ('reverse_shipping_fee', -1), ('seller_shipping_discount', 1), ('final_return_to_seller_shipping_fee', -1)]
+    complete_fields += [(k, -1) for k in ('commission_fee', 'service_fee', 'seller_transaction_fee',
+        'order_ams_commission_fee', 'seller_order_processing_fee', 'withholding_tax', 'cross_border_tax',
+        'escrow_tax', 'fbs_fee', 'ads_escrow_top_up_fee_or_technical_support_fee', 'campaign_fee', 'sspl_fee',
+        'sales_tax_on_lvg', 'shipping_fee_sst', 'return_handling_fee', 'overseas_return_service_fee',
+        'shipping_seller_protection_fee_amount', 'lff_seller_protection_fee_amount', 'reverse_shipping_fee_sst',
+        'return_to_seller_shipping_fee_sst', 'final_product_vat_tax', 'final_shipping_vat_tax')]
+    legacy_fields = [(k, -1) for k in ('voucher_from_seller', 'commission_fee', 'seller_transaction_fee',
+        'order_ams_commission_fee', 'seller_order_processing_fee', 'ads_escrow_top_up_fee_or_technical_support_fee',
+        'actual_shipping_fee', 'reverse_shipping_fee')]+[('buyer_paid_shipping_fee', 1), ('shopee_shipping_rebate', 1)]
+    schemas = [('provider_original_discount', ['original_price', 'seller_discount'], complete_fields),
+               ('provider_selling_price', ['order_selling_price'], legacy_fields)]
+    matches, failures = [], []
+    for schema, prices, fields in schemas:
+        missing = [key for key in [*prices, 'seller_return_refund', *(key for key, _ in fields)] if income.get(key) is None]
+        components = [{'field': key, 'label': key,
+                       'amount': text(Decimal(income[key])*sign) if income.get(key) is not None else None}
+                      for key, sign in fields]
+        if missing:
+            failures.append((missing, components))
+            continue
+        merchandise = Decimal(income['original_price'])-Decimal(income['seller_discount']) if len(prices) == 2 else Decimal(income['order_selling_price'])
+        sales = merchandise-refund
+        fees = sum((Decimal(c['amount']) for c in components), ZERO)
+        if sales+refund+fees == net:
+            matches.append((sales, fees, components, schema))
+        else:
+            failures.append(([], components))
+    if matches and len({(sales, fees) for sales, fees, _, _ in matches}) == 1:
+        sales, fees, components, schema = matches[0]
+        return sales, refund, fees, components, '', schema
+    missing, components = min(failures, key=lambda item: len(item[0])) if failures else ([], [])
+    reason = '多个结算字段结构的核算结果不一致' if matches else '结算字段缺失：'+ '、'.join(missing) if missing else '结算字段构成与净结算额不一致'
+    return None, refund, None, components, reason, ''
+
+
 def split_amount(amount, weights):
     """Largest remainder in micro-units; deterministic and exactly conserved."""
     weights = [(str(k), Decimal(str(v))) for k, v in weights if Decimal(str(v)) > 0]
@@ -61,6 +102,19 @@ def split_amount(amount, weights):
     added = {k for k, _, _ in order[:remainder]}
     sign = -1 if Decimal(str(amount)) < 0 else 1
     return {k: Decimal(v + (k in added)) * SIX * sign for k, v, _ in rows}
+
+
+def prior_settlement_keys(prior, first):
+    """Bound historical lookups to this store's cost-bearing orders."""
+    by_store = defaultdict(list)
+    for store_id, external in first:
+        by_store[store_id].append(external)
+    keys = set()
+    for store_id, orders in by_store.items():
+        for offset in range(0, len(orders), 500):
+            keys.update(prior.filter(store_id=store_id, external_order_id__in=orders[offset:offset+500])
+                        .order_by().values_list('store_id', 'external_order_id').distinct())
+    return keys
 
 
 def shipping_dates(orders, shipments):
@@ -272,17 +326,17 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                 upper = upper_value(finance.filter(store_id=store_id, platform='shopee'), 'raw_envelope_id')
                 if upper is not None:
                     from MySQLdb.cursors import SSCursor
+                    from django.db.backends.mysql.base import CursorWrapper
                     query = ids.filter(raw_envelope_id__lte=upper).order_by('raw_envelope_id')
                     last = None
-                    with connection.wrap_database_errors:
-                        with connection.connection.cursor(SSCursor) as cursor:
-                            cursor.execute(*read_sql(query))
-                            while batch := cursor.fetchmany(500):
-                                for (envelope_id,) in batch:
-                                    if last is not None and envelope_id <= last:
-                                        raise ValidationError('结算来源版本读取异常，未生成部分账单。')
-                                    envelope_ids.add(envelope_id)
-                                    last = envelope_id
+                    with connection.make_cursor(CursorWrapper(connection.connection.cursor(SSCursor))) as cursor:
+                        cursor.execute(*read_sql(query))
+                        while batch := cursor.fetchmany(500):
+                            for (envelope_id,) in batch:
+                                if last is not None and envelope_id <= last:
+                                    raise ValidationError('结算来源版本读取异常，未生成部分账单。')
+                                envelope_ids.add(envelope_id)
+                                last = envelope_id
                     if last != upper:
                         raise ValidationError('结算来源版本读取不完整，请重试；未生成部分账单。')
             else:
@@ -315,22 +369,22 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                 read_count = 0
                 if upper is not None:
                     from MySQLdb.cursors import SSCursor
+                    from django.db.backends.mysql.base import CursorWrapper
                     sql, params = read_sql(query.filter(pk__lte=upper))
                     last_key = None
-                    with connection.wrap_database_errors:
-                        with connection.connection.cursor(SSCursor) as cursor:
-                            cursor.execute(sql, params)
-                            while batch := cursor.fetchmany(500):
-                                for values in batch:
-                                    row = FinanceRow(*values)
-                                    next_key = (row.external_order_id, row.business_date, row.currency, row.pk)
-                                    if last_key is not None and next_key <= last_key:
-                                        raise ValidationError('财务流水排序异常，已停止读取。')
-                                    last_key = next_key
-                                    read_count += 1
-                                    if read_count > expected:
-                                        raise ValidationError('结算来源读取异常，未生成部分账单。')
-                                    yield row
+                    with connection.make_cursor(CursorWrapper(connection.connection.cursor(SSCursor))) as cursor:
+                        cursor.execute(sql, params)
+                        while batch := cursor.fetchmany(500):
+                            for values in batch:
+                                row = FinanceRow(*values)
+                                next_key = (row.external_order_id, row.business_date, row.currency, row.pk)
+                                if last_key is not None and next_key <= last_key:
+                                    raise ValidationError('财务流水排序异常，已停止读取。')
+                                last_key = next_key
+                                read_count += 1
+                                if read_count > expected:
+                                    raise ValidationError('结算来源读取异常，未生成部分账单。')
+                                yield row
                 if read_count != expected:
                     raise ValidationError('结算来源读取不完整，请重试；未生成部分账单。')
         iterator = read_finance()
@@ -353,8 +407,16 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
 
     # Read exact provider escrow versions referenced by posted financial facts.
     envelopes = SyncRawEnvelope.objects.filter(tenant=user.tenant, pk__in=envelope_ids).order_by()
+    if native:
+        from itertools import chain
+        ids = sorted(envelope_ids)
+        # Keep JSON batches small without repeating the entire ID list in each SQL.
+        envelope_rows = chain.from_iterable(SyncRawEnvelope.objects.filter(tenant=user.tenant,
+            pk__in=ids[offset:offset+20]).order_by('pk') for offset in range(0, len(ids), 20))
+    else:
+        envelope_rows = envelopes.iterator(chunk_size=20)
     escrow = {}
-    for envelope in bounded_raw_envelopes(envelopes) if native else envelopes.iterator(chunk_size=20):
+    for envelope in envelope_rows:
         for index, trace in enumerate(envelope.payload.get('responses') or []):
             body = (trace.get('payload') or {}).get('response') or {}
             if not body.get('order_sn') or not body.get('order_income'):
@@ -407,37 +469,15 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
             if native and source:
                 income = {key: text_pool.setdefault(value, value) for key, value in income.items()}
                 source = {**source, 'income': income}
-            components = []
-            if store.code.startswith('SPKJ'):
-                fields = [('voucher_from_seller', -1), ('seller_coin_cash_back', -1),
-                    ('buyer_paid_shipping_fee', 1), ('shipping_fee_discount_from_3pl', 1), ('shopee_shipping_rebate', 1),
-                    ('actual_shipping_fee', -1), ('reverse_shipping_fee', -1), ('seller_shipping_discount', 1), ('final_return_to_seller_shipping_fee', -1)]
-                fields += [(k, -1) for k in ('commission_fee', 'service_fee', 'seller_transaction_fee',
-                    'order_ams_commission_fee', 'seller_order_processing_fee', 'withholding_tax', 'cross_border_tax',
-                    'escrow_tax', 'fbs_fee', 'ads_escrow_top_up_fee_or_technical_support_fee', 'campaign_fee', 'sspl_fee',
-                    'sales_tax_on_lvg', 'shipping_fee_sst', 'return_handling_fee', 'overseas_return_service_fee',
-                    'shipping_seller_protection_fee_amount', 'lff_seller_protection_fee_amount', 'reverse_shipping_fee_sst',
-                    'return_to_seller_shipping_fee_sst', 'final_product_vat_tax', 'final_shipping_vat_tax')]
-                merchandise = None if any(income.get(k) is None for k in ['original_price', 'seller_discount']) else Decimal(income['original_price'])-Decimal(income['seller_discount'])
-            else:
-                fields = [(k, -1) for k in ('voucher_from_seller', 'commission_fee', 'seller_transaction_fee',
-                    'order_ams_commission_fee', 'seller_order_processing_fee', 'ads_escrow_top_up_fee_or_technical_support_fee',
-                    'actual_shipping_fee', 'reverse_shipping_fee')]+[('buyer_paid_shipping_fee', 1), ('shopee_shipping_rebate', 1)]
-                merchandise = Decimal(income['order_selling_price']) if income.get('order_selling_price') is not None else None
-            refund = Decimal(income['seller_return_refund']) if income.get('seller_return_refund') is not None else None
-            for name, sign in fields:
-                value = text(Decimal(income[name])*sign) if income.get(name) is not None else None
-                component = {'field': name, 'label': name, 'amount': value}
-                if native and value in (None, '0.000000', '-0.000000'):
-                    component = component_pool.setdefault((name, value), component)
-                components.append(component)
-            fees = None if any(c['amount'] is None for c in components) else sum((Decimal(c['amount']) for c in components), ZERO)
-            sales = None if merchandise is None or refund is None else merchandise-refund
-            reconciled = sales is not None and fees is not None and refund is not None and sales+fees+refund == net_row.raw_amount
+            sales, refund, fees, components, settlement_reason, settlement_schema = shopee_settlement(income, net_row.raw_amount)
+            if native:
+                components = [component_pool.setdefault((c['field'], c['amount']), c)
+                              if c['amount'] in (None, '0.000000', '-0.000000') else c for c in components]
             prefix = 'html2:sp6th:settlement:'+order if store.code == 'SP6TH' else 'preview:'+'|'.join(['shopee', str(store_id), order, day, currency])
-            for kind, amount in [('sales', sales if reconciled else None), ('refund', refund), ('order_fee', fees if reconciled else None)]:
+            for kind, amount in [('sales', sales), ('refund', refund), ('order_fee', fees)]:
                 add(store, kind, amount, day, order, prefix+':'+kind, source_proof=source and {k: source[k] for k in ['envelope_id', 'response_index', 'platform_finance_fields', 'basis'] if k in source},
-                    sp6th_components=components if kind == 'order_fee' else None, description='SaaS保存的官方订单结算响应；构成必须与净结算额对平。')
+                    sp6th_components=components if kind == 'order_fee' else None, settlement_schema=settlement_schema,
+                    description=settlement_reason if kind != 'refund' and settlement_reason else 'SaaS保存的官方订单结算响应；构成必须与净结算额对平。')
             if source:shopee_income.append({'store_id': store_id, 'order': order, 'date': day, 'currency': currency, **source})
 
     finally:
@@ -448,7 +488,7 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
     if native:
         escrow.clear()
         envelope_ids.clear()
-        del envelopes
+        envelopes = None
         component_pool.clear()
         text_pool.clear()
 
@@ -462,14 +502,14 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
         business_date__lt=start, raw_amount__gt=0).filter(Q(raw_fee_name__iexact='Item Price Credit') | Q(raw_fee_name='order_selling_price') | Q(raw_fee_name='escrow_amount'))
     if native:
         # Historical settlement matters only for orders receiving a cost in this scope.
-        prior = prior.filter(external_order_id__in={key[1] for key in first}).order_by()
-        prior_keys = set(prior.values_list('store_id', 'external_order_id').distinct())
+        prior_keys = prior_settlement_keys(prior, first)
     else:
         prior_keys = set(prior.values_list('store_id', 'external_order_id'))
     registrations = None
     shipment_lookups = None
     related_ids = set()
     if native:
+        from django.db.models import F
         from apps.sales_management.warehouse_order_models import OrderWarehouseLookup
         from apps.sales_management.aftersales_models import ReturnAllocation
         registrations = list(OrderRegistration.objects.filter(tenant=user.tenant, store_id__in=stores,
@@ -483,9 +523,10 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                 related_ids.add(registration.order_id)
         before = date.fromordinal(max(date.min.toordinal(), start.toordinal()-2))
         after = date.fromordinal(min(date.max.toordinal(), end.toordinal()+2))
-        related_ids.update(ReturnAllocation.objects.filter(case__tenant=user.tenant, case__store_id__in=stores,
+        return_order_ids = set(ReturnAllocation.objects.filter(case__tenant=user.tenant, case__store_id__in=stores,
             line__receipt__tenant=user.tenant, line__receipt__received_at__date__range=(before, after)
             ).order_by().values_list('case__order_id', flat=True).distinct())
+        related_ids.update(return_order_ids)
         financial_orders = {f['external_order_id'] for f in facts if f.get('external_order_id')}
         selected = Q(order__external_order_id__in=financial_orders) | Q(order_id__in=related_ids)
         shipped = Q(status='matched', warehouse_id__isnull=False)
@@ -496,12 +537,15 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                 dates |= Q(snapshot__packages__icontains=f'{month//12:04d}-{month%12+1:02d}')
             shipped &= dates
         lookup_query = OrderWarehouseLookup.objects.filter(order__tenant=user.tenant, order__store_id__in=stores
-            ).filter(selected | shipped).order_by().only('id', 'order_id', 'status', 'warehouse_id', 'snapshot')
-        shipment_lookups = {row.order_id: row for row in lookup_query.iterator(chunk_size=500)}
+            ).filter(selected | shipped).order_by().only('id', 'order_id', 'status', 'warehouse_id'
+            ).annotate(_read_packages=F('snapshot__packages'))
+        shipment_lookups = {}
+        for row in lookup_query.iterator(chunk_size=500):
+            row.snapshot = {'packages': row._read_packages}
+            shipment_lookups[row.order_id] = row
         related_ids.update(shipment_lookups)
     order_query = SalesOrder.objects.filter(tenant=user.tenant, store_id__in=stores)
     if native:
-        from django.db.models import F
         order_query = order_query.filter(Q(pk__in=related_ids) | Q(external_order_id__in=financial_orders)).order_by().only('id', 'store_id', 'platform_id', 'external_order_id',
             'raw_status', 'normalized_status', 'delivered_at_utc').annotate(
                 _read_logistics=F('source_details__platform_logistics'),
@@ -512,17 +556,32 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
             order.source_details = {'platform_logistics': order._read_logistics,
                                     'platform_pickup_at_utc': order._read_pickup}
     orders_by_key = {(r.store_id, r.external_order_id): r for r in orders}
-    order_dates = shipping_dates(orders, ShipmentRecord.objects.filter(tenant=user.tenant,
+    shipments = ShipmentRecord.objects.filter(tenant=user.tenant,
         store_id__in=stores, sales_order__isnull=False).values(
-            'sales_order_id', 'store_id', 'platform_id', 'shipped_at_utc'))
+            'sales_order_id', 'store_id', 'platform_id', 'shipped_at_utc')
+    if native:
+        from itertools import chain
+        order_ids = [o.pk for o in orders]
+        shipment_query = shipments
+        shipments = chain.from_iterable(shipment_query.filter(sales_order_id__in=order_ids[offset:offset+500]
+            ).iterator(chunk_size=500) for offset in range(0, len(order_ids), 500))
+    order_dates = shipping_dates(orders, shipments)
+    del shipments
     from .summary_cost_classification import collect_classifications, classify
-    classifications = collect_classifications(user, stores, orders, facts, native=native)
+    classification_orders = [o for o in orders if (o.store_id, o.external_order_id) in first
+        and (o.store_id, o.external_order_id) not in prior_keys] if native else orders
+    classifications = collect_classifications(user, stores, classification_orders, facts, native=native)
     if native:
         # Shipping-date and classification evidence has consumed these projections.
         for order in orders:
             order.source_details = None
             del order._read_logistics, order._read_pickup
-        del order_query, lookup_query, selected, financial_orders, related_ids
+        from collections import namedtuple
+        identity = namedtuple('OrderIdentity', 'pk store_id platform_id external_order_id')
+        orders = [identity(o.pk, o.store_id, o.platform_id, o.external_order_id) for o in orders]
+        orders_by_key = {(o.store_id, o.external_order_id): o for o in orders}
+        if orders:del order
+        del classification_orders, order_query, lookup_query, selected, financial_orders, related_ids
     sku_sales = {'source': 'SaaS SalesOrderItem', 'orders': {}, 'exchanges': {}}
     products = {}; catalogue = []
     provider_shops = defaultdict(set)
@@ -545,6 +604,7 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
         # Resolve the earliest historical item per product in SQL. MySQL's
         # default collation may collapse distinct provider identifiers.
         from itertools import islice
+        from django.db import connection
         from django.db.models import BinaryField, F, Func, Min
 
         product_key = F('platform_product_id')
@@ -562,11 +622,17 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                     })
     item_query = SalesOrderItem.objects.filter(sales_order__tenant=user.tenant, sales_order__store_id__in=stores).select_related('sales_order').order_by('pk')
     if native:
+        from django.db.models import Case, When, Value, BooleanField
         item_query = item_query.only('id', 'sales_order_id', 'internal_sku_id', 'platform_product_id',
-            'platform_variant_id', 'seller_sku', 'quantity', 'source_details', 'original_unit_price',
+            'platform_variant_id', 'seller_sku', 'quantity', 'original_unit_price',
             'sale_unit_price', 'line_total_amount', 'currency', 'item_name_snapshot',
-            'sales_order__id', 'sales_order__store_id', 'sales_order__external_order_id')
-        from itertools import chain
+            'sales_order__id', 'sales_order__store_id', 'sales_order__external_order_id').annotate(
+                _read_price_source=F('source_details__api_price_source'),
+                _read_unverified=F('source_details__api_price_unverified_zero'),
+                _read_reported_amount=F('source_details__reported_line_amount'),
+                _read_unit_price=F('source_details__sale_unit_price'),
+                _read_unit_price_present=Case(When(source_details__has_key='sale_unit_price', then=Value(True)),
+                    default=Value(False), output_field=BooleanField()))
         order_ids = [order.pk for order in orders]
         item_rows = item_query
         def read_item_pages(query):
@@ -575,7 +641,10 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
             if upper is None:
                 return
             last = 0
-            while batch := list(query.filter(pk__gt=last, pk__lte=upper).order_by('pk')[:200]):
+            while last < upper:
+                batch = list(query.filter(pk__gt=last, pk__lte=upper).order_by('pk')[:200])
+                if not batch:
+                    raise ValidationError('商品明细来源读取不完整，请重试；未生成部分汇总。')
                 for item in batch:
                     if item.pk <= last:
                         raise ValidationError('商品明细分页游标未推进，已停止读取。')
@@ -587,6 +656,12 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
             for offset in range(0, len(order_ids), 500)
         )
     for item in item_query:
+        if native:
+            item.source_details = {'api_price_source': item._read_price_source,
+                'api_price_unverified_zero': item._read_unverified,
+                'reported_line_amount': item._read_reported_amount}
+            if item._read_unit_price_present:
+                item.source_details['sale_unit_price'] = item._read_unit_price
         order = item.sales_order;key = str(order.store_id)+'|'+order.external_order_id
         line = {'item_id': item.pk, 'internal_sku_id': item.internal_sku_id, 'platform_product_id': item.platform_product_id,
                 'platform_variant_id': item.platform_variant_id, 'seller_sku': item.seller_sku, 'quantity': item.quantity,
@@ -600,6 +675,8 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                         current_price_fresh=(timezone.now()-quote['captured_at']).total_seconds() <= 86400)
         sku_sales['orders'].setdefault(key, []).append(line)
         products.setdefault((order.store_id, item.platform_product_id), {'store_id': order.store_id, 'platform_product_id': item.platform_product_id, 'title': item.item_name_snapshot, 'url': ''})
+    if native:
+        del quotes, saved_products
     if registrations is None:
         registrations = list(OrderRegistration.objects.filter(tenant=user.tenant, store_id__in=stores,
             deleted_at__isnull=True, status__in=['registered', 'historical_recorded', 'completed', 'applied']).order_by('version', 'pk'))
@@ -609,7 +686,7 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
         shipment_lookups = {r.order_id: r for r in OrderWarehouseLookup.objects.filter(order__tenant=user.tenant, order__store_id__in=stores)}
     sku_query = ProductSKU.objects.filter(tenant=user.tenant)
     if native:
-        sku_query = sku_query.only('id', 'sku_code', 'legacy_sku_code')
+        sku_query = sku_query.values_list('pk', 'sku_code', 'legacy_sku_code', named=True).iterator(chunk_size=500)
     skus = {sku.pk: sku for sku in sku_query}
     aliases = defaultdict(set)
     for sku in skus.values():
@@ -634,8 +711,11 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
     for store_id, external in sorted(cost_orders):
         day = first.get((store_id, external))
         store = stores[store_id];order = orders_by_key.get((store_id, external));key = str(store_id)+'|'+external
-        lookup = shipment_lookups.get(order.pk) if order else None
+        lookup = (shipment_lookups.pop(order.pk, None) if native else shipment_lookups.get(order.pk)) if order else None
         final, reasons = shipped_items(lookup, store.timezone)
+        if native and lookup:
+            lookup.snapshot = {}
+            del lookup._read_packages
         components, cost = [], ZERO
         for line in final:
             sku_id = line.get('sku_id') or line.get('internal_sku_id');code = line.get('source_sku') or ''
@@ -690,7 +770,7 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                     'monthly_cost_id': component.get('monthly_cost_id'), 'monthly_cost_status': component.get('monthly_cost_status')},
                 'cost_calculation': {'components': [component], 'state': 'pending' if component['reasons'] else 'calculated',
                     'reasons': component['reasons'], 'time_basis': 'warehouse_shipped_date'}})
-        if order:outbound_components[order.pk] = components
+        if order and (not native or order.pk in return_order_ids):outbound_components[order.pk] = components
         if day is None or (store_id, external) in prior_keys:continue
         f = add(store, 'product_cost', -cost if components and any(not c['reasons'] for c in components) else None, day, external, 'database:cost:'+str(store_id)+':'+external,
             currency='CNY', source='SaaS仓库实际出库商品成本', status='pending' if reasons else 'estimated' if any(c.get('monthly_cost_status') in ('estimated','pending_review') for c in components) else 'confirmed',

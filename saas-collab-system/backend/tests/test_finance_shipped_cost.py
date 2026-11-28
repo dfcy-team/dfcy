@@ -41,13 +41,27 @@ def test_pending_or_invalid_evidence_does_not_supply_cost(changes):
 
 
 @pytest.mark.django_db
-def test_cost_uses_shipped_B_not_platform_A_and_missing_evidence_is_unknown(settings):
+@pytest.mark.parametrize('native',[False,True])
+def test_cost_uses_shipped_B_not_platform_A_and_missing_evidence_is_unknown(settings,monkeypatch,native):
     from tests.test_sales_management import create_scope, create_order, user_for
     from tests.test_finance_database_summary import posted_settlement
     from apps.products.models import ProductSPU, ProductSKU, ProductCostVersion
     from apps.sales_management.warehouse_order_models import OrderWarehouseLookup
     from apps.sales_management.registration_models import PendingOrderDetail
-    from apps.finance.summary_database import collect
+    from apps.finance.summary_database import collect as read_source
+    from apps.finance import summary_shipped_items
+    original_shipped=summary_shipped_items.shipped_items
+    lookups=[]
+    def track_lookup(row,zone):
+        if row:lookups.append(row)
+        return original_shipped(row,zone)
+    monkeypatch.setattr(summary_shipped_items,'shipped_items',track_lookup)
+    def collect(user,scope):
+        result=read_source(user,scope,native=native)
+        if native:
+            assert all(row.snapshot=={} and not hasattr(row,'_read_packages') for row in lookups)
+        lookups.clear()
+        return result
     settings.SALES_ORDER_WAREHOUSE_SYNC_ENABLED = False
     tenant, platform, store, warehouse = create_scope('shipped-cost', currency='CNY')
     actor = user_for(tenant, 'shipped-cost-user')
@@ -74,6 +88,8 @@ def test_cost_uses_shipped_B_not_platform_A_and_missing_evidence_is_unknown(sett
     assert len(flows) == 1 and flows[0]['amount'] == '-24.000000'
     assert flows[0]['date'] == '2026-09-01' and flows[0]['currency'] == 'CNY'
     assert collect(actor, scope)['cost_flows'] == flows
+    row.refresh_from_db()
+    assert row.snapshot == {'packages':[package()]}
     from apps.sales_management.aftersales_models import AftersalesCase, WarehouseReturnReceipt, WarehouseReturnLine, ReturnAllocation
     case=AftersalesCase.objects.create(tenant=tenant,store=store,order=order,source_key='cost-return')
     receipt=WarehouseReturnReceipt.objects.create(tenant=tenant,warehouse=warehouse,return_no='RETURN-1',received_at=datetime(2026,9,12,tzinfo=timezone.utc))
@@ -99,3 +115,14 @@ def test_cost_uses_shipped_B_not_platform_A_and_missing_evidence_is_unknown(sett
     row.status='not_found';row.save()
     cost = next(f for f in collect(actor, scope)['facts'] if f['kind']=='product_cost')
     assert cost['amount'] is None and cost['status']=='pending'
+    # A current return still needs its historical outbound even without a current settlement.
+    from apps.finance.models import PlatformFinanceTransaction
+    PlatformFinanceTransaction.objects.filter(tenant=tenant,store=store).delete()
+    row.status='matched'
+    row.snapshot={'packages':[package(shipped_at_utc='2026-08-10T00:00:00Z')]}
+    row.save()
+    ReturnAllocation.objects.create(line=received,case=case,case_sku='B',quantity=1)
+    source=collect(actor,scope)
+    credits=[f for f in source['facts'] if f.get('cost_event')=='return']
+    assert len(credits)==1 and Decimal(credits[0]['amount'])==12
+    assert source['cost_flows']==[]

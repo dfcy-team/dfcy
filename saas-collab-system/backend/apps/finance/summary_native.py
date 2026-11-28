@@ -23,6 +23,7 @@ _replies = None
 _code_stamp = None
 _tenant_id = None
 _session_key = None
+_idle_timer = None
 logger = logging.getLogger(__name__)
 
 
@@ -39,7 +40,10 @@ class CalculationTimeout(ValidationError):
 
 
 def stop():
-    global _process, _tenant_id, _session_key
+    global _process, _tenant_id, _session_key, _idle_timer
+    if _idle_timer is not None:
+        _idle_timer.cancel()
+        _idle_timer = None
     # A dying child cannot serve even the same cache key after a failed reap.
     _tenant_id = None
     _session_key = None
@@ -53,6 +57,26 @@ def stop():
         _process = None
     _tenant_id = None
     _session_key = None
+
+
+def _release_when_idle():
+    global _idle_timer
+    if _idle_timer is not None:
+        _idle_timer.cancel()
+        _idle_timer = None
+    process = _process
+    if process is None or process.poll() is not None:
+        return
+
+    def release():
+        with _lock:
+            if _idle_timer is timer and _process is process:
+                stop()
+
+    timer = threading.Timer(60, release)
+    timer.daemon = True
+    _idle_timer = timer
+    timer.start()
 
 
 atexit.register(stop)
@@ -129,7 +153,10 @@ def query(dataset, payload):
             stop()
             raise ValidationError('财务查询未完成，请重试；未更改账务数据。')
     finally:
-        _lock.release()
+        try:
+            _release_when_idle()
+        finally:
+            _lock.release()
     timings = {'lock_wait_ms': lock_wait_ms}
     for name in ('read_decode_ms','validate_ms','prepare_ms','restore_ms','vm_ms','directory_ms','open_ms','calculate_ms'):
         value = result.get('timings',{}).get(name)

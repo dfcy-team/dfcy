@@ -15,6 +15,13 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 
 @pytest.fixture(autouse=True)
+def legacy_refresh_mode(settings):
+    """Compatibility coverage; the new default mode has its own schedule suite."""
+    settings.FINANCE_SUMMARY_SCHEDULED_READS_ENABLED = False
+
+
+
+@pytest.fixture(autouse=True)
 def broker(monkeypatch):
     send = Mock()
     monkeypatch.setattr(run_calculation, 'apply_async', send)

@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 import uuid
@@ -51,7 +52,7 @@ def write_document(path, template, source):
         else:
             yield packed(value)
     digest = hashlib.sha256()
-    with path.open('wb') as file, gzip.GzipFile(filename='', fileobj=file, mode='wb', mtime=0) as compressed:
+    with path.open('wb') as file, gzip.GzipFile(filename='', fileobj=file, mode='wb', mtime=0, compresslevel=1) as compressed:
         def write(text):
             raw = text.encode('utf-8')
             digest.update(raw)
@@ -212,9 +213,10 @@ def materialize_source(user, dataset, spec, path, token):
     from .summary_database import collect
     from .summary_service import document_path
     proof = path.with_suffix('.json')
-    started = timezone.now()
+    started = time.monotonic()
     with source_budget():
         source = collect(user, spec['scope'], allow_legacy_zero=False, native=True)
+    collected = time.monotonic()
     # Encode repeated fee evidence once; the native engine restores the exact objects.
     pool, indexes = [], {}
     for fact in source.get('facts', []):
@@ -228,6 +230,7 @@ def materialize_source(user, dataset, spec, path, token):
             refs.append(indexes[key])
         fact['sp6th_components'] = refs
     source['native_components'] = pool
+    compact_native_evidence(source)
     temporary = path.with_suffix('.tmp-' + token)
     try:
         digest = write_document(temporary, gzip.decompress(document_path(dataset).read_bytes()).decode('utf-8'), source)
@@ -236,10 +239,47 @@ def materialize_source(user, dataset, spec, path, token):
         temporary.unlink(missing_ok=True)
     info = {'sha256': digest, 'read_at': source['read_at'],
             'source_rows_read': source.get('source_counts', {}).get('platform_finance'),
-            'read_ms': round((timezone.now()-started).total_seconds()*1000, 2)}
+            'read_ms': round((time.monotonic()-started)*1000, 2),
+            'collect_ms': round((collected-started)*1000, 2),
+            'document_bytes': path.stat().st_size}
+    info['document_ms'] = round(info['read_ms']-info['collect_ms'], 2)
     temporary = proof.with_suffix('.tmp-' + token)
     temporary.write_text(json.dumps(info), encoding='utf-8')
     os.replace(temporary, proof)
+
+
+def compact_native_evidence(source):
+    """Transport shared evidence once; restore it before any rule executes."""
+    fields, indexes = [], {}
+    for record in source.get('facts', []) + source.get('shopee_income', []):
+        proof = record.get('source_proof') if 'source_proof' in record else record
+        if not isinstance(proof, dict):continue
+        value = proof.get('platform_finance_fields')
+        if not isinstance(value, (dict, list)):continue
+        identity = id(value)
+        if identity not in indexes:
+            indexes[identity] = len(fields)
+            fields.append(value)
+        proof['platform_finance_fields'] = indexes[identity]
+    source['native_finance_fields'] = fields
+    components, component_indexes, calculations = [], {}, set()
+    for record in source.get('facts', []) + source.get('cost_flows', []) + source.get('raw_flows', []):
+        calculation = record.get('cost_calculation')
+        if not isinstance(calculation, dict) or not isinstance(calculation.get('components'), list):continue
+        if id(calculation) in calculations:continue
+        calculations.add(id(calculation))
+        refs = []
+        for component in calculation['components']:
+            identity = id(component)
+            if identity not in component_indexes:
+                component_indexes[identity] = len(components)
+                components.append(component)
+            refs.append(component_indexes[identity])
+        calculation['components'] = refs
+    source['native_cost_components'] = components
+    costs = {id(flow): index for index, flow in enumerate(source.get('cost_flows', []))}
+    source['raw_flows'] = [{'native_cost_index': costs[id(flow)]} if id(flow) in costs else flow
+                           for flow in source.get('raw_flows', [])]
 
 
 def launch_source_worker(request):
@@ -260,7 +300,7 @@ def launch_source_worker(request):
         raise ValidationError('来源读取未完成，请重试；未更改账务数据。')
 
 
-def execute(dataset, user, payload):
+def execute(dataset, user, payload, *, snapshot_job_id=None):
     from .summary_native import query, CalculationBusy, materialization_guard
     from .summary_jobs import calculation_key
     spec = payload['_database_query']
@@ -269,9 +309,23 @@ def execute(dataset, user, payload):
     state = query_accounting_state(user, spec['settings'], dataset.accounting_state)
     if accounting_source_scope(spec['scope'], state) != spec['scope']:
         raise ValidationError('本次查询缺少已关账期间依据，请重新发起查询。')
+    if spec.get('source_job'):
+        from .summary_schedule import read_source
+        parent, saved = read_source(user, spec['source_job'])
+        path = private_root() / saved['file']
+        if not path.is_file():
+            raise ValidationError('已汇总来源文件不可用，请手动汇总；未自动重读业务来源。')
+        derived = SimpleNamespace(tenant_id=dataset.tenant_id, pk=dataset.pk, source_hash=saved['sha256'],
+            document_file=path.name, metadata={'database_scope': parent.request['_database_query']['scope'], 'direct_query': True},
+            accounting_state=state)
+        result = query(derived, {k:v for k,v in payload.items() if k not in {'_database_query', '_snapshot_build'}})
+        result.update(direct_query=True, scheduled_summary=True, source_read_at=saved['read_at'],
+                      summary_completed_at=parent.finished_at.isoformat(), source_cache_reused=True)
+        return result
     key = calculation_key(dataset, 'query', {'_database_query': spec})
     path = private_root() / ('read-query-' + key + '.html.gz')
     proof = path.with_suffix('.json')
+    materialized = False
     if not path.exists() or not proof.exists():
         lock_key = 'finance-read-query:' + key
         token = uuid.uuid4().hex
@@ -283,6 +337,7 @@ def execute(dataset, user, payload):
                     launch_source_worker({'user': user.pk, 'tenant': user.tenant_id,
                         'document_file': dataset.document_file, 'scope': spec['scope'],
                         'filename': path.name, 'token': token})
+                    materialized = True
                 if not path.is_file() or not proof.is_file():
                     raise ValidationError('来源读取未完成，请重试；未更改账务数据。')
         finally:
@@ -291,7 +346,14 @@ def execute(dataset, user, payload):
     info = json.loads(proof.read_text(encoding='utf-8'))
     derived = SimpleNamespace(tenant_id=dataset.tenant_id, pk=dataset.pk, source_hash=info['sha256'],
         document_file=path.name, metadata={'database_scope': spec['scope'], 'direct_query': True}, accounting_state=state)
-    result = query(derived, {k: v for k, v in payload.items() if k != '_database_query'})
+    result = query(derived, {k: v for k, v in payload.items() if k not in {'_database_query', '_snapshot_build'}})
     result.update(direct_query=True, source_read_at=info['read_at'], source_read_ms=info['read_ms'],
-                  source_rows_read=info.get('source_rows_read'))
+                  source_rows_read=info.get('source_rows_read'), source_cache_reused=not materialized,
+                  source_collect_ms=info.get('collect_ms'), source_document_ms=info.get('document_ms'))
+    if snapshot_job_id is not None:
+        saved = private_root() / f'scheduled-source-{snapshot_job_id}.html.gz'
+        os.replace(path, saved)
+        proof.unlink(missing_ok=True)
+        result['_prepared_source_info'] = {**info, 'file': saved.name}
+        result['scheduled_summary'] = True
     return result
