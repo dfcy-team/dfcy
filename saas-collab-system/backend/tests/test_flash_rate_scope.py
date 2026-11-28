@@ -33,7 +33,7 @@ def test_error_classification_and_scope(shop,settings,code,message,app_scope,rej
         integration_config=SimpleNamespace(network_enabled=True,status='verified',credential_id='synthetic-reference',platform_config={'partner_id':'synthetic'}))
     custody=SimpleNamespace(retrieve_secret=lambda _:'synthetic-key',retrieve_access_token=lambda _:'synthetic-token')
     response=SimpleNamespace(status_code=200,json=lambda:{'error':code,'message':message})
-    with patch('apps.flash_sales.provider.authorized_store',return_value=auth),patch('apps.flash_sales.provider.get_custody_backend',return_value=custody),patch('apps.flash_sales.provider.get_runtime_platform_config',return_value={'api_host':'https://partner.shopeemobile.com'}),patch('apps.flash_sales.provider.PlatformHttpClient.request',return_value=response):
+    with patch('apps.flash_sales.provider.authorized_store',return_value=auth),patch('apps.flash_sales.provider.checked_custody_backend',return_value=custody),patch('apps.flash_sales.provider.get_runtime_platform_config',return_value={'api_host':'https://partner.shopeemobile.com'}),patch('apps.flash_sales.provider.PlatformHttpClient.request',return_value=response):
         with pytest.raises(Rejected if rejected else Deferred):
             ShopeeAdapter(store).call('get_shop_flash_sale_items')
     adapter=ShopeeAdapter(store)

@@ -1,7 +1,7 @@
 import pytest
 
 from apps.sales_management.registration_models import OrderRegistration
-from apps.sales_management.registration_services import create_registration
+from apps.sales_management.registration_services import create_registration, set_registration_deleted
 from apps.workflows.models import WorkflowAuditEvent
 from apps.permissions.models import DataScope
 from tests.test_order_registrations import context, exchange, screenshot
@@ -19,7 +19,7 @@ def create_row(context, kind="promotion", key="soft-delete"):
     return create_registration(user, kind, store.pk, order.pk, payload, key)[0]
 
 
-@pytest.mark.parametrize("kind", ["exchange", "promotion", "gcash"])
+@pytest.mark.parametrize("kind", ["promotion", "gcash"])
 def test_delete_hides_record_keeps_evidence_and_audit_and_can_restore(context, kind):
     row = create_row(context, kind)
     client = client_for(context[0])
@@ -77,11 +77,14 @@ def test_restore_exchange_cannot_steal_another_active_registration(context):
     row = create_row(context, "exchange")
     client = client_for(context[0])
     base = f"/api/internal/commerce/registrations/exchange/{row.pk}/"
-    result = client.post(base + "delete/", {"version": row.version, "note": "先删除"}, format="json").data["data"]
+    # Retired exchange HTTP writes remain blocked. Exercise the retained
+    # historical service invariant directly, without reopening that API.
+    deleted = set_registration_deleted(context[0], "exchange", row.pk, row.version, "先删除")
     assert OrderRegistration.objects.get(pk=row.pk).active_exchange_order_id is None
     active = exchange(context, "new-active")
-    response = client.post(base + "restore/", {"version": result["version"]}, format="json")
-    assert response.status_code == 409
+    from apps.common.exceptions import StateConflict
+    with pytest.raises(StateConflict, match="另一张"):
+        set_registration_deleted(context[0], "exchange", row.pk, deleted.version, restore=True)
     row.refresh_from_db(); active.refresh_from_db()
     assert row.deleted_at is not None and active.active_exchange_order_id == context[3].pk
 
@@ -110,11 +113,25 @@ def test_deleted_idempotent_request_cannot_silently_recreate_a_draft(context):
 def test_restore_fails_for_order_that_is_no_longer_pending(context):
     row = create_row(context, "exchange")
     client = client_for(context[0]); base = f"/api/internal/commerce/registrations/exchange/{row.pk}/"
-    deleted = client.post(base + "delete/", {"version": row.version, "note": "暂缓"}, format="json").data["data"]
+    deleted = set_registration_deleted(context[0], "exchange", row.pk, row.version, "暂缓")
     order = context[3]; order.normalized_status = "cancelled"; order.save()
-    assert client.post(base + "restore/", {"version": deleted["version"]}, format="json").status_code == 409
+    from apps.common.exceptions import StateConflict
+    with pytest.raises(StateConflict):
+        set_registration_deleted(context[0], "exchange", row.pk, deleted.version, restore=True)
     row.refresh_from_db()
     assert row.deleted_at is not None and row.active_exchange_order_id is None
+
+
+@pytest.mark.parametrize("operation", ["evidence", "delete", "restore", "approve"])
+def test_retired_exchange_http_writes_stay_disabled(context, operation):
+    row = create_row(context, "exchange")
+    response = client_for(context[0]).post(
+        f"/api/internal/commerce/registrations/exchange/{row.pk}/{operation}/",
+        {"version": row.version, "note": "不得恢复已停用入口"}, format="json")
+    assert response.status_code == 400
+    assert "换货登记已停用" in str(response.data)
+    row.refresh_from_db()
+    assert row.deleted_at is None and row.active_exchange_order_id == context[3].pk
 
 
 def test_foreign_tenant_cannot_delete_or_restore_or_read_deleted_record(context):
