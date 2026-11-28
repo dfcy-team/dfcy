@@ -33,6 +33,8 @@ def validate_scope(user, value, previous):
 
 def schedule_changed_summaries():
     """Refresh the current/previous month only, preserving historical inputs."""
+    from .summary_schedule import enabled
+    if enabled():return
     from .summary_jobs import request_calculation
     from .summary_recent import recent_scope
     from .summary_health import record_check

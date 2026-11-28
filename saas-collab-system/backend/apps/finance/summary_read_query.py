@@ -257,10 +257,26 @@ def launch_source_worker(request):
         raise ValidationError('来源读取未完成，请重试；未更改账务数据。')
 
 
-def execute(dataset, user, payload):
+def execute(dataset, user, payload, *, snapshot_job_id=None):
     from .summary_native import query, CalculationBusy, materialization_guard
     from .summary_jobs import calculation_key
     spec = payload['_database_query']
+    if spec.get('source_job'):
+        from .summary_schedule import read_source
+        parent, saved = read_source(user, spec['source_job'])
+        path = private_root() / saved['file']
+        if not path.is_file():
+            raise ValidationError('已汇总来源文件不可用，请手动汇总；未自动重读业务来源。')
+        state = dataset.accounting_state
+        if spec['settings']:
+            state = FinanceSummaryState.objects.get(dataset_id=spec['settings'][0], revision=spec['settings'][1])
+        derived = SimpleNamespace(tenant_id=dataset.tenant_id, pk=dataset.pk, source_hash=saved['sha256'],
+            document_file=path.name, metadata={'database_scope': parent.request['_database_query']['scope'], 'direct_query': True},
+            accounting_state=state)
+        result = query(derived, {k:v for k,v in payload.items() if k not in {'_database_query', '_snapshot_build'}})
+        result.update(direct_query=True, scheduled_summary=True, source_read_at=saved['read_at'],
+                      summary_completed_at=parent.finished_at.isoformat(), source_cache_reused=True)
+        return result
     key = calculation_key(dataset, 'query', {'_database_query': spec})
     path = private_root() / ('read-query-' + key + '.html.gz')
     proof = path.with_suffix('.json')
@@ -288,8 +304,14 @@ def execute(dataset, user, payload):
         state = FinanceSummaryState.objects.get(dataset_id=spec['settings'][0], revision=spec['settings'][1])
     derived = SimpleNamespace(tenant_id=dataset.tenant_id, pk=dataset.pk, source_hash=info['sha256'],
         document_file=path.name, metadata={'database_scope': spec['scope'], 'direct_query': True}, accounting_state=state)
-    result = query(derived, {k: v for k, v in payload.items() if k != '_database_query'})
+    result = query(derived, {k: v for k, v in payload.items() if k not in {'_database_query', '_snapshot_build'}})
     result.update(direct_query=True, source_read_at=info['read_at'], source_read_ms=info['read_ms'],
                   source_rows_read=info.get('source_rows_read'), source_cache_reused=not materialized,
                   source_collect_ms=info.get('collect_ms'), source_document_ms=info.get('document_ms'))
+    if snapshot_job_id is not None:
+        saved = private_root() / f'scheduled-source-{snapshot_job_id}.html.gz'
+        os.replace(path, saved)
+        proof.unlink(missing_ok=True)
+        result['_prepared_source_info'] = {**info, 'file': saved.name}
+        result['scheduled_summary'] = True
     return result

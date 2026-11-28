@@ -695,3 +695,6 @@ if BOARD_PREWARM_ENABLED:
         "schedule": 60.0,
         "options": {"queue": "realtime_board", "expires": 55},
     }
+
+FINANCE_SUMMARY_SCHEDULED_READS_ENABLED = env_bool("FINANCE_SUMMARY_SCHEDULED_READS_ENABLED", True)
+FINANCE_SUMMARY_DAILY_TIMES = ("02:00", "12:30")

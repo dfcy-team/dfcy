@@ -28,7 +28,15 @@ def summary_bootstrap(request):
         from .summary_service import require_access
         require_access(request.user)
         ids = store_ids(request.user)
+        from .summary_schedule import enabled, daily_times, register_scope
+        if enabled():
+            from .summary_read_query import query_scope
+            from django.utils import timezone
+            from zoneinfo import ZoneInfo
+            month = timezone.localdate(timezone=ZoneInfo('Asia/Shanghai')).strftime('%Y-%m')
+            register_scope(request.user, query_scope(request.user, {'month': month}))
         return success_response({'direct_query': True, 'dataset': None, 'revision': 0,
+            'scheduled_summary': enabled(), 'summary_schedule': daily_times(),
             'tenant_id': request.user.tenant_id, 'access_signature': signature(request.user, ids),
             'can_edit': False, 'can_view_settings': full_reader(request.user) and FinanceSummaryDataset.objects.filter(tenant=request.user.tenant, active=True).exists(),
             'scope_stores': list(StoreMaster.objects.filter(tenant=request.user.tenant, pk__in=ids)
@@ -412,9 +420,14 @@ def summary_direct_table(request):
     context = request.query_params.get('query_context')
     if context is not None:
         context = serializers.IntegerField(min_value=1).run_validation(context)
-    row = request_query(request.user, {'action': 'table', **table_input(request)}, context=context,
-                        refresh=request.query_params.get('refresh') == '1')
-    data = job_data(row, request.user)
+    from .summary_schedule import enabled, table_response
+    if enabled():
+        data = table_response(request.user, {'action': 'table', **table_input(request)}, context=context,
+                              refresh=request.query_params.get('refresh') == '1')
+    else:
+        row = request_query(request.user, {'action': 'table', **table_input(request)}, context=context,
+                            refresh=request.query_params.get('refresh') == '1')
+        data = job_data(row, request.user)
     response = success_response(data['result'] if data.get('result') is not None else data,
                                 status=202 if data['pending'] else 200)
     response['Cache-Control'] = 'no-store'
@@ -458,6 +471,8 @@ def summary_direct_detail(request):
         response['Cache-Control'] = 'no-store'
         return response
     payload = {**logical_payload(parent.request), 'action': 'table_detail'}
+    if payload.pop('_snapshot_build', None):
+        payload['_database_query'] = {**payload['_database_query'], 'source_job': parent.pk}
     for key in ('row_key', 'kind', 'source_key', 'cost_page', 'flow_page'):
         if key in detail.validated_data:
             payload[key] = detail.validated_data[key]
