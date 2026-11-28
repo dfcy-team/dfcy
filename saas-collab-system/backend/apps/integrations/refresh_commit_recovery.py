@@ -48,6 +48,22 @@ def lease_expired(data):
     return lease is not None and timezone.is_aware(lease) and lease <= timezone.now()
 
 
+def manual_refresh_blocked(record, attempt):
+    data = (attempt.commit_recovery or {}) if attempt else {}
+    if data.get("phase") not in {"exchange_in_flight", "commit_pending"}:
+        return False
+    # A definitive platform rejection cannot have issued a new token. Keep
+    # ambiguous exchanges and saved candidates fenced, even after lease expiry.
+    rejected = (attempt.status == "failed" and attempt.failure_category == "authorization_rejected"
+                and attempt.finished_at is not None and attempt.finished_at <= timezone.now())
+    return not (rejected and data.get("schema") == 1 and data.get("phase") == "exchange_in_flight"
+                and lease_expired(data) and not data.get("candidate")
+                and not data.get("recover_only") and not data.get("resuming_exchange")
+                and data.get("scope") == _scope(record)
+                and data.get("source_reference") == _digest(record.token_id)
+                and data.get("source_version") == record.credential_reference_version)
+
+
 def _persist(attempt, data, phase):
     data = {**data, "phase": phase}
     AutomaticRefreshAttempt.objects.filter(pk=attempt.pk).update(

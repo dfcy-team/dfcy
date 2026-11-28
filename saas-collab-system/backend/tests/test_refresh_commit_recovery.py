@@ -274,15 +274,15 @@ def test_provider_attaches_operation_only_to_journaled_refresh(platform,journale
 def test_real_custody_journal_keeps_new_reference_until_commit(case,monkeypatch,tmp_path):
     from apps.integrations.custody import FileCustodyBackend
     custody=FileCustodyBackend(tmp_path/"synthetic-only-vault")
-    old=custody.store_secrets(credential_type="shopee",access_token="SYNTHETIC_OLD_ACCESS",
-        refresh_token="SYNTHETIC_OLD_REFRESH",reference_version=case.auth.credential_reference_version,
+    old=custody.store_secrets(credential_type="shopee",access_token="PLACEHOLDER_OLD_ACCESS",
+        refresh_token="PLACEHOLDER_OLD_REFRESH",reference_version=case.auth.credential_reference_version,
         expires_at=(timezone.now()+timedelta(minutes=5)).isoformat())
     with authorization_service_write():
         case.auth.credential_id=old["credential_id"];case.auth.token_id=old["token_id"]
         case.auth.save(update_fields=["credential_id","token_id"])
     def exchange(auth):
         refs=custody.store_secrets(credential_type="shopee",reference_version=auth.credential_reference_version+1,
-            access_token="SYNTHETIC_NEW_ACCESS",refresh_token="SYNTHETIC_NEW_REFRESH",
+            access_token="PLACEHOLDER_NEW_ACCESS",refresh_token="PLACEHOLDER_NEW_REFRESH",
             expires_at=(timezone.now()+timedelta(hours=4)).isoformat(),
             operation_id=auth._refresh_operation_id,idempotency_key=auth._refresh_operation_id)
         return {**refs,"reference_kind":"custody","previous_reference_revoker":custody.revoke,
@@ -301,7 +301,7 @@ def test_real_custody_journal_keeps_new_reference_until_commit(case,monkeypatch,
     assert case.provider.refresh_authorization.call_count==1
     case.auth.refresh_from_db()
     assert case.auth.token_id==found["token_id"]
-    assert custody.retrieve_access_token(case.auth.token_id)=="SYNTHETIC_NEW_ACCESS"
+    assert custody.retrieve_access_token(case.auth.token_id)=="PLACEHOLDER_NEW_ACCESS"
 
 @pytest.mark.django_db(transaction=True)
 def test_platform_exchange_runs_outside_authorization_transaction(case):
