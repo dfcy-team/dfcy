@@ -1,12 +1,52 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { gunzipSync } from 'node:zlib';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { gunzipSync, gzipSync } from 'node:zlib';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createRequire } from 'node:module';
 const require=createRequire(import.meta.url);
-const {prepareSource,createEngine}=require('../../backend/apps/finance/summary_engine.cjs');
+const {prepareSource,createEngine,readDocument}=require('../../backend/apps/finance/summary_engine.cjs');
 const path='../backend/apps/finance/templates/database-v1.html.gz';
 const template=gunzipSync(readFileSync(path)).toString();
 describe('原生计算源减载',()=>{
+ it('流式解压与原制品逐字节一致，预加载不改变核算输入',async()=>{
+  const buffer=await readDocument(path);expect(buffer.equals(gunzipSync(readFileSync(path)))).toBe(true);
+  const loaded=createEngine(path,{}, {memo:true,retainSource:false,documentBuffer:buffer}),existing=createEngine(path,{}, {memo:true,retainSource:false});
+  expect(loaded.c.TEST_SNAPSHOT).toEqual(existing.c.TEST_SNAPSHOT);
+ });
+ it('流式读取校验CRC和长度，拒绝伪造超预算的解压长度',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'finance-document-')),file=join(dir,'input.gz');
+  try{
+   const bytes=gzipSync(Buffer.from('合成来源 </script> '+ 'x'.repeat(100000)));
+   writeFileSync(file,bytes);expect((await readDocument(file)).toString()).toBe(gunzipSync(bytes).toString());
+   const broken=Buffer.from(bytes);broken[broken.length-8]^=1;writeFileSync(file,broken);await expect(readDocument(file)).rejects.toThrow();
+   const oversized=Buffer.from(bytes);oversized.writeUInt32LE(1024**3+1,oversized.length-4);writeFileSync(file,oversized);await expect(readDocument(file)).rejects.toThrow('exceeds read budget');
+   writeFileSync(file,Buffer.from('invalid'));await expect(readDocument(file)).rejects.toThrow('Invalid financial document');
+  }finally{rmSync(dir,{recursive:true,force:true});}
+ });
+ it('共享结算字段和成本流水按原引用还原，不复制证据或丢失字段',()=>{
+  const snapshot=JSON.parse(template.match(/id="snapshot">([\s\S]*?)<\/script>/)[1]);
+  const fields={original_price:1,commission_fee:2,seller_return_refund:3},cost={source_id:'cost:1',amount:null,raw_cost_flow:true,cost_calculation:{components:[{quantity:2}]}};
+  snapshot.database.native_finance_fields=[fields];snapshot.database.facts=[{platform:'shopee',store_id:1,external_order_id:'one',date:'2026-11-01',currency:'PHP',source_proof:{platform_finance_fields:0}}];
+  snapshot.shopee_income=[{store_id:1,order:'one',date:'2026-11-01',currency:'PHP',platform_finance_fields:0}];snapshot.database.cost_flows=[cost];snapshot.database.raw_flows=[{native_cost_index:0}];
+  const html=()=>template.replace(/(id="snapshot">)[\s\S]*?(<\/script>)/,(_,a,b)=>a+JSON.stringify(snapshot)+b);
+  const restored=prepareSource(html(),true).snapshot;
+  expect(restored.database.facts[0].source_proof.platform_finance_fields).toEqual(fields);
+  expect(restored.shopee_income[0].platform_finance_fields).toBe(restored.database.facts[0].source_proof.platform_finance_fields);
+  expect(restored.database.raw_flows[0]).toBe(restored.database.cost_flows[0]);expect(restored.database.raw_flows[0]).toEqual(cost);
+  snapshot.database.facts[0].source_proof.platform_finance_fields=1;expect(()=>prepareSource(html(),true)).toThrow('Invalid financial evidence reference');
+  snapshot.database.facts[0].source_proof.platform_finance_fields=0;snapshot.database.raw_flows[0].native_cost_index=-1;expect(()=>prepareSource(html(),true)).toThrow('Invalid cost source reference');
+ });
+ it('成本子项共享还原全部依据，损坏引用不能作为零成本继续计算',()=>{
+  const snapshot=JSON.parse(template.match(/id="snapshot">([\s\S]*?)<\/script>/)[1]);
+  const component={quantity:'2',unit_cost:null,reasons:['pending'],source_sku:'synthetic'};
+  snapshot.database.native_cost_components=[component];snapshot.database.facts=[{cost_calculation:{components:[0],reasons:['pending']}}];
+  snapshot.database.cost_flows=[{cost_calculation:{components:[0]}}];snapshot.database.raw_flows=[{native_cost_index:0}];
+  const html=()=>template.replace(/(id="snapshot">)[\s\S]*?(<\/script>)/,(_,a,b)=>a+JSON.stringify(snapshot)+b);
+  const db=prepareSource(html(),true).snapshot.database;
+  expect(db.facts[0].cost_calculation.components).toEqual([component]);expect(db.cost_flows[0].cost_calculation.components[0]).toBe(db.facts[0].cost_calculation.components[0]);
+  snapshot.database.facts[0].cost_calculation.components=[2];expect(()=>prepareSource(html(),true)).toThrow('Invalid cost component reference');
+ });
  it('结算索引保留店铺、订单、日期、币种、类型及重复依据的匹配规则',()=>{
   const {c}=createEngine(path,{}, {memo:true,retainSource:false});
   const row={store_id:58,order:'same-order',date:'2026-10-01',currency:'PHP',income:{original_price:'100'}};
