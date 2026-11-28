@@ -67,6 +67,8 @@ def test_advertising_validation_uses_ads_balance_and_never_shop_identity(case, m
     config.platform_config = {**config.platform_config, 'api_type': 'advertising'}
     config.save(update_fields=['platform_config'])
     case.auth.integration_config = config
+    from apps.integrations import readonly_clients
+    monkeypatch.setattr(readonly_clients, 'get_custody_backend', lambda: case.custody)
     clients = []
     original = shopee_advertising.ShopeeAdvertisingReadonlyClient
     class CheckedClient(original):

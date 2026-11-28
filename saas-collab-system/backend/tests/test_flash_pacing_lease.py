@@ -92,7 +92,7 @@ def test_rate_response_stops_same_shop_endpoint_before_transport(shop, settings,
     response = SimpleNamespace(status_code=200, json=lambda: {"error": "error_rate_limit"})
     with patch("apps.flash_sales.provider.authorized_store", return_value=auth), \
          patch("apps.flash_sales.provider.get_runtime_platform_config", return_value={"api_host": "https://partner.shopeemobile.com"}), \
-         patch("apps.flash_sales.provider.get_custody_backend", return_value=custody), \
+         patch("apps.flash_sales.provider.checked_custody_backend", return_value=custody), \
          patch("apps.flash_sales.provider.PlatformHttpClient.request", side_effect=limited if http_error else None, return_value=response) as send:
         with pytest.raises(Deferred) as first:
             ShopeeAdapter(store).call("get_shop_flash_sale_list")
