@@ -401,6 +401,12 @@ def costs_data(actor, scoped, group=None):
     grouped_rows = {}
     kinds = ('supplier','deposit') if group == 'supplier' else (group,) if group else ('supplier','carrier','domestic','deposit','clearance')
     for kind in kinds:
+        if kind == 'domestic':
+            from .domestic_reconciliation import rollup, dashboard_data
+            rows = rollup(actor, scoped, _with_fee_activity(_money_targets(kind, scoped), kind))
+            grouped_rows[kind] = rows
+            groups[kind] = dashboard_data(rows)
+            continue
         rows = _rollup_parties(kind, _with_fee_activity(_money_targets(kind, scoped), kind))
         grouped_rows[kind] = rows
         data = {'documents': sum(r['documents'] for r in rows),
@@ -420,7 +426,7 @@ def costs_data(actor, scoped, group=None):
             row['cash_paid_amount'] = str(Decimal(row['paid']) - Decimal(row['opening']) - (source['converted'] or Decimal('0')))
         groups[kind] = data
     if group and group != 'supplier':
-        return {'groups': groups, 'amount_basis': '系统单据金额，未作汇率换算；供应商货款与货运费用分别统计。', 'notices': []}
+        return {'groups': groups, 'amount_basis': '系统单据金额，未作汇率换算；供应商货款与货运费用分别统计。', 'notices': ['国内费用按原币分别汇总，不同币种或币种不明的非零金额不生成合计；金额排序按币种分组。'] if group == 'domestic' else []}
     # Supplier purchase totals and cash use the same actor/country scope as the
     # purchase ledger. Deposit applications move funds; they are not new cash.
     purchase_parties = {row['_party_id']: row for row in grouped_rows['deposit']}
@@ -503,6 +509,9 @@ class DashboardQueue(InternalAPI):
             records = inbounds.filter(status='draft').select_related('batch__country', 'batch__freight_company')
         else:
             records = _with_fee_activity(_money_targets(kind, scoped), kind)
+            if kind == 'domestic':
+                from .domestic_reconciliation import queue
+                return Response(queue(request.user, scoped, records, v))
             if v.get('item_status'):
                 if kind not in ('carrier', 'clearance'):
                     raise serializers.ValidationError({'item_status': '费用项目状态仅用于批次货运费及入库清关费用。'})

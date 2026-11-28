@@ -335,7 +335,7 @@ def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=
     token, batch = secrets.token_hex(24), None
     if apply:
         with transaction.atomic():
-            Tenant.objects.select_for_update().get(pk=actor.tenant_id)
+            # The unique store/window key serializes inserts; lock the existing batch for lease checks.
             batch, _ = TikTokVideoSyncBatch.objects.select_for_update().get_or_create(
                 tenant_id=actor.tenant_id,store_id=store_id,window_start=day,window_end=day+timedelta(days=1),
                 api_version=VERSION,defaults={'idempotency_key':f'{VERSION}:{day}', 'max_attempts':365})

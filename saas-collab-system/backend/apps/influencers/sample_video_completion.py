@@ -147,8 +147,9 @@ def complete_sample_from_video(*, actor, video_id, apply=True, details=None):
             title=video.title[:240], published_at=published, metric_date=published.date(),
             currency=video.store.currency, source="api_sample_completion",
         )
+    from .completion_provenance import completion_reason
     transition_sample_fulfillment(
         user=actor, fulfillment=sample, status="completed", expected_version=sample.version,
-        confirm_terminal=True, reason=f"api_video_verified:{video.pk}:{video.external_video_id}",
+        confirm_terminal=True, reason=completion_reason(tenant_id=actor.tenant_id, sample_id=sample.pk, actor_id=actor.pk, raw_id=video.pk, external_id=video.external_video_id),
     )
     return "completed"

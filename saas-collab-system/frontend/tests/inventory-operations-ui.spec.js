@@ -15,6 +15,15 @@ describe('inventory operations navigation and evidence contract', () => {
   expect(alerts).not.toContain('label="评估状态" name="assessment"');
   expect(alerts).not.toContain('label="待核对数据" name="pending"');
  });
+ it('loads operations rows and global summary independently with scoped stale guards', () => {
+  expect(decisions).toContain("params.read_projection = 'list'");
+  expect(decisions).toContain("read_projection: 'summary'");
+  expect(decisions).toContain('loading.value = false; void loadSummary(forceRefresh)');
+  expect(decisions).toContain('successfulSummaryKey === key');
+  expect(decisions).toContain('++summarySequence');
+  expect(decisions).toContain('未查询'); expect(decisions).toContain('读取中'); expect(decisions).toContain('结果未确认');
+  expect(decisions).toContain("if (props.mode !== 'operations') { rows.value=[]; total.value=0; }");
+ });
  it('keeps unknown statuses unasserted and exposes row evidence/actions', () => {
   expect(decisions).toContain('暂无销量数据');
   expect(decisions).toContain('暂无库存判断');

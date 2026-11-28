@@ -11,6 +11,9 @@
       <div class="toolbar">
         <el-input v-model="filters.search" clearable placeholder="搜索昵称 ID、账号昵称、数字 ID 或达人备注" @keyup.enter="applyFilters" />
         <el-input v-model="filters.profile_notes" clearable placeholder="达人备注（模糊搜索）" aria-label="达人备注搜索" @keyup.enter="applyFilters" />
+        <el-select v-model="contactChannel" clearable placeholder="联系方式渠道"><el-option v-for="(label, channel) in INFLUENCER_CONTACT_CHANNEL_LABELS" :key="channel" :label="label" :value="channel" /></el-select>
+        <el-input v-model="contactValue" clearable placeholder="精确搜索联系方式" @keyup.enter="applyContactSearch" />
+        <el-button @click="applyContactSearch">搜索联系方式</el-button>
         <el-select v-model="filters.platform" clearable placeholder="全部平台"><el-option v-for="(label, value) in INFLUENCER_PLATFORM_LABELS" :key="value" :label="label" :value="value" /></el-select>
         <el-select v-model="filters.status" clearable placeholder="全部状态"><el-option label="启用（含身份待补全）" value="active" /><el-option label="停用" value="inactive" /></el-select>
         <el-select v-model="filters.cooperation_status" clearable placeholder="合作分层"><el-option v-for="(label, value) in INFLUENCER_COOPERATION_STATUS_LABELS" :key="value" :label="label" :value="value" /></el-select>
@@ -152,7 +155,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { hasPlatformIdentity, archiveStateLabel } from './recordEvidence';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { collectionRows, collectionTotal } from '../../utils/businessResponse';
@@ -168,6 +171,7 @@ import {
   fetchInfluencerBlacklistHistory,
   fetchInfluencerContacts,
   fetchInfluencers,
+  searchInfluencersByContact,
   formatInfluencerError,
   saveInfluencerForm,
   deleteInfluencerArchive,
@@ -182,10 +186,14 @@ import {
 const auth = useAuthStore();
 const rows = ref([]); const total = ref(null); const page = ref(1); const pageSize = ref(20); const loading = ref(false); const saving = ref(false); const listError = ref('');
 const deletedOnly = ref(false);
+const contactChannel = ref(''); const contactValue = ref('');
+const appliedContact = ref(null);
+watch(contactChannel, () => { contactValue.value = ''; appliedContact.value = null; });
 const editVisible = ref(false); const detailVisible = ref(false); const detailLoading = ref(false); const detailError = ref(''); const detail = ref(null); const editing = ref(null);
 const relatedSource = ref(null); const editLoading = ref(false); const createOutcomeUncertain = ref(false); const detailRelated = ref([]); const relatedError = ref('');
 const detailSections = ref({ contacts: {}, history: {}, related: {}, creator: {} });
 let editRequestId = 0;
+let listRequestId = 0;
 let detailRequestId = 0; let formSnapshot = '';
 const creatorSnapshots = ref([]); const creatorStores = ref([]); const creatorStoreId = ref(null); const creatorError = ref(''); const creatorLoading = ref(false);
 const blankProfile = () => ({ display_name: '', external_influencer_id: '', level: '', tier: '', average_video_views: 0, average_live_views: 0, is_active: true, market: '', platforms: '', content_types: '', profile_url: '', duplicate_reason: '', product_cooperation_count: 0, first_cooperation_at: null, cooperation_count: 0, completed_cooperation_count: 0, fulfilled_cooperation_count: 0, fulfillment_rate: null, content_completion_rate: null, historical_gmv: '0.0000', historical_orders: 0, historical_performance: {}, profile_notes: '' });
@@ -224,15 +232,26 @@ const formatTime = (value) => value ? new Date(value).toLocaleString('zh-CN', { 
 const creatorStatusLabel = (status) => ({ matched: '账号和地区一致', handle_mismatch: '账号不一致，待人工确认', region_mismatch: '地区不一致，待人工确认', incomplete: '身份不完整，待人工确认' }[status] || status);
 
 async function load() {
+  const requestId = ++listRequestId;
   loading.value = true; listError.value = '';
   const params = { page: page.value, page_size: pageSize.value, include_nickname_id: 'true', ordering: filters.ordering, ...(filters.search.trim() ? { search: filters.search.trim() } : {}), ...(filters.profile_notes.trim() ? { profile_notes: filters.profile_notes.trim() } : {}), ...(filters.status ? { status: filters.status } : {}), ...(filters.platform ? { platform: filters.platform } : {}), ...(filters.cooperation_status ? { cooperation_status: filters.cooperation_status } : {}), ...(filters.level ? { level: filters.level } : {}), ...(filters.market.trim() ? { market: filters.market.trim() } : {}), ...(filters.tier.trim() ? { tier: filters.tier.trim() } : {}), ...(filters.is_blacklisted ? { is_blacklisted: filters.is_blacklisted } : {}) };
   if (deletedOnly.value) params.deleted_only = 'true';
-  const response = await fetchInfluencers(params); loading.value = false;
+  const response = appliedContact.value
+    ? await searchInfluencersByContact(params, appliedContact.value)
+    : await fetchInfluencers(params);
+  if (requestId !== listRequestId) return; loading.value = false;
   if (!response?.success) { rows.value = []; total.value = null; listError.value = response?.message || '达人档案加载失败，请稍后重试'; return; }
   rows.value = collectionRows(response.data); total.value = collectionTotal(response.data);
 }
+async function applyContactSearch() {
+  page.value = 1;
+  appliedContact.value = contactChannel.value
+    ? { channel: contactChannel.value, value: contactValue.value.trim() }
+    : null;
+  await load();
+}
 function applyFilters() { page.value = 1; load(); }
-function resetFilters() { deletedOnly.value = false; Object.assign(filters, { search: '', profile_notes: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' }); applyFilters(); }
+function resetFilters() { deletedOnly.value = false; appliedContact.value = null; contactChannel.value = ''; contactValue.value = ''; Object.assign(filters, { search: '', profile_notes: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' }); applyFilters(); }
 function changePageSize() { page.value = 1; load(); }
 function resetForm() { editRequestId += 1; editLoading.value = false; createOutcomeUncertain.value = false; editing.value = null; relatedSource.value = null; Object.assign(form, blankForm()); formSnapshot = JSON.stringify(form); }
 async function confirmDraftSwitch() {

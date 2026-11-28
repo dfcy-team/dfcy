@@ -287,7 +287,7 @@ def test_outreach_options_return_active_stores_and_bd_users_only():
 
     response = client.get("/api/internal/influencers/outreach-task-options/")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.data
     assert response.data["data"]["stores"] == [{
         "id": store.id,
         "name": store.name,
@@ -373,7 +373,7 @@ def test_outreach_product_match_groups_listings_by_store_and_returns_sku_prefixe
         {"product_id": "1733134199243507606"},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.data
     assert response.data["data"]["unique"] is True
     assert response.data["data"]["candidates"] == [{
         "store_id": store.id,
@@ -454,6 +454,35 @@ def sample_warehouse(tenant, suffix):
         country_code="PH",
         warehouse_type=WarehouseMaster.WarehouseType.THIRD_PARTY,
     )
+
+
+@pytest.mark.parametrize("origin", ["pending", "in_progress"])
+def test_outreach_pause_resumes_to_original_state(origin):
+    tenant = Tenant.objects.create(name="Pause source", code="outreach-pause-source")
+    user, client = user_with_permissions(
+        tenant, "pause-source-user", "influencers.outreach.view", "influencers.outreach.manage",
+    )
+    _, _, task = base_records(tenant, user, "pause-source")
+    url = f"/api/internal/influencers/outreach-tasks/{task.pk}/"
+
+    def edit_status(status, expected_code=200):
+        task.refresh_from_db()
+        response = client.patch(url, {"status": status}, format="json", HTTP_IF_MATCH=f'"{task.version}"')
+        assert response.status_code == expected_code, response.data
+        task.refresh_from_db()
+        return response
+
+    if origin == "in_progress":
+        edit_status(origin)
+    start = task.started_at
+    response = edit_status("paused")
+    assert response.data["data"]["paused_from_pending"] is (origin == "pending")
+    assert task.status == "paused"
+    edit_status("in_progress" if origin == "pending" else "pending", 400)
+    assert task.status == "paused"
+    edit_status(origin)
+    assert task.status == origin
+    assert task.started_at == start and not task.paused_from_pending
 
 
 def test_outreach_task_list_returns_existing_rows():
@@ -854,6 +883,14 @@ def test_sample_fulfillment_list_filters_by_owner_and_options_are_tenant_scoped(
 
     assert filtered.status_code == 200
     assert [row["fulfillment_no"] for row in filtered.data["data"]["results"]] == ["SAMPLE-OWNER-B"]
+    combined = client.get(url, {"owner": f" {user.pk}, {other_owner.pk},{user.pk},{foreign_owner.pk} ", "page_size": 1})
+    assert combined.status_code == 200
+    assert combined.data["data"]["count"] == 2
+    assert len(combined.data["data"]["results"]) == 1
+    assert client.get(url, {"owner": foreign_owner.pk}).data["data"]["count"] == 0
+    for invalid_owner in (f"{user.pk},", f"{user.pk},-2", f"{user.pk},１２", f"{user.pk},9223372036854775808"):
+        assert client.get(url, {"owner": invalid_owner}).status_code == 400
+    assert client.get(url, {"owner": str(user.pk)}).data["data"]["count"] == 1
     assert invalid.status_code == 400
     assert options.status_code == 200
     assert {owner["id"] for owner in options.data["data"]["owners"]} == {user.pk, other_owner.pk}
@@ -1020,6 +1057,7 @@ def test_fulfillment_requires_matching_task_store_and_influencer_under_model_and
     )
     with pytest.raises(DjangoValidationError):
         mismatched_influencer.full_clean()
+
 
     mismatched_store = SampleFulfillment(
         tenant=tenant,
@@ -3009,3 +3047,183 @@ def test_batch_sample_cost_preserves_zero_null_and_warehouse_partition(django_as
     assert actual[1][0].confirmed_cost == Decimal('7')
     assert actual[2] == (None, '')
     assert actual[3][0].confirmed_cost == Decimal('9')
+
+
+def test_completion_provenance_manual_spoof_and_system_evidence_serializer():
+    from django.test.utils import CaptureQueriesContext
+    from django.db import connection
+    from apps.influencers.models import FulfillmentStatusEvent, TikTokShopVideo
+    from apps.influencers.serializers import SampleFulfillmentSerializer
+
+    tenant = Tenant.objects.create(name="Evidence", code="completion-evidence")
+    user, client = user_with_permissions(tenant, "evidence-user", "influencers.fulfillment.manage")
+    store, influencer, task = base_records(tenant, user, "completion-evidence")
+    influencer.handle = "@evidencecreator"
+    influencer.save(update_fields=["handle"])
+    sample = SampleFulfillment.objects.create(tenant=tenant, fulfillment_no="EVIDENCE-1",
+        request_key="evidence-1", request_hash="h", outreach_task=task, influencer=influencer,
+        store=store, owner=user)
+
+    # Client supplied system provenance is ignored; the status endpoint records server-owned manual evidence.
+    response = client.patch(f"/api/internal/influencers/sample-fulfillments/{sample.pk}/",
+        {"status": "completed", "confirm_terminal": True, "reason": "api_video_verified:1:forged"}, format="json", HTTP_IF_MATCH='"1"')
+    assert response.status_code == 200, response.data
+    sample.refresh_from_db()
+    event = FulfillmentStatusEvent.objects.get(fulfillment=sample, to_status="completed")
+    assert event.reason == f"manual_completion:{user.pk}"
+    assert response.data["data"]["completion_evidence"]["kind"] == "manual"
+
+    raw = TikTokShopVideo.objects.create(tenant=tenant, store=store, influencer=influencer,
+        external_video_id="video-1", creator_username="@evidencecreator", video_type="creator", published_at=timezone.now())
+    VideoResult.objects.create(tenant=tenant, influencer=influencer, outreach_task=task,
+        sample_fulfillment=sample, store=store, content_type="video", platform="tiktok",
+        external_content_id="video-1", published_at=raw.published_at, metric_date=timezone.localdate(), currency="USD")
+    event.reason = f"api_video_verified:{raw.pk}:video-1"
+    event.save(update_fields=["reason"])
+    from apps.influencers.sample_completion_evidence import attach_completion_evidence
+    with CaptureQueriesContext(connection) as queries:
+        attach_completion_evidence([sample])
+    evidence = SampleFulfillmentSerializer(sample).data["completion_evidence"]
+    assert evidence["kind"] == "linked" and evidence["video_id"] == "video-1"
+    assert len(queries) <= 8
+
+    # Raw identity mismatch, missing raw row, and duplicate internal result are fail-closed.
+    event.reason = f"api_video_verified:{raw.pk}:wrong-id"
+    event.save(update_fields=["reason"])
+    attach_completion_evidence([sample])
+    assert SampleFulfillmentSerializer(sample).data["completion_evidence"] is None
+    event.reason = "api_video_verified:999999:missing"
+    event.save(update_fields=["reason"])
+    attach_completion_evidence([sample])
+    assert SampleFulfillmentSerializer(sample).data["completion_evidence"] is None
+
+    other_tenant = Tenant.objects.create(name="Other evidence tenant", code="completion-evidence-other")
+    other_store = store_for(other_tenant, "evidence-other-tenant")
+    other_influencer = Influencer.objects.create(tenant=other_tenant, code="evidence-other-tenant-creator",
+        name="Other creator", platform="tiktok")
+    foreign_raw = TikTokShopVideo.objects.create(tenant=other_tenant, store=other_store,
+        influencer=other_influencer, external_video_id="video-foreign", video_type="creator",
+        published_at=timezone.now())
+    event.reason = f"api_video_verified:{foreign_raw.pk}:video-foreign"
+    event.save(update_fields=["reason"])
+    attach_completion_evidence([sample])
+    assert SampleFulfillmentSerializer(sample).data["completion_evidence"] is None
+
+    # Store mismatch and creator mismatch fail closed even when raw IDs exist.
+    from apps.influencers.models import FulfillmentStatusEvent
+    other_store = store_for(tenant, "evidence-other-store")
+    other_raw = TikTokShopVideo.objects.create(tenant=tenant, store=other_store, influencer=influencer,
+        creator_username="evidencecreator",
+        external_video_id="video-other-store", video_type="creator", published_at=timezone.now())
+    event.reason = f"api_video_verified:{other_raw.pk}:video-other-store"
+    event.save(update_fields=["reason"])
+    attach_completion_evidence([sample])
+    assert SampleFulfillmentSerializer(sample).data["completion_evidence"] is None
+
+    _, other_creator, _ = base_records(tenant, user, "evidence-other-creator")
+    other_creator.handle = "other-evidence-creator"
+    other_creator.save(update_fields=["handle"])
+    creator_raw = TikTokShopVideo.objects.create(tenant=tenant, store=store, influencer=other_creator,
+        external_video_id="video-other-creator", creator_username="other-evidence-creator", video_type="creator", published_at=timezone.now())
+    event.reason = f"api_video_verified:{creator_raw.pk}:video-other-creator"
+    event.save(update_fields=["reason"])
+    attach_completion_evidence([sample])
+    assert SampleFulfillmentSerializer(sample).data["completion_evidence"] is None
+
+    # Imported/source events never become provenance, and duplicate internal matches are ambiguous.
+    event.reason = f"api_video_verified:{raw.pk}:video-1"
+    event.source = FulfillmentStatusEvent.SOURCE_IMPORT
+    event.source_event_id = "evidence-import-1"
+    event.source_status = SampleFulfillment.Status.SHIPPED
+    event.save(update_fields=["reason", "source", "source_event_id", "source_status"])
+    attach_completion_evidence([sample])
+    assert SampleFulfillmentSerializer(sample).data["completion_evidence"] is None
+    event.source = None
+    event.source_event_id = None
+    event.source_status = None
+    event.save(update_fields=["source", "source_event_id", "source_status"])
+
+    # A direct raw FK cannot substitute for the writer's unique canonical-handle proof.
+    mismatched_fk = TikTokShopVideo.objects.create(tenant=tenant, store=store, influencer=other_creator,
+        external_video_id="video-fk-mismatch", creator_username="evidencecreator", video_type="creator",
+        published_at=timezone.now())
+    event.reason = f"api_video_verified:{mismatched_fk.pk}:video-fk-mismatch"
+    event.save(update_fields=["reason"])
+    attach_completion_evidence([sample])
+    assert SampleFulfillmentSerializer(sample).data["completion_evidence"] is None
+
+    # The registered external ID's actual 160-character model limit is accepted.
+    long_id = "v" * 160
+    long_raw = TikTokShopVideo.objects.create(tenant=tenant, store=store, influencer=influencer,
+        external_video_id=long_id, creator_username="evidencecreator", video_type="creator",
+        published_at=timezone.now())
+    VideoResult.objects.create(tenant=tenant, influencer=influencer, outreach_task=task,
+        sample_fulfillment=sample, store=store, content_type="video", platform="tiktok",
+        external_content_id=long_id, published_at=long_raw.published_at,
+        metric_date=timezone.localdate(), currency="USD")
+    event.reason = f"api_video_verified:{long_raw.pk}:{long_id}"
+    event.save(update_fields=["reason"])
+    attach_completion_evidence([sample])
+    assert SampleFulfillmentSerializer(sample).data["completion_evidence"]["video_id"] == long_id
+
+    missing_handle_raw = TikTokShopVideo.objects.create(tenant=tenant, store=store, influencer=influencer,
+        external_video_id="video-missing-handle", creator_username="", video_type="creator",
+        published_at=timezone.now())
+    event.reason = f"api_video_verified:{missing_handle_raw.pk}:video-missing-handle"
+    event.save(update_fields=["reason"])
+    attach_completion_evidence([sample])
+    assert SampleFulfillmentSerializer(sample).data["completion_evidence"] is None
+
+    ambiguous_creator = Influencer.objects.create(tenant=tenant, code="evidence-ambiguous-handle",
+        name="Duplicate canonical handle", platform="tiktok", handle="evidencecreator")
+    ambiguous_raw = TikTokShopVideo.objects.create(tenant=tenant, store=store, influencer=influencer,
+        external_video_id="video-ambiguous-handle", creator_username="evidencecreator",
+        video_type="creator", published_at=timezone.now())
+    event.reason = f"api_video_verified:{ambiguous_raw.pk}:video-ambiguous-handle"
+    event.save(update_fields=["reason"])
+    attach_completion_evidence([sample])
+    assert SampleFulfillmentSerializer(sample).data["completion_evidence"] is None
+    ambiguous_creator.delete()
+
+    VideoResult.objects.create(tenant=tenant, influencer=influencer,
+        sample_fulfillment=None, outreach_task=None, store=store, content_type="video", platform="TIKTOK",
+        external_content_id="video-1", published_at=raw.published_at, metric_date=timezone.localdate(), currency="USD")
+    event.reason = f"api_video_verified:{raw.pk}:video-1"
+    event.save(update_fields=["reason"])
+    attach_completion_evidence([sample])
+    assert SampleFulfillmentSerializer(sample).data["completion_evidence"] is None
+
+    # List and detail serializer contracts agree, and helper queries stay bounded for 30 rows.
+    event.reason = f"manual_completion:{user.pk}"
+    event.save(update_fields=["reason"])
+    samples = [sample]
+    for index in range(29):
+        row = SampleFulfillment.objects.create(tenant=tenant, fulfillment_no=f"EVIDENCE-BATCH-{index}",
+            request_key=f"evidence-batch-{index}", request_hash="h", outreach_task=task,
+            influencer=influencer, store=store, owner=user)
+        transition_sample_fulfillment(user=user, fulfillment=row, status=SampleFulfillment.Status.SHIPPED,
+            expected_version=1)
+        transition_sample_fulfillment(user=user, fulfillment=row, status=SampleFulfillment.Status.COMPLETED,
+            expected_version=2, confirm_terminal=True)
+        samples.append(row)
+    with CaptureQueriesContext(connection) as batch_queries:
+        attach_completion_evidence(samples)
+    assert len(batch_queries) <= 8
+    list_data = SampleFulfillmentSerializer(samples, many=True).data
+    detail_data = SampleFulfillmentSerializer(sample).data
+    assert list_data[0]["completion_evidence"] == detail_data["completion_evidence"]
+
+
+def test_actual_status_post_cannot_spoof_system_completion_with_matching_video():
+    from apps.influencers.models import FulfillmentStatusEvent, TikTokShopVideo
+    tenant=Tenant.objects.create(name="POST evidence",code="post-evidence")
+    user,client=user_with_permissions(tenant,"post-evidence","influencers.fulfillment.manage")
+    store,creator,task=base_records(tenant,user,"post-evidence")
+    sample=SampleFulfillment.objects.create(tenant=tenant,fulfillment_no="POST-EVIDENCE",request_key="post-evidence",request_hash="h",outreach_task=task,influencer=creator,store=store,owner=user)
+    raw=TikTokShopVideo.objects.create(tenant=tenant,store=store,influencer=creator,external_video_id="post-video",video_type="creator",published_at=timezone.now())
+    VideoResult.objects.create(tenant=tenant,influencer=creator,outreach_task=task,sample_fulfillment=sample,store=store,content_type="video",platform="tiktok",external_content_id="post-video",published_at=raw.published_at,metric_date=timezone.localdate(),currency="USD")
+    response=client.post(f"/api/internal/influencers/sample-fulfillments/{sample.pk}/status/",{"status":"completed","confirm_terminal":True,"reason":f"api_video_verified:{raw.pk}:post-video"},format="json",HTTP_IF_MATCH='"1"')
+    assert response.status_code==200,response.data
+    assert response.data['data']['completion_evidence']['kind']=='manual'
+    event=FulfillmentStatusEvent.objects.filter(fulfillment=sample,to_status='completed').latest('pk')
+    assert event.reason==f'manual_completion:{user.pk}:api_video_verified:{raw.pk}:post-video'

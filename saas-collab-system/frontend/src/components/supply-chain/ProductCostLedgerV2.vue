@@ -5,15 +5,16 @@
     <template v-else>
       <el-form class="ledger-filters" inline @submit.prevent="search">
         <el-form-item label="SKU / 商品"><el-input v-model="draft.search" clearable placeholder="SKU 或商品名称" @input="draft.sku_id=''" @keyup.enter="search" /></el-form-item>
-        <el-form-item label="国家"><el-select v-model="draft.country_id" clearable filterable remote :remote-method="v=>loadOptions('countries',v)" placeholder="全部国家"><el-option v-for="o in options.countries" :key="o.id" :value="o.id" :label="`${o.name} (${o.country_code})`" /></el-select></el-form-item>
-        <el-form-item label="仓库"><el-select v-model="draft.warehouse_id" clearable filterable remote :remote-method="v=>loadOptions('warehouses',v)" placeholder="全部仓库"><el-option v-for="o in options.warehouses" :key="o.id" :value="o.id" :label="`${o.name} (${o.country_code})`" /></el-select></el-form-item>
-        <el-form-item label="发运批次"><el-select v-model="draft.batch_id" clearable filterable remote :remote-method="v=>loadOptions('batches',v)" placeholder="全部批次"><el-option v-for="o in options.batches" :key="o.id" :value="o.id" :label="o.name" /></el-select></el-form-item>
+        <el-form-item label="国家"><el-select v-model="draft.country_id" clearable filterable remote :remote-method="v=>loadOptions('countries',v)" @visible-change="v=>v&&!options.countries.length&&loadOptions('countries')" placeholder="全部国家"><el-option v-for="o in options.countries" :key="o.id" :value="o.id" :label="`${o.name} (${o.country_code})`" /></el-select></el-form-item>
+        <el-form-item label="仓库"><el-select v-model="draft.warehouse_id" clearable filterable remote :remote-method="v=>loadOptions('warehouses',v)" @visible-change="v=>v&&!options.warehouses.length&&loadOptions('warehouses')" placeholder="全部仓库"><el-option v-for="o in options.warehouses" :key="o.id" :value="o.id" :label="`${o.name} (${o.country_code})`" /></el-select></el-form-item>
+        <el-form-item label="发运批次"><el-select v-model="draft.batch_id" clearable filterable remote :remote-method="v=>loadOptions('batches',v)" @visible-change="v=>v&&!options.batches.length&&loadOptions('batches')" placeholder="全部批次"><el-option v-for="o in options.batches" :key="o.id" :value="o.id" :label="o.name" /></el-select></el-form-item>
         <el-form-item label="版本"><el-select v-model="draft.versions"><el-option label="最新版本" value="latest" /><el-option label="包含历史" value="all" /></el-select></el-form-item>
         <el-form-item><el-button type="primary" :disabled="loading" @click="search">查询</el-button><el-button :disabled="loading" @click="reset">重置</el-button></el-form-item>
       </el-form>
-      <el-alert v-if="error || optionError" :title="error || optionError" type="error" :closable="false" />
+      <el-alert v-if="error" :title="error" type="error" :closable="false" />
+      <el-alert v-if="optionError" :title="`筛选项加载失败：${optionError}，不影响已查询的列表。`" type="warning" :closable="false" />
       <div class="ledger-table">
-        <el-table v-loading="loading" :data="rows" border row-key="id" empty-text="查询范围内尚无已计算的供应链成本">
+        <el-table v-loading="loading" :data="rows" border row-key="id" :empty-text="queried ? '查询范围内尚无已计算的供应链成本' : '请选择条件后点击查询'">
           <el-table-column label="商品图片" width="112"><template #default="{row}"><DocumentProductImageV2 :image-path="row.image_preview_url || ''" :alt="`${row.sku || ''} 商品图片`"/></template></el-table-column><el-table-column label="SKU" min-width="190"><template #default="{row}"><DocumentSkuV2 :sku="row.sku" :legacy-sku-code="row.legacy_sku_code"/></template></el-table-column>
           <el-table-column label="入库单件成本" min-width="140"><template #default="{row}">{{ unitCost(row.received_unit_cost) }}</template></el-table-column>
           <el-table-column label="发运单件成本" min-width="140"><template #default="{row}">{{ unitCost(row.shipped_unit_cost) }}</template></el-table-column>
@@ -43,7 +44,7 @@
 import { natureLabel } from '../../utils/payeeSettlement';
 import DocumentSkuV2 from './DocumentSkuV2.vue';
 import DocumentProductImageV2 from './DocumentProductImageV2.vue';
-import {computed, onMounted, onUnmounted, reactive, ref, watch} from 'vue';
+import {computed, onUnmounted, reactive, ref, watch} from 'vue';
 import {useAuthStore} from '../../stores/auth';
 import {fetchSupplyProductCosts, fetchSupplyCostOptions} from '../../api/supplyCostsV2';
 
@@ -51,6 +52,7 @@ const auth=useAuthStore();
 const allowed=computed(()=>!auth.authorizationStale && auth.hasPermission('supply.v2.view'));
 const empty=()=>({search:'',sku_id:'',country_id:'',warehouse_id:'',batch_id:'',versions:'latest'});
 const draft=reactive(empty()), applied=ref(empty()), options=reactive({countries:[],warehouses:[],batches:[]});
+const queried=ref(false);
 const rows=ref([]),total=ref(0),page=ref(1),loading=ref(false),error=ref(''),optionError=ref(''),detail=ref(null);
 let sequence=0;
 const optionSequences={countries:0,warehouses:0,batches:0};
@@ -82,13 +84,12 @@ async function loadOptions(kind,search=''){
     options[kind]=Array.isArray(result.data)?result.data:[];
   }catch(e){if(current===optionSequences[kind])optionError.value=e?.message||'筛选项加载失败';}
 }
-function search(){applied.value={...draft};page.value=1;return load();}
-function reset(){Object.assign(draft,empty());return search();}
+function search(){queried.value=true;applied.value={...draft};page.value=1;return load();}
+function reset(){Object.assign(draft,empty());applied.value=empty();page.value=1;queried.value=false;error.value='';optionError.value='';clear();}
 function changePage(v){page.value=v;return load();}
 function history(row){Object.assign(draft,{...empty(),sku_id:row.sku_id,search:row.sku,country_id:row.country_id,versions:'all'});return search();}
 function clear(){sequence++;rows.value=[];total.value=0;detail.value=null;loading.value=false;for(const kind of Object.keys(options)){optionSequences[kind]++;options[kind]=[];}}
 watch(allowed,v=>{if(!v)clear();});
-onMounted(()=>{load();for(const kind of Object.keys(options))loadOptions(kind);});
 onUnmounted(clear);
 defineExpose({draft,applied,rows,total,load,search,reset,history,changePage,detail});
 </script>

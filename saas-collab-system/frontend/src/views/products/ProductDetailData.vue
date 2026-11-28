@@ -1199,25 +1199,32 @@ async function loadDictionaries() {
   if (!cache.promise) {
     const requestVersion = cache.version;
     let request;
-    request = Promise.all([
+    request = Promise.allSettled([
       fetchProductCategories({ page: 1, page_size: 500 }),
       fetchProductCategoryBackgroundColors(),
       fetchProductColors(),
       fetchProductAttributes(),
-    ]).then(([categoryResponse, backgroundResponse, colorResponse, attributeResponse]) => {
+    ]).then((results) => {
       if (requestVersion !== cache.version) return null;
-      const responses = [categoryResponse, backgroundResponse, colorResponse, attributeResponse];
-      const failed = responses.find((response) => !response?.success);
-      if (failed) throw new Error(failed.protocol_error ? '商品分类、颜色或属性资料暂时无法加载，请点击查询重试。' : failed.message || '商品字典加载失败，请重试');
+      const [categoryResponse, backgroundResponse, colorResponse, attributeResponse] = results.map(
+        (result) => result.status === 'fulfilled' ? result.value : null,
+      );
+      if (!categoryResponse?.success) {
+        throw new Error(categoryResponse?.message || '商品分类暂时无法加载，请点击查询重试。');
+      }
       const dictionaryData = {
         categories: mergeCategoryBackgroundColors(
           collectionRows(categoryResponse.data),
-          collectionRows(backgroundResponse.data),
+          backgroundResponse?.success ? collectionRows(backgroundResponse.data) : [],
         ),
-        colors: collectionRows(colorResponse.data),
-        attributes: collectionRows(attributeResponse.data),
+        colors: colorResponse?.success ? collectionRows(colorResponse.data) : [],
+        attributes: attributeResponse?.success ? collectionRows(attributeResponse.data) : [],
       };
-      cache.value = dictionaryData;
+      if (results.every((result) => result.status === 'fulfilled' && result.value?.success)) {
+        cache.value = dictionaryData;
+      } else {
+        cache.promise = null;
+      }
       return dictionaryData;
     }).catch((error) => {
       // A rejected first request must not poison the shared cache.  The next

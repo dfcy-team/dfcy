@@ -491,6 +491,7 @@ class OutreachTask(StateMachineTenantModel):
     source_owner_name_snapshot = models.CharField(max_length=255, blank=True, default="")
     source_dispatcher_name_snapshot = models.CharField(max_length=255, blank=True, default="")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    paused_from_pending = models.BooleanField(default=False, db_default=False, editable=False)
     dispatch_time = models.DateTimeField(default=timezone.now)
     outreach_at = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)

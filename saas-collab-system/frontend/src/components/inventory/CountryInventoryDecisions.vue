@@ -2,7 +2,7 @@
   <AppPage :title="pageTitle" eyebrow="库存决策" subtitle="按国家复核库存、销量窗口与供应进度；缺失数据会单独标明。" :capability="error ? 'degraded' : 'connected'">
     <section v-if="mode === 'operations'" class="operations-summary" aria-label="当前查询经营指标">
       <article v-for="metric in operationMetrics" :key="metric.label" class="operations-metric"><div><el-icon><component :is="metric.icon" /></el-icon><span>{{ metric.label }}</span></div><strong>{{ operationMetricValue(metric.value) }}</strong><small>{{ metric.note }}</small></article>
-      <p>当前条件共 {{ total }} 个 SKU，顶部统计全部查询结果；状态筛选仅筛选当前页。</p>
+      <p>当前条件共 {{ countLabel }} 个 SKU，顶部统计全部查询结果；状态筛选仅筛选当前页。</p><div v-if="summaryLoading" role="status">经营汇总读取中</div><div v-else-if="summaryError" role="alert">{{ summaryError }} <el-button link @click="loadSummary(true)">重试汇总</el-button></div>
     </section>
     <div v-if="mode === 'replenishment'" class="state-tabs" role="tablist" aria-label="补货建议状态">
       <el-button v-for="tab in replenishmentTabs" :key="tab.value" :type="decisionState === tab.value ? 'primary' : 'default'" @click="setDecisionState(tab.value)">{{ tab.label }}<span v-if="summary[tab.count] !== undefined">（{{ summary[tab.count] }}）</span></el-button>
@@ -128,7 +128,8 @@ const operationMetrics = computed(() => {
     { label: '库存数量待确认', value: all.unknown_stock, note: '尚无可用的同步数量', icon: QuestionFilled }
   ];
 });
-const operationMetricValue = value => !countryId.value || awaitingQuery.value || loading.value || error.value ? '—' : value == null ? '暂无数据' : Number(value).toLocaleString('zh-CN');
+const operationMetricValue = value => !countryId.value || awaitingQuery.value ? '未查询' : summaryLoading.value ? '读取中' : summaryError.value || successfulSummaryKey !== currentOperationScope() || summary.value?.scope !== 'all_filtered' || value == null ? '结果未确认' : Number(value).toLocaleString('zh-CN');
+const countLabel = computed(() => !countryId.value || awaitingQuery.value ? '未查询' : loading.value ? '读取中' : error.value ? '结果未确认' : total.value);
 const displayRows = computed(() => { if (props.mode !== 'operations' || !operationsFilter.value) return rows.value; const [field, status] = operationsFilter.value.split(':'); return rows.value.filter(row => (row.operations?.[field === 'sales' ? 'sales_status' : 'inventory_status'] || 'unknown') === status); });
 const inventoryCount = status => rows.value.filter(row => (row.operations?.inventory_status || 'unknown') === status).length;
 const salesTag = status => ({ unknown: 'info', no_sales: 'warning', observed_sales: 'success' }[status] || 'info');
@@ -146,10 +147,12 @@ const previewing = ref(false), saving = ref(false), reviewOpen = ref(false), rev
 const pipelineStages = [{ key: 'production_unshipped', label: '生产未发' }, { key: 'awaiting_dispatch', label: '待发运' }, { key: 'transporting', label: '运输中' }, { key: 'arrived_unchecked', label: '到仓待检' }, { key: 'received_awaiting_wms', label: '已收未入 WMS' }, { key: 'wms_received', label: '已对账收货（累计）' }, { key: 'excess_shipped', label: '超额发运' }, { key: 'additional_shipped', label: '追加发运' }];
 const validReview = computed(() => !!notes.value.trim() && !!planRevision.value.trim() && reviewLines.value.length > 0 && reviewLines.value.every(line => Number.isInteger(Number(line.quantity)) && Number(line.quantity) > 0));
 const awaitingQuery = ref(true);
+const summaryLoading = ref(false), summaryError = ref('');
 const categoryProps = { checkStrictly: true, emitPath: false, value: 'id', label: 'name', children: 'children' };
-let requestSequence = 0, buildPollTimer = null, activeQueryFingerprint = '';
+let requestSequence = 0, summarySequence = 0, buildPollTimer = null, activeQueryFingerprint = '', successfulSummaryKey = '', summaryResolvedAt = 0, acceptedOperationsParams = null, summaryPendingKey = '', summaryPendingPromise = null;
 watch(() => auth.authorizationStale, stale => {
   if (!stale) return;
+  ++summarySequence; summaryPendingKey = ''; summaryPendingPromise = null; summary.value = {}; successfulSummaryKey = ''; summaryLoading.value = false; summaryError.value = '授权信息已过期，请刷新权限后再查看。';
   ++requestSequence; rows.value = []; total.value = 0; selectedRows.value = [];
   loading.value = false;
   queryBuilding.value = false;
@@ -191,20 +194,45 @@ function businessToday() { const parts = new Intl.DateTimeFormat('en', { timeZon
 function businessDateOffset(date, days) { const [y,m,d] = date.split('-').map(Number); const value = new Date(Date.UTC(y,m-1,d + days)); return `${value.getUTCFullYear()}-${String(value.getUTCMonth()+1).padStart(2,'0')}-${String(value.getUTCDate()).padStart(2,'0')}`; }
 const failed = response => response?.data?.detail || response?.message || '请求失败，请检查网络后重试。';
 const readFailure = value => value?.code === 'ECONNABORTED' || /timeout/i.test(value?.message || '') ? '经营汇总读取超时，结果尚未确认。请稍后重试或缩小 SKU 搜索范围。' : failed(value);
+function operationScopeKey(params) { const { offset, limit, read_projection, refresh, ...scope } = params; return JSON.stringify({ ...scope, authorized_user: auth.currentUser?.id || null, authorization_version: auth.currentUser?.authorization_version || null, authorization_stale: auth.authorizationStale }); }
+function currentOperationScope() { return operationScopeKey({ country_id: countryId.value, search: search.value.trim(), target_days: targetDays.value, window_days: windowDays.value, mapped_only: true, ...(categoryId.value ? { category_id: Number(categoryId.value) } : {}), ...(abcGrade.value ? { abc_grade: abcGrade.value } : {}) }); }
+function loadSummary(force = false) {
+  if (props.mode !== 'operations' || !countryId.value || awaitingQuery.value || !acceptedOperationsParams) return Promise.resolve();
+  if (operationScopeKey(acceptedOperationsParams) !== currentOperationScope()) { if (force) summaryError.value = '筛选条件已变更，请先查询列表后再读取汇总。'; return Promise.resolve(); }
+  const params = { ...acceptedOperationsParams, read_projection: 'summary' };
+  const key = operationScopeKey(params);
+  if (!force && summaryPendingKey === key && summaryPendingPromise) return summaryPendingPromise;
+  if (!force && successfulSummaryKey === key && Date.now() - summaryResolvedAt < 60000) return Promise.resolve();
+  if (force) successfulSummaryKey = '';
+  const seq = ++summarySequence; summaryLoading.value = true; summaryError.value = ''; summary.value = {};
+  summaryPendingKey = key;
+  summaryPendingPromise = (async () => {
+    try {
+      const response = await api.fetchCountryInventoryDecisions(params);
+      if (seq !== summarySequence || key !== currentOperationScope()) return;
+      if (!response?.success || response.data?.summary_state === 'failed') throw new Error(readFailure(response));
+      summary.value = response.data?.summary || {}; successfulSummaryKey = key; summaryResolvedAt = Date.now();
+    } catch (e) { if (seq === summarySequence && key === currentOperationScope()) summaryError.value = readFailure(e); }
+    finally {
+      if (seq === summarySequence) { summaryLoading.value = false; summaryPendingKey = ''; summaryPendingPromise = null; }
+    }
+  })();
+  return summaryPendingPromise;
+}
 async function load({ optionsOnly = false, forceRefresh = false } = {}) {
   if (buildPollTimer) { clearTimeout(buildPollTimer); buildPollTimer = null; }
-  const seq = ++requestSequence; queryBuilding.value = false; const expandedIds = new Set(expanded.value); loading.value = true; error.value = ''; rows.value=[]; total.value=0; selectedRows.value=[];
+  const seq = ++requestSequence; queryBuilding.value = false; const expandedIds = new Set(expanded.value); loading.value = true; error.value = ''; if (props.mode !== 'operations') { rows.value=[]; total.value=0; } else { rows.value = []; if (countryId.value && !optionsOnly) awaitingQuery.value = false; const nextScope = currentOperationScope(); const scopeChanged = successfulSummaryKey !== nextScope; const cacheExpired = successfulSummaryKey === nextScope && Date.now() - summaryResolvedAt >= 60000; if (forceRefresh || scopeChanged || cacheExpired) { successfulSummaryKey = ''; summary.value = {}; summaryError.value = ''; if (summaryPendingKey !== nextScope || forceRefresh) { ++summarySequence; summaryPendingKey = ''; summaryPendingPromise = null; summaryLoading.value = false; } } } selectedRows.value=[];
   try {
     const params = optionsOnly || !countryId.value ? { search: search.value.trim(), limit: 20, offset: 0, target_days: targetDays.value, window_days: windowDays.value, ...(props.mode === 'operations' ? {} : { decision_state: decisionState.value }) } : { country_id: countryId.value, search: search.value.trim(), limit: 20, offset: (page.value - 1) * 20, target_days: targetDays.value, window_days: windowDays.value, ...(props.mode === 'operations' ? {} : { decision_state: decisionState.value }) };
-    if (props.mode === 'operations') { params.mapped_only = true; if (countryId.value && !optionsOnly && categoryId.value) params.category_id = Number(categoryId.value); }
+    if (props.mode === 'operations') { params.mapped_only = true; params.read_projection = 'list'; if (countryId.value && !optionsOnly && categoryId.value) params.category_id = Number(categoryId.value); }
     if (props.mode === 'operations' && params.country_id && abcGrade.value) params.abc_grade = abcGrade.value;
     if (forceRefresh) params.refresh = true;
     activeQueryFingerprint = JSON.stringify({ country_id: params.country_id || null, abc_grade: params.abc_grade || '', search: params.search, target_days: params.target_days, window_days: params.window_days, ...(props.mode === 'operations' ? { category_id: params.category_id || null } : { decision_state: params.decision_state }), offset: params.offset || 0 });
     const response = await api.fetchCountryInventoryDecisions(params);
     if (seq !== requestSequence) return;
     if (auth.authorizationStale) throw new Error('授权信息已过期，请刷新权限后再查看。');
-    if (!response?.success) { error.value = readFailure(response); return; }
-    const data = response.data || {}; countries.value = data.countries || []; if (props.mode === 'operations') categories.value = data.categories || []; summary.value = data.summary || {};
+    if (!response?.success) { error.value = props.mode === 'operations' ? readFailure(response).replace(/^经营汇总/, '库存列表') : readFailure(response); return; }
+    const data = response.data || {}; countries.value = data.countries || []; if (props.mode === 'operations') categories.value = data.categories || []; else summary.value = data.summary || {};
     if (data.query_state === 'building') {
       queryBuilding.value = true;
       rows.value = data.results || []; total.value = Number(data.count || 0);
@@ -220,10 +248,11 @@ async function load({ optionsOnly = false, forceRefresh = false } = {}) {
     else { awaitingQuery.value = false; rows.value = data.results || []; total.value = Number(data.count || 0); await nextTick(); if(seq!==requestSequence)return; for (const row of rows.value) tableRef.value?.toggleRowExpansion?.(row, expandedIds.has(row.sku_id)); }
     permissions.value = data.permissions || { can_preview: false, can_create: false }; notice.value = data.notice || '';
     selectedRows.value = selectedRows.value.filter(old => rows.value.some(row => row.sku_id === old.sku_id));
-  } catch (e) { if (seq === requestSequence) error.value = readFailure(e); }
+    if (props.mode === 'operations' && params.country_id) { acceptedOperationsParams = { ...params }; loading.value = false; void loadSummary(forceRefresh); }
+  } catch (e) { if (seq === requestSequence) error.value = props.mode === 'operations' ? readFailure(e).replace(/^经营汇总/, '库存列表') : readFailure(e); }
   finally { if (seq === requestSequence) loading.value = false; }
 }
-function countryChanged() { page.value = 1; selectedRows.value = []; expanded.value.clear(); categoryId.value = null; categories.value = []; if (props.mode === 'operations') { awaitingQuery.value = true; ++requestSequence; activeQueryFingerprint = ''; if (buildPollTimer) clearTimeout(buildPollTimer); buildPollTimer = null; loading.value = false; queryBuilding.value = false; rows.value = []; total.value = 0; summary.value = {}; notice.value = countryId.value ? '请点击查询读取该国家库存。' : ''; error.value = ''; return; } load(); }
+function countryChanged() { page.value = 1; selectedRows.value = []; expanded.value.clear(); categoryId.value = null; categories.value = []; if (props.mode === 'operations') { awaitingQuery.value = true; ++requestSequence; activeQueryFingerprint = ''; if (buildPollTimer) clearTimeout(buildPollTimer); buildPollTimer = null; loading.value = false; queryBuilding.value = false; rows.value = []; total.value = 0; summary.value = {}; successfulSummaryKey = ''; ++summarySequence; summaryPendingKey = ''; summaryPendingPromise = null; summaryLoading.value = false; summaryError.value = ''; notice.value = countryId.value ? '请点击查询读取该国家库存。' : ''; error.value = ''; return; } load(); }
 function applyFilters() { page.value = 1; selectedRows.value = []; load(); }
 function changePage(value) { page.value = value; selectedRows.value = []; load(); }
 function selectionChanged(selection) { selectedRows.value = selection; }
@@ -267,7 +296,8 @@ let createPending = null;
 let previewPending = null;
 function queryFingerprint() { return JSON.stringify({ country_id: countryId.value || null, abc_grade: props.mode === 'operations' ? abcGrade.value || '' : '', search: search.value.trim(), target_days: targetDays.value, window_days: windowDays.value, ...(props.mode === 'operations' ? { category_id: categoryId.value || null } : { decision_state: decisionState.value }), offset: (page.value - 1) * 20 }); }
 onMounted(() => { const query = router.currentRoute?.value?.query || {}; countryId.value = query.country_id ? Number(query.country_id) : null; search.value = String(query.search || query.sku || ''); load({ optionsOnly: !countryId.value || props.mode === 'operations' }); });
-onUnmounted(() => { ++requestSequence; activeQueryFingerprint = ''; if (buildPollTimer) clearTimeout(buildPollTimer); });
+watch(() => [auth.currentUser?.id, auth.currentUser?.authorization_version], () => { if (props.mode !== 'operations') return; ++requestSequence; ++summarySequence; summaryPendingKey = ''; summaryPendingPromise = null; acceptedOperationsParams = null; rows.value = []; total.value = 0; awaitingQuery.value = true; loading.value = false; summary.value = {}; successfulSummaryKey = ''; summaryLoading.value = false; summaryError.value = ''; });
+onUnmounted(() => { ++summarySequence; summaryPendingKey = ''; summaryPendingPromise = null; ++requestSequence; activeQueryFingerprint = ''; if (buildPollTimer) clearTimeout(buildPollTimer); });
 </script>
 
 <style scoped>

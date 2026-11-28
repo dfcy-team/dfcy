@@ -17,6 +17,14 @@ const fees=[{key:'fees',label:'平台费用',level:2,leaf:false,amount:-900000n}
  {key:'payment',label:'支付手续费',level:3,leaf:true,amount:-200000n},
  {key:'return',label:'手续费返还',level:3,leaf:true,amount:100000n}];
 describe('金额与费率共用构成',()=>{
+ it('来源逐条归并，不先物化所有订单的子项临时数组',()=>{
+  const c=runtime();let merged=0,reads=0;
+  c.Map=class extends Map{set(...args){merged++;return super.set(...args);}};
+  c.ledgerParts=()=>{if(reads++)expect(merged).toBeGreaterThan(0);return fees;};
+  const rows=c.FINANCE_COMPOSITION.fromEntries(Array.from({length:1000},()=>fact([])),-900000000n);
+  expect(reads).toBe(1000);expect(rows.filter(r=>r.included).reduce((n,r)=>n+r.amount,0n)).toBe(-900000000n);
+  expect(rows.map(r=>r.label)).toEqual(['平台费用','佣金','支付手续费','手续费返还']);
+ });
  it('SaaS来源标记仍解析原平台费用，不退回来源名称一行',()=>{
   const c=runtime();c.ledgerParts=f=>f.source==='平台结算'?fees:[{key:'generic',label:f.source,level:2,leaf:true,amount:-900000n}];
   const rows=c.FINANCE_COMPOSITION.fromEntries([{...fact([]),source:'SaaS平台结算'}],-900000n);

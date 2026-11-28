@@ -16,6 +16,16 @@ from apps.sales_management.inventory_queries import prefer_sales_order_time, eli
 from apps.sales_management.scopes import filter_sales_queryset
 
 
+def _bundle_product_source(source):
+    """Select bundle order items without an unbounded SKU join."""
+    bundle_ids = list(ProductSKU.objects.filter(product_type='bundle').order_by()
+                      .values_list('pk', flat=True)[:2001])
+    if len(bundle_ids) > 2000:
+        # Keep the historical FK predicate when a literal IN list would be large.
+        return source.filter(internal_sku__product_type='bundle')
+    return source.filter(internal_sku_id__in=bundle_ids)
+
+
 def sales_windows(actor, country, sku_ids, windows, *, end_date=None,
                   platform_type=None, permission_cache=None, inventory_only=False):
     from . import country_decisions as domain
@@ -148,7 +158,7 @@ def sales_windows(actor, country, sku_ids, windows, *, end_date=None,
             # Resolve each of the two supported bundle representations through its
             # selective relation, then deduplicate immutable order-item identities.
             bundle_sources = [
-                source.filter(internal_sku__product_type='bundle'),
+                _bundle_product_source(source),
                 source.filter(bundle_snapshot__isnull=False),
             ]
             pending_bundles = defaultdict(list)

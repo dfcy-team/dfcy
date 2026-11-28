@@ -1,3 +1,4 @@
+from django.db.models.functions import Lower
 from rest_framework import serializers
 from io import BytesIO
 from datetime import date
@@ -424,26 +425,28 @@ class Options(InternalAPI):
             supplier = allowed_suppliers(user).filter(pk=int(supplier_id)).first()
             if supplier is None:
                 raise NotFound("供应商不可访问。")
-            sku_codes = {code.strip() for code in codes}
-            price_skus = ProductSKU.objects.filter(tenant=user.tenant, is_active=True, product_type="standard").exclude(inventory_type="virtual").filter(
-                Q(sku_code__in=sku_codes) | Q(legacy_sku_code__in=sku_codes)).values("id")
+            sku_codes = {code.strip().lower() for code in codes}
+            price_skus = ProductSKU.objects.filter(tenant=user.tenant, is_active=True, product_type="standard").exclude(inventory_type="virtual").annotate(
+                _sku_code_lower=Lower("sku_code"), _legacy_sku_code_lower=Lower("legacy_sku_code")).filter(
+                Q(_sku_code_lower__in=sku_codes) | Q(_legacy_sku_code_lower__in=sku_codes)).values("id")
             prices = {row.sku_id: row for row in SupplierProductPrice.objects.filter(tenant=user.tenant, supplier=supplier, sku_id__in=price_skus)}
         from .supplier_products import product_details
-        unique_codes = {code.strip() for code in codes}
-        query = ProductSKU.objects.filter(tenant=user.tenant, is_active=True, product_type="standard").exclude(inventory_type="virtual").filter(
-            Q(sku_code__in=unique_codes) | Q(legacy_sku_code__in=unique_codes)).select_related("spu__category_node")
+        unique_codes = {code.strip().lower() for code in codes}
+        query = ProductSKU.objects.filter(tenant=user.tenant, is_active=True, product_type="standard").exclude(inventory_type="virtual").annotate(
+            _sku_code_lower=Lower("sku_code"), _legacy_sku_code_lower=Lower("legacy_sku_code")).filter(
+            Q(_sku_code_lower__in=unique_codes) | Q(_legacy_sku_code_lower__in=unique_codes)).select_related("spu__category_node")
         by_code = {}
         for sku in query:
             item = {"id": sku.pk, "sku": sku.sku_code, "legacy_sku_code": sku.legacy_sku_code or "", "name": sku.product_name,
                     "product_reference_price": str(sku.purchase_price) if sku.purchase_price is not None else None,
                     "supplier_reference_price": str(prices[sku.pk].unit_price) if sku.pk in prices else None,
                     "product_details": product_details(sku)}
-            by_code.setdefault(sku.sku_code, []).append(item)
+            by_code.setdefault(sku.sku_code.strip().casefold(), []).append(item)
             if sku.legacy_sku_code:
-                by_code.setdefault(sku.legacy_sku_code, []).append(item)
+                by_code.setdefault(sku.legacy_sku_code.strip().casefold(), []).append(item)
         rows = []
         for index, code in enumerate(codes, 1):
-            matches = {item["id"]: item for item in by_code.get(code.strip(), [])}
+            matches = {item["id"]: item for item in by_code.get(code.strip().casefold(), [])}
             rows.append({"row": index, "code": code, "item": next(iter(matches.values())) if len(matches) == 1 else None,
                          "error": "未找到启用的普通商品 SKU" if not matches else "编码匹配到多个 SKU" if len(matches) > 1 else None})
         return Response({"data": rows})

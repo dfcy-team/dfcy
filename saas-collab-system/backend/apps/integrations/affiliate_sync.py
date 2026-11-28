@@ -27,6 +27,15 @@ from .readonly_clients import ReadonlyConfigurationError
 
 
 VERSION = AFFILIATE_CONTRACT_VERSION
+
+
+def _can_replace_creator(current, values, account, observed_at, affiliate_observed_at):
+    return bool(
+        current.store_id == values["store_id"] and account
+        and account == values["creator_username_normalized"]
+        and current.source_updated_at and observed_at and affiliate_observed_at
+        and current.source_updated_at < observed_at <= affiliate_observed_at
+    )
 SITE_COUNTRIES = {"PH": "PH", "MY": "MY", "TH": "TH",
                   "\u83f2\u5f8b\u5bbe": "PH", "\u9a6c\u6765": "MY", "\u9a6c\u6765\u897f\u4e9a": "MY", "\u6cf0\u56fd": "TH"}
 SCOPES = {"seller.authorization.info", "seller.affiliate_collaboration.read", "seller.order.info"}
@@ -349,6 +358,15 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
             self.page_quarantine = quarantined
             self.fetch_missing_quarantine = list(quarantined)
             self.page_valid_keys = [self._identity_key(row) for row in valid_rows]
+            self.page_platform_creators = {}
+            for row in valid_rows:
+                key = self._identity_key(row)
+                affiliate_observed = parse_datetime(str(row.get("affiliate_observed_at") or ""))
+                detail_observed = parse_datetime(str(row.get("detail_observed_at") or ""))
+                self.page_platform_creators[key] = (
+                    normalize_account(row.get("creator_username") or ""),
+                    min(affiliate_observed, detail_observed), affiliate_observed,
+                )
             self.page_row_evidence = {self._identity_key(row): {"row_hash": digest_bytes(canonical_bytes(row)), "index": index} for index, row in enumerate(rows)}
             self.current_day = day.isoformat()
             self.verified_day_digest = digest_bytes(canonical_bytes([
@@ -445,7 +463,13 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
                             or current.data_time.date() != values["data_time"].date() or current.product_id != values["product_id"]
                             ):
                         raise ReadonlyConfigurationError("AFFILIATE_PROTECTED_IDENTITY_CONFLICT")
-                    if current.creator_username_normalized != values["creator_username_normalized"]:
+                    identity = {**values, "business_day": self.current_day}
+                    identity_key = self._identity_key(identity)
+                    account, observed_at, affiliate_observed_at = self.page_platform_creators.get(
+                        identity_key, ("", None, None))
+                    changed_creator = current.creator_username_normalized != values["creator_username_normalized"]
+                    if changed_creator and not _can_replace_creator(
+                        current, values, account, observed_at, affiliate_observed_at):
                         self.page_quarantine.append({"key": self._identity_key({**values, "business_day": self.current_day}), **self.page_row_evidence[self._identity_key({**values, "business_day": self.current_day})], "reason": "affiliate_creator_identity_conflict"})
                         results.append({"action": "quarantined"})
                         continue
@@ -453,6 +477,10 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
                         "data_time": current.data_time, "site": current.site, "shop_name": current.shop_name,
                         "product_name": current.product_name, "creator_username": current.creator_username,
                         "store_id": current.store_id}
+                    if changed_creator:
+                        incoming["creator_username"] = values["creator_username"]
+                        incoming["creator_username_normalized"] = values["creator_username_normalized"]
+                        incoming["source_updated_at"] = observed_at
                     for field in (*MONEY_FIELDS.values(), "payment_amount", "settlement_status"):
                         if incoming[field] is None:
                             incoming[field] = getattr(current, field)

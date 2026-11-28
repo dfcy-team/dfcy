@@ -7,59 +7,49 @@ from apps.influencers import tiktok_video_sync
 from apps.integrations import gmv_max_read
 
 
-def test_gmv_max_read_uses_latest_success_audit_for_reused_content(monkeypatch):
-    now = datetime(2026, 10, 31, tzinfo=dt_timezone.utc)
-    mapping = SimpleNamespace(pk=7, store_id=3, advertiser_id='adv', store=SimpleNamespace(code='S'))
-    def snapshot(pk, when, cost):
-        return SimpleNamespace(pk=pk, store_id=3, created_at=when,
-            payload={'advertiser_id':'adv','date':'2026-10-30','platform_store_id':'p',
-                     'currency':'USD','timezone':'UTC','pages':[{'page_info':{'page':1,
-                     'page_size':100,'total_page':1,'total_number':1},'list':[{'dimensions':{'campaign_id':'123'},
-                     'metrics':{'cost':cost,'gross_revenue':cost,'orders':1}}]}]})
-    a = snapshot(1, now, '1')
-    b = snapshot(2, now.replace(minute=1), '2')
-    # A was first stored before B, then observed again after B (A -> B -> A).
-    audits = [SimpleNamespace(pk=10, created_at=now.replace(minute=2), masked_detail={'raw_payload_id':1})]
-    class RawManager:
-        def filter(self, *args, **kwargs): return RawQuery([b, a])
-    class AuditManager:
-        def filter(self, *args, **kwargs): return RawQuery(audits)
-    monkeypatch.setattr(gmv_max_read.SharedAdvertisingRawPayload, 'objects', RawManager())
-    monkeypatch.setattr(gmv_max_read.IntegrationAuditLog, 'objects', AuditManager())
+from unittest.mock import patch
+from hashlib import sha256
+from apps.integrations.models import SharedAdvertisingRawPayload, IntegrationAuditLog
+from tests.test_tiktok_daily_spend_report import setup_report
 
-    rows = gmv_max_read.stored_days(SimpleNamespace(tenant_id=9), [mapping], {7:'Name'},
-                                    date(2026,10,30), date(2026,10,30))
-    assert [row['snapshot_id'] for row in rows] == [1]
+
+def stored_snapshot(user, mapping, when, cost):
+    payload = {'schema':'gmv-max-day-v1','advertiser_id':mapping.advertiser_id,
+        'date':'2026-10-30','platform_store_id':'p','currency':mapping.currency,
+        'timezone':mapping.timezone,'pages':[{'page_info':{'page':1,'page_size':100,
+        'total_page':1,'total_number':1},'list':[{'dimensions':{'campaign_id':'123'},
+        'metrics':{'cost':cost,'gross_revenue':cost,'orders':1}}]}]}
+    with patch('django.utils.timezone.now', return_value=when):
+        return SharedAdvertisingRawPayload.objects.create(tenant=user.tenant,store=mapping.store,
+            platform='tiktok',endpoint=gmv_max_read.REPORT_PATH,
+            payload_hash=sha256(cost.encode()).hexdigest(),payload=payload)
+
+
+@pytest.mark.django_db
+def test_gmv_max_read_uses_latest_success_audit_for_reused_content(setup_report):
+    _, user, mapping, _ = setup_report
+    now = datetime(2026, 10, 31, tzinfo=dt_timezone.utc)
+    a = stored_snapshot(user, mapping, now, '1')
+    stored_snapshot(user, mapping, now.replace(minute=1), '2')
+    # A -> B -> A reuses an immutable RAW row; the successful audit wins.
+    with patch('django.utils.timezone.now', return_value=now.replace(minute=2)):
+        audit = IntegrationAuditLog.objects.create(tenant=user.tenant, actor=user,
+            integration_config=mapping.integration_config,action='ads_gmv_max_day',result='success',
+            masked_detail={'raw_payload_id':a.pk})
+    rows = gmv_max_read.stored_days(user,[mapping],{mapping.pk:'Name'},date(2026,10,30),date(2026,10,30))
+    assert [row['snapshot_id'] for row in rows] == [a.pk]
     assert rows[0]['cost'] == '1'
-    assert rows[0]['fetched_at'] == audits[0].created_at.isoformat()
+    assert rows[0]['fetched_at'] == audit.created_at.isoformat()
 
 
-def test_gmv_max_read_keeps_created_at_order_when_history_has_no_audit(monkeypatch):
+@pytest.mark.django_db
+def test_gmv_max_read_keeps_created_at_order_when_history_has_no_audit(setup_report):
+    _, user, mapping, _ = setup_report
     now = datetime(2026, 10, 31, tzinfo=dt_timezone.utc)
-    mapping = SimpleNamespace(pk=7, store_id=3, advertiser_id='adv', store=SimpleNamespace(code='S'))
-    def snapshot(pk, minute, cost):
-        return SimpleNamespace(pk=pk, store_id=3, created_at=now.replace(minute=minute),
-            payload={'advertiser_id':'adv','date':'2026-10-30','platform_store_id':'p',
-                     'currency':'USD','timezone':'UTC','pages':[{'page_info':{'page':1,
-                     'page_size':100,'total_page':1,'total_number':1},'list':[{'dimensions':{'campaign_id':'123'},
-                     'metrics':{'cost':cost,'gross_revenue':cost,'orders':1}}]}]})
-    older, newer = snapshot(1, 1, '1'), snapshot(2, 2, '2')
-    class RawManager:
-        def filter(self, *args, **kwargs): return RawQuery([older, newer])
-    class AuditManager:
-        def filter(self, *args, **kwargs): return RawQuery([])
-    monkeypatch.setattr(gmv_max_read.SharedAdvertisingRawPayload, 'objects', RawManager())
-    monkeypatch.setattr(gmv_max_read.IntegrationAuditLog, 'objects', AuditManager())
-
-    rows = gmv_max_read.stored_days(SimpleNamespace(tenant_id=9), [mapping], {},
-                                    date(2026,10,30), date(2026,10,30))
-    assert [row['snapshot_id'] for row in rows] == [2]
-
-
-class RawQuery(list):
-    def only(self, *args): return self
-    def order_by(self, *args): return self
-    def iterator(self): return iter(self)
+    stored_snapshot(user,mapping,now.replace(minute=1),'1')
+    newer=stored_snapshot(user,mapping,now.replace(minute=2),'2')
+    rows=gmv_max_read.stored_days(user,[mapping],{},date(2026,10,30),date(2026,10,30))
+    assert [row['snapshot_id'] for row in rows] == [newer.pk]
 
 
 def test_video_run_day_reloads_deactivated_actor_before_request_or_commit(monkeypatch):

@@ -170,7 +170,9 @@
         v-model:current-page="page"
         v-model:page-size="pageSize"
         :total="total"
-        layout="total, prev, pager, next"
+        layout="total, sizes, prev, pager, next"
+        :page-sizes="[25, 50, 100, 200]"
+        @size-change="onPageSizeChange"
         @current-change="load"
       />
     </el-card>
@@ -450,6 +452,7 @@
 </template>
 
 <script setup>
+import { useDuplicateSampleWarning } from '../../composables/useDuplicateSampleWarning';
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import PriorityTaskCarousel from './PriorityTaskCarousel.vue';
 import { taskProgressNotice, recordSourceLabel, publishedEvidenceNotice } from './recordEvidence';
@@ -479,7 +482,6 @@ import {
   restoreOutreachTarget,
   restoreOutreachTask,
   resolveOrCreateInfluencerNickname,
-  sampleDuplicateWarning,
   statusLabel,
   updateOutreachStatus,
   updateOutreachTarget,
@@ -492,7 +494,7 @@ import { formatTaskDateTime } from './taskDateTime';
 import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
 const auth = useAuthStore();
-const TASK_REUSE_ENABLED = false;
+const TASK_REUSE_ENABLED = true;
 const rows = ref([]);
 const recentRequirements = ref([]);
 const priorityTasks = ref({ urgent: [], high: [] });
@@ -515,7 +517,7 @@ const activityError = ref(false);
 let activityTimer;
 const total = ref(0);
 const page = ref(1);
-const pageSize = ref(20);
+const pageSize = ref(50);
 const loading = ref(false);
 let listRequest = 0;
 const saving = ref(false);
@@ -603,7 +605,7 @@ const sampleInfluencerOptions = computed(() => {
   if (!query) return influencerOptions.value;
   return influencerOptions.value.filter((item) => influencerOptionLabel(item).toLowerCase().includes(query));
 });
-const duplicateSampleWarning = computed(() => sampleDuplicateWarning(selectedSampleInfluencer.value));
+const { warning: duplicateSampleWarning } = useDuplicateSampleWarning(sampleVisible, () => selectedSampleInfluencer.value?.id);
 
 const hasValue = (value) => value !== undefined && value !== null && value !== '';
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
@@ -642,14 +644,15 @@ const sampleRecordTargetReached = (row) => Number(row?.target_count || 0) > 0 &&
 const progressLabel = (row) => sampleProgressLabel(row);
 const priorityTagType = (priority) => ({ urgent: 'danger', high: 'warning', low: 'info', normal: 'success' }[priority] || 'info');
 const taskStatusTransitions = {
-  pending: ['in_progress', 'cancelled'],
+  pending: ['in_progress', 'paused', 'cancelled'],
   in_progress: ['paused', 'completed', 'cancelled'],
   paused: ['in_progress', 'cancelled'],
   completed: ['in_progress'],
   cancelled: []
 };
 const taskStatusActionLabel = (status, row) => ({ in_progress: row?.status === 'completed' ? '重新打开任务' : row?.status === 'paused' ? '恢复任务' : '开始任务', paused: '暂停任务', completed: '完成任务', cancelled: '取消任务' }[status] || statusLabel(OUTREACH_STATUS_LABELS, status));
-const nextTaskStatuses = (row) => taskStatusTransitions[row?.status] || [];
+const nextTaskStatuses = (row) => row?.status === 'paused' && row.paused_from_pending
+  ? ['pending', 'cancelled'] : taskStatusTransitions[row?.status] || [];
 const editableTaskStatuses = computed(() => {
   const current = editingTask.value?.status || 'pending';
   return [current, ...nextTaskStatuses(editingTask.value)].filter((value, index, values) => values.indexOf(value) === index);
@@ -694,6 +697,11 @@ async function loadRecentRequirements() {
   } finally {
     activityLoading.value = false;
   }
+}
+
+function onPageSizeChange() {
+  page.value = 1;
+  load();
 }
 
 async function load() {

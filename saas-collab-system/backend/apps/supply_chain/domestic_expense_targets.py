@@ -1,6 +1,7 @@
 """Scoped payable list for independently billed domestic expenses."""
 from django.db.models import Q
 from rest_framework.response import Response
+from .document_time import document_time
 from .permissions import VIEW
 from . import shipments
 
@@ -27,7 +28,7 @@ def targets(request):
         party = group.supplier or group.carrier
         order = group.shipment.order
         return {'id': group.pk, 'kind': 'domestic_expense', 'number': group.shipment.number,
-                'version': group.version, 'document_time': group.created_at,
+                'version': group.version, 'document_time': document_time('domestic_freight', group.shipment),
                 'country_code': order.country_code_snapshot, 'country_name': order.country.name,
                 'supplier_names': party.name, 'currency': group.currency,
                 'stage': group.shipment.status,

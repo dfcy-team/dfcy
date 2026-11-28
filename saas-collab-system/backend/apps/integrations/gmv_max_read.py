@@ -1,5 +1,8 @@
 """Read verified stored GMV Max snapshots; never invoke a provider or custody."""
-from django.db.models import Q
+from collections import defaultdict
+from django.db.models import BigIntegerField, Q
+from django.db.models.fields.json import KeyTextTransform
+from django.db.models.functions import Cast
 from datetime import timedelta
 from .models import IntegrationAuditLog, SharedAdvertisingRawPayload
 from .gmv_max_sync import REPORT_PATH, summarize
@@ -20,24 +23,41 @@ def stored_days(user, mappings, names, start, end, include_campaigns=False):
     query = SharedAdvertisingRawPayload.objects.filter(scope, tenant_id=user.tenant_id,
         platform='tiktok', endpoint=REPORT_PATH, payload__schema='gmv-max-day-v1',
         payload__date__gte=start.isoformat(),payload__date__lte=end.isoformat()).order_by('-created_at','-pk')
-    snapshots = list(query[:1001])
-    if len(snapshots) > 1000:
-        raise GMVMaxSnapshotOverflow('Too many GMV Max snapshots; select a narrower range/store.')
+    keys = ('advertiser_id', 'date', 'platform_store_id', 'currency', 'timezone')
+    aliases = {'key_' + k: KeyTextTransform(k, 'payload') for k in keys}
+    headers = list(query.order_by().annotate(**aliases).values_list(
+        'pk', 'created_at', 'store_id', *aliases)[:40001])
+    if len(headers) > 40000:
+        raise GMVMaxSnapshotOverflow('Snapshot metadata budget exceeded.')
     # RAW rows are content-addressed and may be reused (A -> B -> A). Their
     # immutable created_at then describes first storage, not latest observation.
     # Successful sync audits provide the observation order and raw row link.
     # Legacy rows without such audits retain created_at ordering.
     audit_order = {}
-    if snapshots:
+    for offset in range(0, len(headers), 2000):
+        ids = [h[0] for h in headers[offset:offset + 2000]]
         audits = IntegrationAuditLog.objects.filter(tenant_id=user.tenant_id,
-            action='ads_gmv_max_day', result='success',
-            masked_detail__raw_payload_id__in=[s.pk for s in snapshots]).only('masked_detail', 'created_at', 'id').order_by('-created_at','-pk')
-        for audit in audits.iterator():
-            raw_id = audit.masked_detail.get('raw_payload_id')
-            if raw_id is not None and raw_id not in audit_order:
-                audit_order[raw_id] = (audit.created_at, audit.pk)
+            action='ads_gmv_max_day', result='success').annotate(
+                raw_id=Cast(KeyTextTransform('raw_payload_id', 'masked_detail'), BigIntegerField())
+            ).filter(raw_id__in=ids).order_by().values_list('raw_id', 'created_at', 'pk')
+        for raw_id, stamp, pk in audits.iterator(chunk_size=1000):
+            order = (stamp, pk)
+            if raw_id not in audit_order or order > audit_order[raw_id]:
+                audit_order[raw_id] = order
+    latest = {}
+    for pk, created, *identity in headers:
+        key = tuple(identity)
+        candidate = (audit_order.get(pk, (created, pk)), pk)
+        if key not in latest or candidate > latest[key]:
+            latest[key] = candidate
+    ids = sorted(value[1] for value in latest.values())
+    if len(ids) > max(1000, len(by_subject) * ((end - start).days + 1) * 4):
+        raise GMVMaxSnapshotOverflow('Daily identity budget exceeded.')
+    snapshots = (s for offset in range(0, len(ids), 100)
+                 for s in SharedAdvertisingRawPayload.objects.filter(
+                     tenant_id=user.tenant_id, pk__in=ids[offset:offset + 100]).order_by('pk'))
     seen, rows = set(), []
-    for item in sorted(snapshots, key=lambda s: audit_order.get(s.pk, (s.created_at, s.pk)), reverse=True):
+    for item in snapshots:
         p = item.payload
         m = by_subject[(item.store_id,p['advertiser_id'])]
         key = (m.pk,p['date'],p['platform_store_id'],p['currency'],p['timezone'])
@@ -93,13 +113,15 @@ def collection_days(user, mappings, names, rows, start, end):
             'currency': m.currency, 'timezone': m.timezone}.items()):
             continue
         latest.setdefault((m.pk, d['date']), audit)
+    saved_by_day = defaultdict(list)
+    for row in rows:
+        saved_by_day[(row['store_code'], row['advertiser_id'], row['date'],
+                      row['currency'], row['timezone'])].append(row)
     result = []
     for m in mappings:
         for offset in range((end - start).days + 1):
             day = (start + timedelta(days=offset)).isoformat()
-            saved = [r for r in rows if r['store_code'] == m.store.code
-                     and r['advertiser_id'] == m.advertiser_id and r['date'] == day
-                     and r['currency'] == m.currency and r['timezone'] == m.timezone]
+            saved = saved_by_day[(m.store.code, m.advertiser_id, day, m.currency, m.timezone)]
             failure = latest.get((m.pk, day))
             status = ('no_data' if all(r.get('collection_status') == 'no_data' for r in saved)
                       else 'success') if saved else ('failed' if failure else 'not_collected')

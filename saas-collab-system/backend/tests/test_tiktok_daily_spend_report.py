@@ -21,7 +21,13 @@ URL = "/api/internal/analytics/advertising/tiktok-daily-spend/"
 
 
 @pytest.fixture
-def setup_report():
+def setup_report(monkeypatch):
+    # A synthetic approved runtime with direct authorization disabled. Keep the
+    # real configuration fingerprint and callback-policy code under test.
+    monkeypatch.setattr('apps.integrations.tiktok_callback_settings.runtime_snapshot', lambda: {
+        'source': 'test-approved', 'config': {'platforms': {'tiktok': {
+            'ads_direct_callback_url': '', 'shop_direct_callback_url': ''}},
+            'network': {'oauth_redirect_allowlist': []}}})
     tenant = Tenant.objects.create(code="report", name="Report")
     user = CustomUser.objects.create_user(username="report", tenant=tenant, user_type="internal")
     platform = PlatformMaster.objects.create(tenant=tenant, code="tk", name="TK", platform_type="tiktok")
@@ -64,7 +70,9 @@ def fact(mapping, date="2026-10-01", spend="0", currency="PHP"):
 def test_unknown_zero_partial_disabled_and_read_only(setup_report):
     client, _, mapping, _ = setup_report
     assert client.get("/api/internal/integrations/store-authorizations/").status_code == 403
-    empty = get(client).data["data"]["totals"][0]
+    empty_response = get(client)
+    assert empty_response.status_code == 200, empty_response.data
+    empty = empty_response.data["data"]["totals"][0]
     assert empty["currency"] == "PHP"
     assert empty["total"] is None and empty["known_subtotal"] is None
     assert empty["expected_days"] == 2 and empty["stored_days"] == 0
@@ -73,7 +81,7 @@ def test_unknown_zero_partial_disabled_and_read_only(setup_report):
          patch("apps.integrations.custody.get_custody_backend", side_effect=AssertionError("custody forbidden")), \
          CaptureQueriesContext(connection) as captured:
         response = get(client)
-    assert response.status_code == 200
+    assert response.status_code == 200, response.data
     data = response.data["data"]
     assert data["coverage"] == {"visible_mappings": 1, "mapping_days": 2, "stored": 1, "missing": 1, "explicit_zero": 1}
     assert data["totals"][0]["total"] is None
@@ -127,6 +135,27 @@ def test_gmv_snapshot_overflow_preserves_basic_api_report(setup_report):
     assert data["results"][0]["spend"] == "4.000000"
     assert data["gmv_max_snapshots"] is None
     assert "gmv_max_snapshot_limit_exceeded" in data["warnings"]
+
+
+def test_gmv_90_days_deduplicates_over_a_thousand_raw_revisions(setup_report):
+    client, user, mapping, _ = setup_report
+    snapshots = []
+    for i in range(1002):
+        page = {"page_info": {"page": 1, "page_size": 100, "total_page": 1, "total_number": 1},
+                "list": [{"dimensions": {"campaign_id": "1"}, "metrics": {
+                    "cost": str(i), "gross_revenue": str(i), "orders": 1}}]}
+        payload = {"schema": "gmv-max-day-v1", "advertiser_id": mapping.advertiser_id,
+                   "date": "2026-10-01", "platform_store_id": "store", "currency": "PHP",
+                   "timezone": "Asia/Manila", "pages": [page]}
+        snapshots.append(SharedAdvertisingRawPayload(tenant=user.tenant, store=mapping.store,
+            platform="tiktok", endpoint=REPORT_PATH, payload_hash=sha256(str(i).encode()).hexdigest(), payload=payload))
+    SharedAdvertisingRawPayload.objects.bulk_create(snapshots)
+    result = get(client, report_type="gmv_max", date_to="2026-12-29")
+    assert result.status_code == 200
+    rows = result.data["data"]["gmv_max_snapshots"]
+    from decimal import Decimal
+    assert len(rows) == 1 and Decimal(rows[0]["cost"]) == 1001
+    assert get(client, report_type="gmv_max", date_to="2026-12-30").status_code == 400
 
 
 @pytest.mark.parametrize("params", [{"date_from": ""}, {"date_to": "2026-11-01"},
@@ -313,4 +342,24 @@ def test_verified_empty_and_persisted_failure_have_distinct_read_only_status(set
     assert data['gmv_max_snapshots'][0]['cost'] is None
     assert data['gmv_max_overview'][0]['no_data_days'] == 1
     assert IntegrationAuditLog.objects.count() == before
+    assert 'tok_' not in str(data)
+
+
+def test_invalid_current_runtime_does_not_relabel_evidence_or_gate_stored_history(setup_report, monkeypatch):
+    from rest_framework.exceptions import ValidationError
+    from apps.integrations.tiktok_callback_settings import callback_setting
+    client, _, mapping, _ = setup_report
+    fact(mapping)
+    monkeypatch.setattr('apps.integrations.tiktok_callback_settings.runtime_snapshot',
+                        lambda: {'source': 'invalid-test', 'config': {}})
+    with pytest.raises(ValidationError, match='Invalid approved runtime'):
+        callback_setting(advertising=True)
+    with pytest.raises(ValidationError, match='Invalid approved runtime'):
+        configuration_digest(mapping.integration_config)
+    response = get(client)
+    assert response.status_code == 200, response.data
+    data = response.data['data']
+    assert data['count'] == 1
+    assert data['subjects'][0]['local_evidence'] == 'unverified'
+    assert 'local_evidence_unverified' in data['warnings']
     assert 'tok_' not in str(data)

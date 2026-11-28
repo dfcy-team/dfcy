@@ -38,8 +38,9 @@ class DailySpendQuery(serializers.Serializer):
             raise serializers.ValidationError('Select a store for campaign drilldown.')
         if set(self.initial_data) - set(self.fields):
             raise serializers.ValidationError("Unsupported report parameters.")
-        if not 0 <= (attrs["date_to"] - attrs["date_from"]).days < 31:
-            raise serializers.ValidationError("An explicit inclusive range of 1 to 31 days is required.")
+        limit = 90 if attrs["report_type"].startswith("gmv_max") else 31
+        if not 0 <= (attrs["date_to"] - attrs["date_from"]).days < limit:
+            raise serializers.ValidationError(f"An explicit inclusive range of 1 to {limit} days is required.")
         return attrs
 
 

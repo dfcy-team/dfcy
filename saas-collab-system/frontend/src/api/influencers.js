@@ -4,7 +4,6 @@ import { influencerMocks } from '../mock/influencers';
 const API_ROOT = '/api/internal/influencers';
 
 export const OUTREACH_STATUS_LABELS = Object.freeze({
-  paused: '已暂停',
   pending: '待开始',
   in_progress: '进行中',
   paused: '已暂停',
@@ -212,11 +211,21 @@ export function sampleDuplicateWarning(influencer) {
   return `该达人已有${statuses.map((status) => labels[status]).join('、')}送样记录，请确认是否重复送样；仍可继续创建。`;
 }
 
+export const fetchDuplicateSampleRecords = (influencer, { signal } = {}) => requestWithMockFallback(
+  { signal, method: 'get', url: `${API_ROOT}/resolve/`, params: { duplicate_influencer: influencer } },
+  mockDetail({ records: [] }),
+  'influencers.resolve.duplicate-samples'
+);
+
 export const fetchInfluencers = (params = {}) => requestWithMockFallback(
   { method: 'get', url: `${API_ROOT}/`, params },
   () => influencerMocks.list(params),
   'influencers.list'
 );
+
+export const searchInfluencersByContact = (params, contact) => requestApi({
+  method: 'post', url: `${API_ROOT}/contact-search/`, params, data: contact
+});
 
 const emptyPerformance = () => ({
   success: true,

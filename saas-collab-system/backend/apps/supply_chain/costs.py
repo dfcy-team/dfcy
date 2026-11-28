@@ -625,7 +625,7 @@ def save_fee(actor, kind, pk, payload, key, *, initial_batch_estimate=False):
                 raise ValidationError('已有有效分项付款，不能切回总费用模式。')
     if kind == 'shipment':
         active_domestic = PaymentRecord.objects.filter(tenant_id=actor.tenant_id, shipment=obj,
-            purpose='domestic_freight', reverses__isnull=True, reversal__isnull=True)
+            purpose='domestic_freight', domestic_expense_group__isnull=True, reverses__isnull=True, reversal__isnull=True)
         paid_domestic = sum((row.amount for row in active_domestic), ZERO)
         if paid_domestic and (payload['state'] != 'confirmed' or decimal(payload['amount']) < paid_domestic):
             raise ValidationError('已有国内运费付款，费用不能改为暂估或调低至已付金额以下；请先冲销付款。')

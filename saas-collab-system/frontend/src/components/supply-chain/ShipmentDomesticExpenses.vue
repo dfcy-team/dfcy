@@ -7,6 +7,7 @@ import PaymentLedgerV2 from './PaymentLedgerV2.vue';
 const props = defineProps({ shipment: Object, editable: Boolean, disabled: Boolean, hideSave: Boolean, transportDefaults: Object });
 const emit = defineEmits(['updated']);
 const groups = ref([]), lines = ref([]), suppliers = ref([]), carriers = ref([]);
+const legacyFee = ref(null), legacyAction = ref(''), legacyGroupId = ref(null);
 const loaded = ref(false);
 const loading = ref(false), saving = ref(false), error = ref(''), version = ref(0);
 const ledgerOpen = ref(false), ledgerGroup = ref(null);
@@ -18,6 +19,9 @@ function unwrap(response) {
   return response.data;
 }
 function assign(data) {
+  legacyFee.value = data.legacy_fee || null;
+  legacyAction.value = '';
+  legacyGroupId.value = null;
   groups.value = data.groups || [];
   lines.value = (data.lines || []).map(line => ({ ...line }));
   suppliers.value = data.suppliers || [];
@@ -50,6 +54,25 @@ async function save() {
   if (lines.value.some(row => !row.name?.trim() || !Number.isFinite(Number(row.amount)) || Number(row.amount) <= 0 || !row.payee_id)) { error.value = '请填写费用名称、大于零的金额及收款单位'; return false; }
   if (saving.value || props.disabled || !props.editable) return false;
   const body = { expected_version: props.shipment.version ?? version.value, lines: lines.value };
+  if (Number(legacyFee.value?.amount) > 0 && lines.value.length) {
+    if (!legacyAction.value) { error.value = '请选择替换历史同笔费用或另增费用'; return false; }
+    body.legacy_action = legacyAction.value;
+    if (legacyAction.value === 'replace') {
+      body.legacy_expected_version = legacyFee.value.version;
+      body.legacy_replacement_amount = lines.value.reduce((sum, row) => sum + Number(row.amount), 0).toFixed(4);
+    }
+  }
+  return submit(body);
+}
+async function replaceExisting() {
+  if (saving.value || loading.value || !loaded.value || props.disabled || !props.editable) return false;
+  const group = groups.value.find(row => row.id === legacyGroupId.value);
+  if (!group) { error.value = '请明确选择替换历史费用的人工记录'; return false; }
+  return submit({ expected_version: props.shipment.version ?? version.value,
+    legacy_action: 'replace', legacy_group_id: group.id,
+    legacy_expected_version: legacyFee.value.version, legacy_replacement_amount: group.amount });
+}
+async function submit(body) {
   const signature = JSON.stringify(body);
   if (pending?.signature !== signature) pending = { signature, key: createIdempotencyKey() };
   saving.value = true;
@@ -77,6 +100,21 @@ defineExpose({ save });
   <section v-loading="loading" class="shipment-expenses">
     <h3>国内运输费用明细</h3>
     <el-alert v-if="error" :title="error" type="error" :closable="false"/>
+    <div v-if="legacyFee && Number(legacyFee.amount) > 0" class="legacy-resolution">
+      <p>历史费用：{{ legacyFee.amount }} {{ legacyFee.currency || '币种待核对' }}；请人工确认与本次费用的关系。</p>
+      <el-radio-group v-if="editable" v-model="legacyAction" :disabled="saving || disabled">
+        <el-radio value="replace" label="replace" :disabled="!legacyFee.can_replace">替换历史同笔费用</el-radio>
+        <el-radio value="additional" label="additional">另增费用（保留历史费用）</el-radio>
+      </el-radio-group>
+      <div v-if="editable && groups.length" class="expense-actions">
+        <el-select v-model="legacyGroupId" placeholder="选择已维护的同笔人工费用" :disabled="saving || disabled">
+          <el-option v-for="group in groups" :key="group.id" :value="group.id" :label="`${group.payee_name} · ${group.amount} ${group.currency}（记录 ${group.id}）`"/>
+        </el-select>
+        <el-button :disabled="saving || disabled || !legacyGroupId || !legacyFee.can_replace" :loading="saving" @click="replaceExisting">以此人工记录替换历史费用</el-button>
+      </div>
+      <small>替换保留人工记录的原金额及付款记录；另增费用将同时保留历史费用。请按实际业务选择。</small>
+      <small v-if="legacyFee.blocked_reason">{{ legacyFee.blocked_reason }}</small>
+    </div>
     <el-table :data="lines" border empty-text="暂无我司承担费用；需要付款时添加费用">
       <el-table-column label="费用项目" min-width="150"><template #default="{row}">
         <el-input v-model="row.name" :disabled="!editable || saving || disabled" placeholder="运费 / 装卸费 / 提货费"/>

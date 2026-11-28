@@ -187,3 +187,10 @@ class IsProductCostBackfillOperator(ProductBusinessPermission):
 def filter_lifecycle_reviews(user, queryset, permission_code="products.lifecycle.view"):
     queryset = queryset.filter(tenant=user.tenant)
     return filter_lifecycle_queryset(user, queryset, permission_code)
+
+
+class IsProductCategoryStyleReadOrManage(IsMasterdataSettingsReadOrManage):
+    def has_permission(self, request, view):
+        if request.method == "GET" and IsProductCategoryReadOrManage().has_permission(request, view):
+            return True
+        return super().has_permission(request, view)

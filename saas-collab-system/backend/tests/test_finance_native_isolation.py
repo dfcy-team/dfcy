@@ -19,6 +19,7 @@ def test_tenant_switch_recycles_before_loading_next_vm(context,monkeypatch,chang
     monkeypatch.setattr(native,'_session_key',None)
     monkeypatch.setattr(native.subprocess,'Popen',spawn)
     monkeypatch.setattr(native.threading,'Thread',Mock())
+    monkeypatch.setattr(native.threading,'Timer',Mock())
     replies=Mock();replies.get.return_value={'ok':True,'result':{'rows':[]},'timings':{'vm_ms':1.25,'unsafe':'SENSITIVE'}}
     monkeypatch.setattr(native.queue,'Queue',lambda:replies)
     with caplog.at_level('INFO',logger='apps.finance.summary_native'):

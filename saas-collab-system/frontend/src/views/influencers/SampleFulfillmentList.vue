@@ -25,7 +25,7 @@
         <el-select v-model="filters.status" multiple collapse-tags collapse-tags-tooltip clearable placeholder="全部状态" @change="applyFilters">
           <el-option v-for="(label, value) in FULFILLMENT_FILTER_STATUS_LABELS" :key="value" :label="label" :value="value" />
         </el-select>
-        <el-select v-model="filters.owner" clearable filterable placeholder="全部送样负责人" @change="applyFilters">
+        <el-select v-model="filters.owner" multiple collapse-tags collapse-tags-tooltip clearable filterable placeholder="全部送样负责人" @change="applyFilters">
           <el-option v-for="owner in ownerOptions" :key="owner.id" :label="owner.full_name || owner.username" :value="owner.id" />
         </el-select>
         <el-date-picker v-model="filters.createdDateFrom" type="date" value-format="YYYY-MM-DD" placeholder="创建日期起" aria-label="创建日期起" />
@@ -47,11 +47,13 @@
         <el-button @click="resetFilters">重置</el-button>
         <el-button type="primary" :disabled="!canManage" @click="openCreate">新增送样</el-button>
         <el-button v-if="canManage" @click="openImport">导入送样</el-button>
+        <el-button v-if="canManage" :disabled="loading || batchCompleting || !selectedSamples.length" :loading="batchCompleting" @click="completeSelectedSamples">批量标记已完成{{ selectedSamples.length ? `（${selectedSamples.length}）` : '' }}</el-button>
         </div>
       </div>
 
       <p class="field-hint">时间均为北京时间（UTC+8）。</p>
-      <el-table v-loading="loading" :data="rows" empty-text="暂无送样履约" @row-click="openDetail">
+      <el-table ref="sampleTable" v-loading="loading" :data="rows" row-key="id" empty-text="暂无送样履约" @row-click="openDetail" @selection-change="selectedSamples = $event">
+        <el-table-column v-if="canManage" type="selection" width="44" :selectable="canCompleteSample" />
         <el-table-column label="送样 / 建联编号" min-width="175">
           <template #default="{ row }">
             <b>{{ displayValue(row.fulfillment_no) }}</b>
@@ -111,6 +113,7 @@
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
             <el-tag>{{ statusLabel(FULFILLMENT_STATUS_LABELS, row.status) }}</el-tag>
+            <small v-if="completionEvidenceLabel(row.completion_evidence)">{{ completionEvidenceLabel(row.completion_evidence) }}</small>
             <small v-if="publishedEvidenceNotice(row)">视频证据待关联</small>
           </template>
         </el-table-column>
@@ -138,7 +141,7 @@
           </template>
         </el-table-column>
       </el-table>
-      <el-pagination v-if="total" v-model:current-page="page" v-model:page-size="pageSize" :total="total" layout="total, prev, pager, next" @current-change="load" />
+      <el-pagination v-if="total" v-model:current-page="page" v-model:page-size="pageSize" :total="total" layout="total, sizes, prev, pager, next" :page-sizes="[25, 50, 100, 200]" @size-change="onPageSizeChange" @current-change="load" />
     </el-card>
 
     <el-dialog v-model="visible" class="sample-dialog" width="min(900px, 94vw)" @closed="discardDraft">
@@ -281,6 +284,7 @@
           <el-button v-if="!detailSample.is_deleted" type="danger" plain :disabled="!canManage" @click="removeSample(detailSample)">删除</el-button>
           <el-button v-else type="primary" :disabled="!canManage" @click="restoreSample(detailSample)">恢复</el-button>
           <el-tag>{{ statusLabel(FULFILLMENT_STATUS_LABELS, detailSample.status) }}</el-tag>
+          <small v-if="completionEvidenceLabel(detailSample.completion_evidence)">{{ completionEvidenceLabel(detailSample.completion_evidence) }}</small>
         </div>
         <section class="detail-section"><h3>送样事实</h3><div class="detail-facts">
           <div><span>类型流水号</span><b>{{ displayValue(detailSample.type_no) }}</b></div>
@@ -306,6 +310,7 @@
 </template>
 
 <script setup>
+import { useDuplicateSampleWarning } from '../../composables/useDuplicateSampleWarning';
 import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { formatTaskDateTime } from './taskDateTime';
 import { recordSourceLabel, publishedEvidenceNotice, matchedVideoCount } from './recordEvidence';
@@ -330,7 +335,6 @@ import {
   OUTREACH_PRIORITY_LABELS,
   restoreSampleFulfillment,
   resolveOrCreateInfluencerNickname,
-  sampleDuplicateWarning,
   statusLabel,
   updateSampleFulfillment
 } from '../../api/influencers';
@@ -349,7 +353,7 @@ const influencerOptions = ref([]);
 const ownerOptions = ref([]);
 const total = ref(0);
 const page = ref(1);
-const pageSize = ref(20);
+const pageSize = ref(50);
 const loading = ref(false);
 const saving = ref(false);
 const influencerLoading = ref(false);
@@ -361,7 +365,10 @@ const detailSample = ref(null);
 const editingSample = ref(null);
 const inheritedTask = ref(null);
 const draftKey = ref('');
-const filters = reactive({ search: '', status: [], store: [], owner: null, createdDateFrom: '', createdDateTo: '', includeDeleted: false, ordering: '-created_at' });
+const filters = reactive({ search: '', status: [], store: [], owner: [], createdDateFrom: '', createdDateTo: '', includeDeleted: false, ordering: '-created_at' });
+const sampleTable = ref(null);
+const selectedSamples = ref([]);
+const batchCompleting = ref(false);
 const expandedSkuRows = reactive({});
 const form = reactive({ fulfillment_no: '', type_no: '', outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', sample_sent_at: '', notes: '', link_type: 'YYJL', quick_tags: [] });
 const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '已完成']);
@@ -442,6 +449,8 @@ const autoSkuValues = new WeakMap();
 const newItem = () => ({ site_code: productContext.value?.country_code || '', external_product_id: '', requested_sku: null, warehouse: null, quantity: 1 });
 const items = ref([newItem()]);
 const canManage = computed(() => auth.hasPermission('influencers.fulfillment.manage'));
+const batchCompletableStatuses = new Set(['pending', 'processing', 'shipped', 'delivered', 'published', 'live_creator', 'overdue']);
+const canCompleteSample = (row) => canManage.value && !row.is_deleted && Number.isInteger(row.version) && batchCompletableStatuses.has(row.status);
 const fulfilledStatuses = ['shipped', 'delivered', 'received', 'creating', 'published', 'completed', 'live_creator'];
 const fulfilledCount = computed(() => rows.value.filter((row) => fulfilledStatuses.includes(row.status) || row.shipped_at || row.sample_order_no).length);
 const pendingCount = computed(() => rows.value.filter((row) => row.status === 'pending').length);
@@ -601,7 +610,7 @@ watch([eligibleWarehouses, () => items.value.length], () => {
     }
   }
 });
-const duplicateSampleWarning = computed(() => sampleDuplicateWarning(selectedInfluencer.value));
+const { warning: duplicateSampleWarning } = useDuplicateSampleWarning(() => visible.value && !editingSample.value, () => selectedInfluencer.value?.id);
 const todayLabel = formatTaskDateTime(new Date()).slice(0, 10);
 
 function sampleTimeInput(value) {
@@ -610,10 +619,18 @@ function sampleTimeInput(value) {
 }
 
 let listRequest = 0;
+function onPageSizeChange() {
+  page.value = 1;
+  load();
+}
+
 async function load() {
   const request = ++listRequest;
   loading.value = true;
-  const params = { page: page.value, page_size: pageSize.value, search: filters.search, owner: filters.owner, ordering: filters.ordering };
+  sampleTable.value?.clearSelection?.();
+  selectedSamples.value = [];
+  const params = { page: page.value, page_size: pageSize.value, search: filters.search, ordering: filters.ordering };
+  if (filters.owner.length) params.owner = filters.owner.join(',');
   if (filters.status.length) params.status = filters.status.join(',');
   if (filters.store.length) params.store = filters.store.join(',');
   if (filters.createdDateFrom) params.created_date_from = filters.createdDateFrom;
@@ -630,6 +647,42 @@ async function load() {
   }
 }
 
+async function completeSelectedSamples() {
+  if (!canManage.value || loading.value || batchCompleting.value) return;
+  const targets = rows.value.filter((row) => selectedSamples.value.some((selected) => String(selected.id) === String(row.id)) && canCompleteSample(row));
+  if (!targets.length) return;
+  const requestAtConfirm = listRequest;
+  const pageAtConfirm = page.value;
+  const targetIds = targets.map((row) => String(row.id));
+  batchCompleting.value = true;
+  try {
+    try {
+      await ElMessageBox.confirm(`将本页勾选的 ${targets.length} 条送样标记为已完成？完成后不可撤销。`, '确认批量完成', { type: 'warning' });
+    } catch { return; }
+    if (requestAtConfirm !== listRequest || pageAtConfirm !== page.value || targets.some((target) => !rows.value.some((row) => String(row.id) === String(target.id)))) return;
+    let confirmed = 0;
+    const unconfirmed = [];
+    for (const target of targets) {
+      if (!canCompleteSample(target)) { unconfirmed.push(target.fulfillment_no || target.id); continue; }
+      try {
+        const response = await updateSampleFulfillment(target.id, { status: 'completed', confirm_terminal: true }, target.version);
+        if (response.success) { confirmed += 1; continue; }
+      } catch { /* Refresh before retrying unconfirmed records. */ }
+      unconfirmed.push(target.fulfillment_no || target.id);
+    }
+    if (targetIds.length !== targets.length) return;
+    page.value = 1;
+    await load();
+    if (unconfirmed.length) {
+      await ElMessageBox.alert(`已确认完成 ${confirmed} 条，${unconfirmed.length} 条未确认完成。列表已刷新，请核对这些记录后再重试：${unconfirmed.join('、')}`, '批量完成结果', { type: 'warning' });
+    } else {
+      ElMessage.success(`已完成 ${confirmed} 条送样`);
+    }
+  } finally {
+    batchCompleting.value = false;
+  }
+}
+
 function applyFilters() {
   page.value = 1;
   load();
@@ -642,7 +695,7 @@ function openImport() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', status: [], store: [], owner: null, createdDateFrom: '', createdDateTo: '', includeDeleted: false, ordering: '-created_at' });
+  Object.assign(filters, { search: '', status: [], store: [], owner: [], createdDateFrom: '', createdDateTo: '', includeDeleted: false, ordering: '-created_at' });
   applyFilters();
 }
 
@@ -826,6 +879,16 @@ function matchTagType(status) {
   if (status === 'matched' || String(status || '').startsWith('matched_')) return 'success';
   if (['pending', 'not_imported'].includes(status)) return 'warning';
   return 'danger';
+}
+
+function completionEvidenceLabel(evidence) {
+  if (!evidence) return '';
+  const at = evidence.at ? ` · ${formatTaskDateTime(evidence.at)}` : '';
+  if (evidence.kind === 'system') return `系统核验视频 ${evidence.video_id || ''}${at}`;
+  if (evidence.kind === 'linked') return `历史视频关联（来源未核验） ${evidence.video_id || ''}${at}`;
+  if (evidence.kind === 'manual') return `人工标记完成 · ${evidence.actor || '未知操作人'}${at}`;
+  if (evidence.kind === 'generic') return `状态修改 · ${evidence.actor || '未知操作人'}${at}`;
+  return '';
 }
 
 async function openDetail(row) {

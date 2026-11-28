@@ -1,6 +1,6 @@
 """Stored auction-spend reporting only; no collection or credential dependencies."""
 from decimal import Decimal
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
 from apps.integrations.models import AdsOAuthSession, TikTokAdsAdvertiserMapping, TikTokAdsDailySpend
 from apps.integrations.oauth_state_service import configuration_digest
@@ -71,7 +71,15 @@ def daily_spend_report(user, query):
     sessions = list(AdsOAuthSession.objects.filter(tenant_id=user.tenant_id, status="bound",
         store_id__in={m.store_id for m in visible}, integration_config_id__in={m.integration_config_id for m in visible}).order_by('-created_at','-pk'))
     configs = {m.integration_config_id: m.integration_config for m in visible}
-    digests = {config_id: configuration_digest(config) for config_id, config in configs.items()}
+    digests = {}
+    for config_id, config in configs.items():
+        try:
+            digests[config_id] = configuration_digest(config)
+        except ValidationError:
+            # Current OAuth approval can invalidate current binding evidence,
+            # never previously stored business facts or the scoped read grant.
+            # Direct authorization still calls the unchanged strict resolver.
+            digests[config_id] = None
     names = {}
     for m in visible:
         for session in sessions:

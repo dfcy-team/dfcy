@@ -1,6 +1,7 @@
 <template>
   <section class="dashboard-page">
     <h1 class="sr-only">工作台</h1>
+    <section class="workspace-section"><TrackingSummary /></section>
     <MonthlySalesProgress />
     <section class="workspace-section">
       <header><h2>常用入口</h2><p>进入当前角色可见的任务页面。</p></header>
@@ -12,7 +13,6 @@
       </div>
     </section>
 
-    <section class="workspace-section"><TrackingSummary /></section>
   </section>
 </template>
 

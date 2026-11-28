@@ -2,6 +2,8 @@ from types import SimpleNamespace
 import json
 
 import pytest
+from django.db.models import QuerySet
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
@@ -43,6 +45,138 @@ def records(code='shared'):
 def contact(record, member, value, **kwargs):
     return InfluencerContact.objects.create(tenant=record.tenant, influencer=member, created_by=record.user,
                                             channel='email', value=value, **kwargs)
+
+
+def test_private_contact_search_is_post_only_exact_scoped_and_read_only():
+    r = records('contact-search')
+    contact(r, r.a, 'Exact@Example.test', is_active=True)
+    contact(r, r.b, 'hidden@example.test', is_active=False)
+    contact(r, r.unrelated, 'other@example.test', is_active=True)
+    before = list(InfluencerContact.objects.values('pk', 'is_active', 'value'))
+    response = r.client.post('/api/internal/influencers/contact-search/?page_size=1',
+                             {'channel': 'email', 'value': 'exact@example.TEST'}, format='json')
+    assert response.status_code == 200, response.data
+    rows = response.data['data']['results']
+    assert response.data['data']['count'] == 2
+    assert len(rows) == 1 and rows[0]['id'] in {r.a.pk, r.b.pk}
+    assert response.data['data'].get('next')
+    assert 'Exact@Example.test' not in json.dumps(response.data)
+    assert all('Exact@Example.test' not in link for link in response.data.get('links', {}).values() if isinstance(link, str))
+    assert all('exact@example.TEST' not in link for link in response.data.get('links', {}).values() if isinstance(link, str))
+    assert list(InfluencerContact.objects.values('pk', 'is_active', 'value')) == before
+    leaked_query = r.client.post('/api/internal/influencers/contact-search/?value=Exact%40Example.test',
+                                 {'channel': 'email', 'value': 'exact@example.TEST'}, format='json')
+    assert leaked_query.status_code == 400
+    assert 'Exact@Example.test' not in json.dumps(leaked_query.data)
+    assert 'exact@example.TEST' not in json.dumps(leaked_query.data)
+    assert r.client.get('/api/internal/influencers/contact-search/').status_code == 405
+    invalid = r.client.post('/api/internal/influencers/contact-search/',
+                            {'channel': 'email', 'value': 'x' * 241}, format='json')
+    assert invalid.status_code == 400 and 'value' not in json.dumps(invalid.data)
+
+
+def test_contact_search_channel_only_phone_normalization_and_permission_scope():
+    r = records('contact-channel-only')
+    phone = InfluencerContact.objects.create(tenant=r.tenant, influencer=r.a, created_by=r.user,
+                                            channel='phone', value='+63 (900) 123-4567', is_active=True)
+    inactive = InfluencerContact.objects.create(tenant=r.tenant, influencer=r.b, created_by=r.user,
+                                                channel='phone', value='+63 900 123 4567', is_active=False)
+    contact(r, r.unrelated, '   ', is_active=True)
+    response = r.client.post('/api/internal/influencers/contact-search/',
+                             {'channel': 'phone', 'value': '+63-900-123-4567'}, format='json')
+    assert response.status_code == 200, response.data
+    assert {item['id'] for item in response.data['data']['results']} == {r.a.pk, r.b.pk}
+    channel_only = r.client.post('/api/internal/influencers/contact-search/',
+                                 {'channel': 'phone'}, format='json')
+    assert channel_only.status_code == 200, channel_only.data
+    assert {item['id'] for item in channel_only.data['data']['results']} == {r.a.pk, r.b.pk}
+    r.role.permissions.remove(Permission.objects.get(code='influencers.manage'))
+    view_only = r.client.post('/api/internal/influencers/contact-search/',
+                              {'channel': 'phone', 'value': '+63-900-123-4567'}, format='json')
+    assert view_only.status_code == 200
+    grant = Permission.objects.get(code='influencers.view')
+    r.role.permissions.remove(grant)
+    r.role.permissions.add(Permission.objects.get(code='influencers.manage'))
+    denied = r.client.post('/api/internal/influencers/contact-search/',
+                           {'channel': 'phone', 'value': '+63-900-123-4567'}, format='json')
+    assert denied.status_code == 403
+    phone.refresh_from_db(); inactive.refresh_from_db()
+    assert phone.is_active and not inactive.is_active
+
+
+@pytest.mark.parametrize(('channel', 'stored', 'query'), [
+    ('email', 'Exact@Example.test', 'exact@example.TEST'),
+    ('phone', '+63 (900) 123-4567', '+63-900-123-4567'),
+    ('whatsapp', '@Creator.123', 'creator.123'),
+    ('viber', 'abc123', '@ABC123'),
+])
+def test_contact_search_channel_normalization(channel, stored, query):
+    r = records(f'contact-normalize-{channel}')
+    InfluencerContact.objects.create(tenant=r.tenant, influencer=r.a, created_by=r.user,
+                                    channel=channel, value=stored, is_active=True)
+    response = r.client.post('/api/internal/influencers/contact-search/',
+                             {'channel': channel, 'value': query}, format='json')
+    assert response.status_code == 200, response.data
+    assert {row['id'] for row in response.data['data']['results']} == {r.a.pk, r.b.pk}
+    assert stored not in json.dumps(response.data)
+
+
+def test_contact_search_lowercase_normalization_is_exact_for_sharp_s_and_accents():
+    r = records('contact-unicode-normalize')
+    sharp_s = contact(r, r.a, 'straße@example.test', is_active=True)
+    accented = contact(r, r.unrelated, 'café@example.test', is_active=True)
+    exact = r.client.post('/api/internal/influencers/contact-search/',
+                          {'channel': 'email', 'value': 'STRAßE@example.test'}, format='json')
+    near_miss = r.client.post('/api/internal/influencers/contact-search/',
+                              {'channel': 'email', 'value': 'cafe@example.test'}, format='json')
+    accent_exact = r.client.post('/api/internal/influencers/contact-search/',
+                                 {'channel': 'email', 'value': 'café@example.test'}, format='json')
+    assert {row['id'] for row in exact.data['data']['results']} == {r.a.pk, r.b.pk}
+    assert near_miss.data['data']['count'] == 0
+    assert {row['id'] for row in accent_exact.data['data']['results']} == {r.unrelated.pk}
+    assert sharp_s.value and accented.value
+
+
+def test_contact_search_independently_scopes_hidden_owner_hidden_member_foreign_tenant_and_deleted_filter():
+    r = records('contact-scope')
+    r.scope.delete()
+    warehouse = WarehouseMaster.objects.create(tenant=r.tenant, code='PH', name='PH', country_code='PH', warehouse_type='third_party')
+    DataScope.objects.create(tenant=r.tenant, role=r.role, scope_type='custom', config={'warehouse_ids': [warehouse.pk]})
+    r.a.profile.market = 'PH'; r.a.profile.save(update_fields=['market'])
+    r.b.profile.market = 'MY'; r.b.profile.save(update_fields=['market'])
+    contact(r, r.a, 'visible@example.test', is_active=True)
+    contact(r, r.b, 'hidden-owner@example.test', is_active=True)
+    assert r.client.post('/api/internal/influencers/contact-search/',
+                         {'channel': 'email', 'value': 'hidden-owner@example.test'}, format='json').data['data']['count'] == 0
+    visible = r.client.post('/api/internal/influencers/contact-search/',
+                            {'channel': 'email', 'value': 'visible@example.test'}, format='json')
+    assert {row['id'] for row in visible.data['data']['results']} == {r.a.pk}
+    r.b.profile.market = 'PH'; r.b.profile.save(update_fields=['market'])
+    deleted = Influencer.objects.get(pk=r.b.pk)
+    QuerySet.update(Influencer.objects.filter(pk=deleted.pk), is_deleted=True, status='inactive', deleted_at=timezone.now())
+    regular = r.client.post('/api/internal/influencers/contact-search/',
+                            {'channel': 'email', 'value': 'visible@example.test'}, format='json')
+    deleted_only = r.client.post('/api/internal/influencers/contact-search/?deleted_only=true',
+                                 {'channel': 'email', 'value': 'visible@example.test'}, format='json')
+    assert {row['id'] for row in regular.data['data']['results']} == {r.a.pk}
+    assert {row['id'] for row in deleted_only.data['data']['results']} == {r.b.pk}
+    other = records('contact-scope-foreign')
+    contact(other, other.a, 'visible@example.test', is_active=True)
+    foreign_search = r.client.post('/api/internal/influencers/contact-search/',
+                                   {'channel': 'email', 'value': 'visible@example.test'}, format='json')
+    assert {row['id'] for row in foreign_search.data['data']['results']} == {r.a.pk}
+
+
+@pytest.mark.parametrize('payload', [
+    [], {'channel': [], 'value': 'x'}, {'channel': 'x' * 41, 'value': 'x'},
+    {'channel': 'not-a-channel', 'value': 'x'}, {'channel': 'email', 'value': 'x' * 241},
+    {'channel': 'phone', 'value': '---'},
+])
+def test_contact_search_rejects_invalid_payloads_without_echoing_private_values(payload):
+    r = records('contact-invalid-' + str(len(str(payload))))
+    response = r.client.post('/api/internal/influencers/contact-search/', payload, format='json')
+    assert response.status_code == 400
+    assert 'x' * 20 not in json.dumps(response.data)
 
 
 def form(record, member):

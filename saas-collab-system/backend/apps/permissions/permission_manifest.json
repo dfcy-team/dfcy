@@ -31009,6 +31009,29 @@
       "owner": "influencers"
     },
     {
+      "route": "api/internal/influencers/contact-search/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "influencers"
+    },
+    {
+      "route": "api/internal/influencers/contact-search/",
+      "method": "POST",
+      "action": "read",
+      "permission_code": "influencers.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "influencers",
+      "risk": "normal"
+    },
+    {
       "route": "api/internal/influencers/outreach-product-match/",
       "method": "GET",
       "action": "read",
@@ -42248,11 +42271,11 @@
       "permission_code": "masterdata.settings.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsMasterdataSettingsReadOrManage"
+        "IsProductCategoryStyleReadOrManage"
       ],
       "owner": "products",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "b87b69034ea1c3263051c022dfdfb6e6fa6d2f98aab8fb772b992a9f838fb812",
+      "guard_source_sha256": "44731b86842669d9362b10d0092d04fa6ae96118796dc29865a1f823363d5add",
       "risk": "normal"
     },
     {
@@ -42262,11 +42285,11 @@
       "permission_code": "masterdata.settings.manage",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsMasterdataSettingsReadOrManage"
+        "IsProductCategoryStyleReadOrManage"
       ],
       "owner": "products",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "b87b69034ea1c3263051c022dfdfb6e6fa6d2f98aab8fb772b992a9f838fb812",
+      "guard_source_sha256": "44731b86842669d9362b10d0092d04fa6ae96118796dc29865a1f823363d5add",
       "risk": "normal"
     },
     {
@@ -42276,7 +42299,7 @@
       "permission_code": null,
       "policy": "framework_options_exemption",
       "permission_classes": [
-        "IsMasterdataSettingsReadOrManage"
+        "IsProductCategoryStyleReadOrManage"
       ],
       "owner": "products"
     },
@@ -42287,11 +42310,11 @@
       "permission_code": "masterdata.settings.manage",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsMasterdataSettingsReadOrManage"
+        "IsProductCategoryStyleReadOrManage"
       ],
       "owner": "products",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "b87b69034ea1c3263051c022dfdfb6e6fa6d2f98aab8fb772b992a9f838fb812",
+      "guard_source_sha256": "44731b86842669d9362b10d0092d04fa6ae96118796dc29865a1f823363d5add",
       "risk": "normal"
     },
     {
@@ -60497,5 +60520,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "e84ec3554ae9e5909707f7c81303f4eb71a973ad07979141652669aba1909ce5"
+  "catalog_hash": "ffabbc521506b5c1cae841e5fa09af1dd3af218d9fafb53197dd5ec8bd3ea8e8"
 }

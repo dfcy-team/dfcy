@@ -15,7 +15,7 @@ const stubs={
  'el-alert':{props:['title'],template:'<p role="alert">{{title}}</p>'},
  'el-form-item':{props:['label'],template:'<label>{{label}}<slot/></label>'},
  'el-input':{props:['modelValue','placeholder'],emits:['update:modelValue','input'],template:'<input :placeholder="placeholder" :value="modelValue" @input="$emit(\'update:modelValue\',$event.target.value);$emit(\'input\',$event.target.value)" />'},
- 'el-select':{props:['modelValue'],emits:['update:modelValue'],template:'<select :value="modelValue" @change="$emit(\'update:modelValue\',$event.target.value)"><slot/></select>'},
+ 'el-select':{props:['modelValue'],emits:['update:modelValue','visible-change'],template:'<select @focus="$emit(\'visible-change\',true)" :value="modelValue" @change="$emit(\'update:modelValue\',$event.target.value)"><slot/></select>'},
  'el-option':{props:['label','value'],template:'<option :value="value">{{label}}</option>'},
  'el-button':{props:['disabled'],emits:['click'],template:'<button :disabled="disabled" @click="$emit(\'click\')"><slot/></button>'},
  'el-table':defineComponent({props:['data'],setup(props,{slots}){provide('ledgerRows',computed(()=>props.data));return()=>h('div',{class:'table-stub'},slots.default?.());}}),
@@ -38,10 +38,21 @@ describe('ProductCostLedgerV2 query ledger',()=>{
   mocks.requestApi.mockReset().mockImplementation(async config=>responseFor(config));
  });
 
+ it('does not query on mount or reset, and loads filter choices only when opened',async()=>{
+  const wrapper=mountLedger();await flushPromises();expect(mocks.requestApi).not.toHaveBeenCalled();
+  await wrapper.findAll('select')[0].trigger('focus');await flushPromises();
+  expect(mocks.requestApi.mock.calls).toHaveLength(1);
+  await wrapper.get('button').trigger('click');await flushPromises();expect(wrapper.vm.rows).toHaveLength(1);
+  const before=mocks.requestApi.mock.calls.length;await wrapper.findAll('button').find(b=>b.text()==='重置').trigger('click');await flushPromises();
+  expect(mocks.requestApi.mock.calls).toHaveLength(before);expect(wrapper.vm.rows).toEqual([]);
+ });
+
  it('keeps all selected filters when moving to the next result page',async()=>{
   const wrapper=mountLedger();await flushPromises();
   await wrapper.find('input[placeholder="SKU 或商品名称"]').setValue('SKU-41');
   const selects=wrapper.findAll('select');
+  for (const select of selects.slice(0,3)) await select.trigger('focus');
+  await flushPromises();
   await selects[0].setValue('3');await selects[1].setValue('7');await selects[2].setValue('12');
   await selects[3].setValue('all');
   await wrapper.get('button').trigger('click');
@@ -54,6 +65,7 @@ describe('ProductCostLedgerV2 query ledger',()=>{
 
  it('shows pending recalculation and preserves null versus numeric zero costs',async()=>{
   const wrapper=mountLedger();await flushPromises();
+  await wrapper.get('button').trigger('click');await flushPromises();
   expect(wrapper.text()).toContain('待复算');
   expect(wrapper.text()).toContain('未确定');
   wrapper.vm.detail=row;await nextTick();
@@ -63,6 +75,7 @@ describe('ProductCostLedgerV2 query ledger',()=>{
 
  it('switches a row into all-history mode while locking its SKU and country',async()=>{
   const wrapper=mountLedger();await flushPromises();
+  await wrapper.get('button').trigger('click');await flushPromises();
   const historyButton=wrapper.findAll('button').find(button=>button.text()==='历史版本');
   expect(historyButton).toBeTruthy();await historyButton.trigger('click');
   const request=mocks.requestApi.mock.calls.filter(([config])=>config.url.endsWith('/product-cost-ledger/')).at(-1)[0].params;
@@ -86,6 +99,7 @@ describe('ProductCostLedgerV2 query ledger',()=>{
 
  it('clears already loaded rows when authorization becomes stale',async()=>{
   const wrapper=mountLedger();await flushPromises();
+  await wrapper.get('button').trigger('click');await flushPromises();
   expect(wrapper.text()).toContain('SKU-41');
   mocks.authState.authorizationStale=true;await nextTick();await nextTick();
   expect(wrapper.text()).toContain('需要供应链查看权限及对应数据范围。');

@@ -142,13 +142,13 @@ def _require_blacklist_scope(user):
         require_all_scope(user, permission_code)
 
 
-def _pagination(request):
+def _pagination(request, max_page_size=100):
     try:
         page = int(request.query_params.get("page", 1))
         page_size = int(request.query_params.get("page_size", 20))
     except ValueError as exc:
         raise ValidationError("Pagination values must be integers.") from exc
-    if page < 1 or page_size < 1 or page_size > 100:
+    if page < 1 or page_size < 1 or page_size > max_page_size:
         raise ValidationError("Invalid pagination range.")
     return page, page_size
 
@@ -332,6 +332,9 @@ class InfluencerCollectionView(ScopedInfluencerView):
     write_permission_code = "influencers.manage"
 
     def get(self, request):
+        return self._list(request)
+
+    def _list(self, request, contact_result_ids=None):
         require_scope(request.user, self.read_permission_code)
         include_nickname_id = _nickname_read_requested(request)
         blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
@@ -346,6 +349,8 @@ class InfluencerCollectionView(ScopedInfluencerView):
         status = request.query_params.get("status", "").strip()
         deleted_only = _query_bool(request.query_params.get('deleted_only', 'false'), field='deleted_only')
         queryset = queryset.filter(is_deleted=deleted_only)
+        if contact_result_ids is not None:
+            queryset = queryset.filter(pk__in=contact_result_ids)
         if search:
             search_filter = (
                 Q(code__icontains=search)
@@ -437,6 +442,88 @@ class InfluencerCollectionView(ScopedInfluencerView):
             after_data={"code": instance.code, "status": instance.status},
         )
         return success_response(InfluencerPublicSerializer(instance).data, status=201)
+
+
+class InfluencerContactSearchView(InfluencerCollectionView):
+    """Private exact contact lookup; reuses the scoped and redacted collection."""
+    http_method_names = ["post", "options"]
+    method_action_overrides = {"POST": "read"}
+    # POST transports the private contact value in its body but performs only a view operation.
+    write_permission_code = "influencers.view"
+
+    def post(self, request):
+        from .models import InfluenceArchiveMembership, InfluencerContact
+
+        require_scope(request.user, self.read_permission_code)
+        from django.db import connection
+        from django.db.models import Case, CharField, F, Q, Value, When
+        from django.db.models.functions import Collate, Lower, Replace, Substr, Trim
+
+        if not isinstance(request.data, dict):
+            raise ValidationError({"contact": "Invalid contact search."})
+        allowed_query_keys = {
+            "search", "profile_notes", "status", "deleted_only", "platform", "cooperation_status",
+            "level", "market", "tier", "is_blacklisted", "ordering", "page", "page_size",
+            "include_nickname_id",
+        }
+        if set(request.query_params.keys()) - allowed_query_keys:
+            raise ValidationError({"query": "Unsupported query parameter."})
+        channel = request.data.get("channel")
+        value = request.data.get("value", "")
+        allowed = {"email", "phone", "whatsapp", "wechat", "telegram", "tiktok", "instagram", "messenger", "line", "viber", "other"}
+        if not isinstance(channel, str) or channel not in allowed or not isinstance(value, str) or len(value) > 240:
+            raise ValidationError({"contact": "Invalid contact search."})
+        value = value.strip()
+        owners = filter_queryset(request.user, Influencer.objects.filter(
+            tenant=request.user.tenant, is_deleted=False,
+        ), self.read_permission_code).values("pk")
+        contacts = InfluencerContact.objects.filter(
+            tenant_id=request.user.tenant_id, influencer_id__in=owners,
+            is_active=True, channel=channel,
+        ).annotate(_trimmed_contact=Trim("value")).exclude(_trimmed_contact="")
+        binary_collation = {"mysql": "utf8mb4_bin", "sqlite": "BINARY", "postgresql": "C"}.get(connection.vendor)
+        if binary_collation is None:
+            raise ValidationError({"contact": "Unsupported contact search database."})
+
+        def exact_normalized_match(queryset, stored_expression, requested_value):
+            requested_expression = Lower(Trim(Value(requested_value)))
+            return queryset.annotate(
+                _contact_normalized=Collate(stored_expression, binary_collation),
+                _query_normalized=Collate(requested_expression, binary_collation),
+            ).filter(_contact_normalized=F("_query_normalized"))
+
+        if value:
+            if channel == "email":
+                contacts = exact_normalized_match(contacts, Lower(Trim("value")), value)
+            elif channel in {"phone", "whatsapp", "viber"} and all(ch.isascii() and (ch.isdigit() or ch in "+-(). /") for ch in value):
+                digits = "".join(ch for ch in value if ch.isascii() and ch.isdigit())
+                if not digits:
+                    raise ValidationError({"contact": "Invalid contact search."})
+                canonical = Trim("value")
+                for char in ("+", " ", "-", "(", ")", ".", "/"):
+                    canonical = Replace(canonical, Value(char), Value(""))
+                contacts = contacts.annotate(
+                    _canonical_phone=Collate(canonical, binary_collation),
+                    _query_phone=Collate(Value(digits), binary_collation),
+                ).filter(_canonical_phone=F("_query_phone"))
+            else:
+                canonical_handle = Case(
+                    When(value__startswith="@", then=Substr("value", 2)),
+                    default="value", output_field=CharField(),
+                )
+                contacts = exact_normalized_match(contacts, Lower(Trim(canonical_handle)), value.lstrip("@"))
+        contact_owner_ids = contacts.values("influencer_id")
+        shared_member_ids = InfluenceArchiveMembership.objects.filter(
+            tenant_id=request.user.tenant_id, influencer_id__in=contact_owner_ids,
+            influencer__tenant_id=request.user.tenant_id, group__tenant_id=request.user.tenant_id,
+            group__memberships__tenant_id=request.user.tenant_id,
+            group__memberships__influencer__tenant_id=request.user.tenant_id,
+        ).values("group__memberships__influencer_id")
+        result_queryset = Influencer.objects.filter(tenant=request.user.tenant).filter(
+            Q(pk__in=contact_owner_ids) | Q(pk__in=shared_member_ids),
+        )
+        visible_results = filter_queryset(request.user, result_queryset, self.read_permission_code).values("pk")
+        return self._list(request, contact_result_ids=visible_results)
 
 
 class InfluencerRelatedArchivesView(ScopedInfluencerView):
@@ -700,6 +787,19 @@ class InfluencerResolveView(ScopedInfluencerView):
 
     def get(self, request):
         permission_codes = _require_resolve_read_scope(request.user)
+        if "duplicate_influencer" in request.query_params:
+            from .models import influencer_identity_queryset
+            raw_id = str(request.query_params.get("duplicate_influencer", ""))
+            if not raw_id.isascii() or not raw_id.isdecimal() or raw_id.startswith("0") or len(raw_id) > 19 or int(raw_id) > 9223372036854775807:
+                raise ValidationError({"duplicate_influencer": "Expected a positive resource ID."})
+            visible = filter_any_permission(request.user, Influencer.objects.filter(
+                tenant=request.user.tenant, is_deleted=False), permission_codes)
+            influencer = get_object_or_404(visible, pk=int(raw_id))
+            identities = filter_any_permission(request.user, influencer_identity_queryset(influencer), permission_codes)
+            records = filter_any_permission(request.user, SampleFulfillment.objects.filter(
+                tenant=request.user.tenant, influencer_id__in=identities.values("pk"), is_deleted=False,
+                status__in=("pending", "shipped", "delivered", "overdue", "blacklisted")), permission_codes)
+            return success_response({"records": list(records.order_by("-created_at", "-pk").values("fulfillment_no", "status")[:3])})
         raw_query = str(
             request.query_params.get("q")
             or request.query_params.get("search")
@@ -982,7 +1082,7 @@ class OutreachTaskCollectionView(ScopedInfluencerView):
             ordering = "-_priority_rank" if ordering.startswith("-") else "_priority_rank"
         queryset = queryset.order_by(ordering, "-id")
         queryset = filter_queryset(request.user, queryset, self.read_permission_code)
-        page, page_size = _pagination(request)
+        page, page_size = _pagination(request, max_page_size=200)
         return success_response(paginated_data(request, queryset, OutreachTaskSerializer, page=page, page_size=page_size, serializer_context={"request": request}))
 
     def post(self, request):
@@ -1536,12 +1636,17 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
                    or not 0 < int(value) < 2**63 for value in stores):
                 raise ValidationError({"store": "Expected positive store IDs."})
             queryset = queryset.filter(store_id__in=stores)
-        owner_id = request.query_params.get("owner", "").strip()
-        if owner_id:
-            if not owner_id.isdigit() or int(owner_id) < 1:
-                raise ValidationError({"owner": "owner must be a positive integer."})
+        owner_filter = request.query_params.get("owner", "").strip()
+        if owner_filter:
+            owner_ids = list(dict.fromkeys(value.strip() for value in owner_filter.split(",")))
+            if any(
+                not value or not value.isascii() or not value.isdecimal()
+                or len(value) > 19 or not 0 < int(value) < 2**63
+                for value in owner_ids
+            ):
+                raise ValidationError({"owner": "Expected positive owner IDs."})
             queryset = queryset.filter(
-                owner_id=int(owner_id),
+                owner_id__in=owner_ids,
                 owner__tenant=request.user.tenant,
             )
         search = request.query_params.get("search", "").strip()
@@ -1601,7 +1706,7 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
                 fields = ("_without_task", *fields)
             queryset = queryset.order_by(*fields)
         queryset = filter_queryset(request.user, queryset, self.read_permission_code)
-        page, page_size = _pagination(request)
+        page, page_size = _pagination(request, max_page_size=200)
         return success_response(paginated_data(request, queryset, SampleFulfillmentSerializer, page=page, page_size=page_size))
 
     def post(self, request):
@@ -1712,7 +1817,10 @@ class SampleFulfillmentDetailView(ScopedInfluencerView):
                         fulfillment=fulfillment,
                         status=requested_status,
                         expected_version=fulfillment.version if has_fact_changes else expected_version,
-                        reason="manual_edit",
+                        reason=(f"manual_completion:{request.user.pk}"[:240]
+                                if requested_status == SampleFulfillment.Status.COMPLETED
+                                and initial_status != SampleFulfillment.Status.COMPLETED
+                                else "manual_edit"),
                         confirm_terminal=confirm_terminal,
                     )
                 elif not has_fact_changes and not requested_status:
@@ -1805,13 +1913,19 @@ class SampleFulfillmentStatusView(ScopedInfluencerView):
         confirm_terminal = request.data.get("confirm_terminal", False)
         if not isinstance(confirm_terminal, bool):
             raise ValidationError({"confirm_terminal": "confirm_terminal must be a boolean."})
+        reason = request.data.get("reason", "")
+        if not isinstance(reason, str):
+            raise ValidationError({"reason": "Expected text."})
+        if requested_status == SampleFulfillment.Status.COMPLETED:
+            # Preserve the human audit note without trusting it as provenance.
+            reason = (f"manual_completion:{request.user.pk}:" + reason)[:240]
         try:
             fulfillment = transition_sample_fulfillment(
                 user=request.user,
                 fulfillment=fulfillment,
                 status=requested_status,
                 expected_version=_expected_version(request),
-                reason=request.data.get("reason", ""),
+                reason=reason,
                 confirm_terminal=confirm_terminal,
             )
         except ValidationError as exc:

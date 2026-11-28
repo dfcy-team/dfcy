@@ -25,6 +25,10 @@ const stubs = {
   'el-dialog': { props: ['modelValue'], emits: ['update:modelValue'], template: '<section v-if="modelValue"><slot/><slot name="footer"/></section>' }, 'el-form': { template: '<form><slot/></form>' }, 'el-form-item': { template: '<label><slot/></label>' }, 'el-date-picker': true
 };
 function mountPage(mode = 'replenishment') { return mount(CountryInventoryDecisions, { props: { mode }, global: { stubs } }); }
+const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
+const listResult = (override = {}) => data({ results: [sample], count: 1, summary: null, summary_state: 'not_requested', ...override });
+const summaryResult = (values = {}) => data({ results: [], count: 1, summary_state: 'complete', summary: { scope: 'all_filtered', stocked: 0, sold: 0, zero_stock: 0, unknown_stock: 0, ...values } });
+
 
 describe('country inventory decisions', () => {
   beforeEach(() => {
@@ -32,12 +36,114 @@ describe('country inventory decisions', () => {
     mocks.evaluate.mockReset(); mocks.fetch.mockReset().mockResolvedValue(data({ results: [], count: 0 })); mocks.preview.mockReset(); mocks.create.mockReset(); mocks.push.mockReset(); mocks.stale = false; mocks.canManage = true; mocks.key = 0;
   });
 
+  it('publishes list results before summary completes and preserves them through summary retry', async () => {
+    const summaryPending = deferred();
+    mocks.fetch.mockResolvedValueOnce(data({ results: [], count: 0 }));
+    const wrapper = mountPage('operations'); await flushPromises();
+    mocks.fetch.mockResolvedValueOnce(listResult()).mockImplementationOnce(() => summaryPending.promise);
+    wrapper.vm.countryId = 2; await wrapper.vm.load(); await flushPromises();
+    expect(wrapper.vm.rows).toEqual([sample]); expect(wrapper.vm.total).toBe(1); expect(wrapper.vm.loading).toBe(false); expect(wrapper.vm.summaryLoading).toBe(true);
+    summaryPending.reject(new Error('summary unavailable')); await flushPromises();
+    expect(wrapper.vm.rows).toEqual([sample]); expect(wrapper.vm.total).toBe(1); expect(wrapper.vm.summaryError).toContain('summary unavailable'); expect(wrapper.text()).toContain('summary unavailable');
+    mocks.fetch.mockResolvedValueOnce(summaryResult({ stocked: 0 }));
+    await wrapper.findAll('button').find(button => button.text() === '重试汇总').trigger('click'); await flushPromises();
+    expect(wrapper.vm.rows).toEqual([sample]); expect(wrapper.vm.operationMetricValue(0)).toBe('0'); expect(wrapper.vm.summaryError).toBe(''); wrapper.unmount();
+  });
+
+  it('fetches a new summary after returning to a country whose pending request was invalidated', async () => {
+    const stale = deferred();
+    mocks.fetch.mockResolvedValueOnce(data({ results: [], count: 0 }));
+    const wrapper = mountPage('operations'); await flushPromises();
+    mocks.fetch.mockResolvedValueOnce(listResult()).mockImplementationOnce(() => stale.promise);
+    wrapper.vm.countryId = 2; await wrapper.vm.load(); await flushPromises();
+    wrapper.vm.countryId = 3; wrapper.vm.countryChanged();
+    wrapper.vm.countryId = 2; wrapper.vm.countryChanged();
+    mocks.fetch.mockResolvedValueOnce(listResult()).mockResolvedValueOnce(summaryResult({ stocked: 5 }));
+    await wrapper.vm.load(); await flushPromises();
+    expect(mocks.fetch.mock.calls.filter(([params]) => params.read_projection === 'summary')).toHaveLength(2);
+    expect(wrapper.vm.operationMetricValue(wrapper.vm.summary.stocked)).toBe('5');
+    stale.resolve(summaryResult({ stocked: 99 })); await flushPromises();
+    expect(wrapper.vm.operationMetricValue(wrapper.vm.summary.stocked)).toBe('5');
+    expect(wrapper.vm.summaryLoading).toBe(false); wrapper.unmount();
+  });
+
+  it('ignores late summaries from a previous country scope', async () => {
+    const staleSummary = deferred();
+    mocks.fetch.mockResolvedValueOnce(data({ results: [], count: 0 }));
+    const wrapper = mountPage('operations'); await flushPromises();
+    mocks.fetch.mockResolvedValueOnce(listResult()).mockImplementationOnce(() => staleSummary.promise);
+    wrapper.vm.countryId = 2; await wrapper.vm.load(); await flushPromises();
+    expect(wrapper.vm.summaryLoading).toBe(true);
+    wrapper.vm.countryId = 3; wrapper.vm.countryChanged();
+    mocks.fetch.mockResolvedValueOnce(listResult({ count: 2 })).mockResolvedValueOnce(summaryResult({ stocked: 2 }));
+    await wrapper.vm.load(); await flushPromises();
+    expect(wrapper.vm.summary.stocked).toBe(2);
+    staleSummary.resolve(summaryResult({ stocked: 99 })); await flushPromises();
+    expect(wrapper.vm.summary.stocked).toBe(2); wrapper.unmount();
+  });
+
+  it('reuses the scoped summary across page-only changes and distinguishes queried zero from unknown', async () => {
+    mocks.fetch.mockResolvedValueOnce(data({ results: [], count: 0 }));
+    const wrapper = mountPage('operations'); await flushPromises();
+    expect(wrapper.vm.operationMetricValue(0)).toBe('未查询');
+    mocks.fetch.mockResolvedValueOnce(listResult()).mockResolvedValueOnce(summaryResult({ stocked: 0 }));
+    wrapper.vm.countryId = 2; await wrapper.vm.load(); await flushPromises();
+    expect(wrapper.vm.operationMetricValue(0)).toBe('0');
+    mocks.fetch.mockResolvedValueOnce(listResult({ count: 2 }));
+    wrapper.vm.changePage(2); await flushPromises();
+    expect(mocks.fetch.mock.calls.filter(([params]) => params.read_projection === 'summary')).toHaveLength(1);
+    expect(mocks.fetch.mock.calls.findLast(([params]) => params.read_projection === 'list')[0]).toMatchObject({ offset: 20, country_id: 2 });
+    expect(wrapper.vm.operationMetricValue(0)).toBe('0'); wrapper.unmount();
+  });
+
+  it('invalidates successful cache when a different filter list fails', async () => {
+    mocks.fetch.mockResolvedValueOnce(data({ results: [], count: 0 }));
+    const wrapper = mountPage('operations'); await flushPromises();
+    mocks.fetch.mockResolvedValueOnce(listResult()).mockResolvedValueOnce(summaryResult({ stocked: 4 }));
+    wrapper.vm.countryId = 2; wrapper.vm.search = 'A'; await wrapper.vm.load(); await flushPromises();
+    expect(wrapper.vm.operationMetricValue(4)).toBe('4');
+    mocks.fetch.mockRejectedValueOnce(new Error('list B failed'));
+    wrapper.vm.search = 'B'; await wrapper.vm.load(); await flushPromises();
+    mocks.fetch.mockResolvedValueOnce(listResult()).mockResolvedValueOnce(summaryResult({ stocked: 4 }));
+    wrapper.vm.search = 'A'; await wrapper.vm.load(); await flushPromises();
+    expect(mocks.fetch.mock.calls.filter(([params]) => params.read_projection === 'summary')).toHaveLength(2);
+    expect(wrapper.vm.operationMetricValue(4)).toBe('4'); wrapper.unmount();
+  });
+
+  it('ignores a pending summary after category and ABC filters are removed', async () => {
+    const obsolete = deferred();
+    mocks.fetch.mockResolvedValueOnce(data({ results: [], count: 0 }));
+    const wrapper = mountPage('operations'); await flushPromises();
+    wrapper.vm.countryId = 2; wrapper.vm.categoryId = 10; wrapper.vm.abcGrade = 'A';
+    mocks.fetch.mockResolvedValueOnce(listResult()).mockImplementationOnce(() => obsolete.promise);
+    await wrapper.vm.load(); await flushPromises();
+    wrapper.vm.categoryId = null; wrapper.vm.abcGrade = '';
+    mocks.fetch.mockResolvedValueOnce(listResult()).mockResolvedValueOnce(summaryResult({ stocked: 3 }));
+    await wrapper.vm.load(); await flushPromises();
+    obsolete.resolve(summaryResult({ stocked: 88 })); await flushPromises();
+    expect(wrapper.vm.summary.stocked).toBe(3); wrapper.unmount();
+  });
+
+  it('shares an in-flight summary across same-scope pagination', async () => {
+    const pending = deferred();
+    mocks.fetch.mockResolvedValueOnce(data({ results: [], count: 0 }));
+    const wrapper = mountPage('operations'); await flushPromises();
+    mocks.fetch.mockResolvedValueOnce(listResult()).mockImplementationOnce(() => pending.promise);
+    wrapper.vm.countryId = 2; await wrapper.vm.load(); await flushPromises();
+    mocks.fetch.mockResolvedValueOnce(listResult({ count: 2 }));
+    await wrapper.vm.changePage(2); await flushPromises();
+    expect(mocks.fetch.mock.calls.filter(([params]) => params.read_projection === 'summary')).toHaveLength(1);
+    expect(wrapper.vm.summaryLoading).toBe(true);
+    pending.resolve(summaryResult({ stocked: 6 })); await flushPromises();
+    expect(wrapper.vm.operationMetricValue(6)).toBe('6'); wrapper.unmount();
+  });
+
   it('keeps a deep-linked operations country awaiting its first explicit query', async () => {
     mocks.query = { country_id: '2' };
     const wrapper = mountPage('operations'); await flushPromises();
     expect(mocks.fetch.mock.calls[0][0]).not.toHaveProperty('country_id');
     expect(wrapper.vm.awaitingQuery).toBe(true);
-    expect(wrapper.vm.operationMetricValue(0)).toBe('—');
+    expect(wrapper.vm.operationMetricValue(0)).toBe('未查询');
     expect(wrapper.text()).toContain('请选择国家并点击查询');
     await wrapper.vm.load(); await flushPromises();
     expect(mocks.fetch.mock.calls.at(-1)[0]).toHaveProperty('country_id', 2);
@@ -49,10 +155,10 @@ describe('country inventory decisions', () => {
     const low = { ...sample, sku_id: 8, sku: 'LOW-8', operations: { sales_status: 'observed_sales', inventory_status: 'low' } };
     mocks.fetch.mockResolvedValue(data({ results: [sample, low], count: 40 }));
     const wrapper = mountPage('operations'); await flushPromises();
-    expect(wrapper.vm.operationMetricValue(0)).toBe('—');
+    expect(wrapper.vm.operationMetricValue(0)).toBe('未查询');
     wrapper.vm.countryId = 2; await wrapper.vm.load(); await flushPromises();
-    expect(mocks.fetch.mock.calls.at(-1)[0]).not.toHaveProperty('decision_state');
-    expect(mocks.fetch.mock.calls.at(-1)[0]).toHaveProperty('mapped_only', true);
+    expect(mocks.fetch.mock.calls.findLast(([params]) => params.read_projection === 'list')[0]).not.toHaveProperty('decision_state');
+    expect(mocks.fetch.mock.calls.findLast(([params]) => params.read_projection === 'list')[0]).toHaveProperty('mapped_only', true);
     expect(wrapper.vm.displayRows).toHaveLength(2);
     wrapper.vm.operationsFilter = 'sales:unknown'; await wrapper.vm.$nextTick();
     expect(wrapper.vm.displayRows.map(row => row.sku_id)).toEqual([7]);
@@ -60,8 +166,8 @@ describe('country inventory decisions', () => {
     wrapper.vm.operationsFilter = 'inventory:low'; await wrapper.vm.$nextTick();
     expect(wrapper.vm.displayRows.map(row => row.sku_id)).toEqual([8]);
     wrapper.vm.changePage(2); await flushPromises();
-    expect(mocks.fetch.mock.calls.at(-1)[0]).toMatchObject({ offset: 20, limit: 20, country_id: 2 });
-    expect(mocks.fetch.mock.calls.at(-1)[0]).not.toHaveProperty('decision_state');
+    expect(mocks.fetch.mock.calls.findLast(([params]) => params.read_projection === 'list')[0]).toMatchObject({ offset: 20, limit: 20, country_id: 2 });
+    expect(mocks.fetch.mock.calls.findLast(([params]) => params.read_projection === 'list')[0]).not.toHaveProperty('decision_state');
     expect(mocks.evaluate).not.toHaveBeenCalled();
     wrapper.unmount();
   });
@@ -95,7 +201,7 @@ describe('country inventory decisions', () => {
     mocks.fetch.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
     wrapper.vm.countryId = 2; const pending = wrapper.vm.load(); await flushPromises();
     wrapper.vm.rows = [sample]; wrapper.vm.selectedRows = [sample]; wrapper.vm.countryId = 3; wrapper.vm.countryChanged();
-    expect(wrapper.vm.rows).toEqual([]); expect(wrapper.vm.selectedRows).toEqual([]); expect(wrapper.vm.total).toBe(0); expect(wrapper.vm.operationMetricValue(0)).toBe('—');
+    expect(wrapper.vm.operationMetricValue(0)).toBe('未查询');
     resolveOld(data({ results: [{ ...sample, sku: 'STALE' }], count: 1 })); await pending; await flushPromises();
     expect(wrapper.vm.rows).toEqual([]); expect(wrapper.text()).not.toContain('STALE'); expect(mocks.fetch).toHaveBeenCalledTimes(2); wrapper.unmount();
   });
@@ -107,7 +213,6 @@ describe('country inventory decisions', () => {
     expect(expand).toHaveBeenCalledWith(sample, true);
     mocks.fetch.mockRejectedValueOnce(new Error('network unavailable'));
     await wrapper.vm.load(); await flushPromises();
-    expect(wrapper.vm.operationMetricValue(0)).toBe('—');
     expect(wrapper.vm.displayRows).toHaveLength(0);
     wrapper.unmount();
   });

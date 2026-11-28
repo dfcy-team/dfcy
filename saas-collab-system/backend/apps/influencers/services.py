@@ -2265,9 +2265,12 @@ def transition_outreach_task(*, user, task, status, expected_version):
     if status not in OutreachTask.Status.values:
         raise ValidationError({"status": "Unsupported task status."})
     allowed = {
-        OutreachTask.Status.PENDING: {OutreachTask.Status.IN_PROGRESS, OutreachTask.Status.CANCELLED},
+        OutreachTask.Status.PENDING: {OutreachTask.Status.IN_PROGRESS, OutreachTask.Status.PAUSED, OutreachTask.Status.CANCELLED},
         OutreachTask.Status.IN_PROGRESS: {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED, OutreachTask.Status.PAUSED},
-        OutreachTask.Status.PAUSED: {OutreachTask.Status.IN_PROGRESS, OutreachTask.Status.CANCELLED},
+        OutreachTask.Status.PAUSED: {
+            OutreachTask.Status.PENDING if task.paused_from_pending else OutreachTask.Status.IN_PROGRESS,
+            OutreachTask.Status.CANCELLED,
+        },
         OutreachTask.Status.COMPLETED: {OutreachTask.Status.IN_PROGRESS},
         OutreachTask.Status.CANCELLED: set(),
     }
@@ -2276,6 +2279,7 @@ def transition_outreach_task(*, user, task, status, expected_version):
     before = {"status": task.status, "version": task.version}
     now = timezone.now()
     changes = {"status": status, "version": task.version + 1, "updated_at": now}
+    changes["paused_from_pending"] = status == OutreachTask.Status.PAUSED and task.status == OutreachTask.Status.PENDING
     if status == OutreachTask.Status.IN_PROGRESS:
         changes["finalized_at"] = None
         changes["started_at"] = task.started_at or now

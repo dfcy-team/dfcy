@@ -1,0 +1,49 @@
+{
+  "package_sha256": "7287acf80c189264c304100e1def986efbf34c53d1cdcc76c8d3f7ff7d6a20d6",
+  "files": [
+    {
+      "path": "backend/apps/finance/summary_database.py",
+      "deployed_source_sha256": "8f0238d609e052c34e7b4d101019f5f65ca4b6ba594de4bc940f5e1f149e0c5e"
+    },
+    {
+      "path": "backend/apps/finance/summary_database_document.py",
+      "deployed_source_sha256": "ea1efc7110ac73696d3b66a4e49e280e948426380ea2597a1a6fe47c2100b03d"
+    },
+    {
+      "path": "backend/apps/finance/summary_engine.cjs",
+      "deployed_source_sha256": "70928fcad84dce6dd27f9d35e982b7ef1fe9299d3764a04304c3769782762452"
+    },
+    {
+      "path": "backend/apps/finance/summary_native.cjs",
+      "deployed_source_sha256": "a39c823c110b212a9bae8efff9ceda8a4359b8d40d7563eaf1fc1a99dbbdeacb"
+    },
+    {
+      "path": "backend/apps/finance/summary_read_query.py",
+      "deployed_source_sha256": "cd9142928ee5372356e51e1fdae4bbcf35283aa3dd8673f173074cb2b1dd64d9"
+    },
+    {
+      "path": "backend/tests/test_finance_database_summary.py",
+      "deployed_source_sha256": "39cc8fe605ce751b751f40c5adbe5f6b6ddd6a1b04679c929b7dd6fd77373018"
+    },
+    {
+      "path": "backend/tests/test_finance_read_query.py",
+      "deployed_source_sha256": "d2448e24e03d0dc547a289d8f574a2e9c81d4f6e02506031c4db41bb59624811"
+    },
+    {
+      "path": "frontend/src/views/finance/FinanceSummaryNative.vue",
+      "deployed_source_sha256": "420a74ebf4f076d0c2a68df37b2766b607e713bbdcb16990a9ae34aae5cecd05"
+    },
+    {
+      "path": "frontend/tests/finance-summary-engine-source.spec.js",
+      "deployed_source_sha256": "4eecd5d343966d0963321321361deed3a926223702cb170bc240215cbf278b13"
+    },
+    {
+      "path": "frontend/tests/finance-summary-native.spec.js",
+      "deployed_source_sha256": "531d1ae3c34d45e750d43a60d5ec6e3c178661e022e0a7b4bea2cd1bf970ee9c"
+    },
+    {
+      "path": "frontend/tests/finance-summary-pagination.spec.js",
+      "deployed_source_sha256": "97847ae54c375eb4fe542195d2e23dd8334df11a99f5d59f357b7abd835a1cb8"
+    }
+  ]
+}

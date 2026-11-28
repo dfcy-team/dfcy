@@ -43,10 +43,21 @@ def classify_endpoint(route, callback, catalog_by_code):
         if "get" in methods: methods.add("head")
     if "options" in available: methods.add("options")
     rows = []
+    action_overrides = getattr(view, "method_action_overrides", {})
+    if not isinstance(action_overrides, dict):
+        raise ValueError(f"Invalid method_action_overrides declaration on {view.__module__}.{view.__name__}")
+    for override_method, override_action in action_overrides.items():
+        if (not isinstance(override_method, str) or override_method.lower() not in supported
+                or override_method.lower() not in methods
+                or not isinstance(override_action, str)
+                or override_action not in {"read", "create", "update", "delete"}):
+            raise ValueError(f"Invalid method action override {override_method!r}: {override_action!r} on {view.__module__}.{view.__name__}")
+    action_overrides = {method.upper(): action for method, action in action_overrides.items()}
     for method in sorted(methods, key=lambda m: (m != "options", list(HTTP_ACTIONS).index(m.upper()) if m.upper() in HTTP_ACTIONS else 99)):
         verb = method.upper()
         if method == "options":
             rows.append(_row(route, verb, "exempt", policy="framework_options_exemption", classes=names, owner=owner)); continue
+        action = action_overrides.get(verb, HTTP_ACTIONS[verb])
         code = getattr(view, "read_permission_code", None) if method in ("get", "head") else getattr(view, "write_permission_code", None)
         if declared and not code and view.__module__ in {"apps.pilot.views", "apps.pilot.ui_p8_views"}:
             # These reviewed dispatchers declare their operation from fixed
@@ -76,17 +87,17 @@ def classify_endpoint(route, callback, catalog_by_code):
         if declared and not code:
             rows.append(_row(route, verb, "error", policy="declared_permission_missing", classes=names, owner=owner))
         elif (declared or actual_special_codes) and code not in catalog_by_code:
-            rows.append(_row(route, verb, HTTP_ACTIONS[verb], code, "catalog_declaration_missing", names, owner))
+            rows.append(_row(route, verb, action, code, "catalog_declaration_missing", names, owner))
         elif declared:
-            row = _row(route, verb, HTTP_ACTIONS[verb], code, "catalog_permission", names, owner)
+            row = _row(route, verb, action, code, "catalog_permission", names, owner)
             definition = catalog_by_code.get(code, {})
             row["risk"] = "high" if is_high_risk_permission(code, action=definition.get("action"), permission_type=definition.get("permission_type", "action")) else "normal"
             rows.append(row)
         elif actual_special_codes:
             for specialized_code in sorted(set(actual_special_codes)):
                 if specialized_code not in catalog_by_code:
-                    rows.append(_row(route, verb, HTTP_ACTIONS[verb], specialized_code, "catalog_declaration_missing", names, owner)); continue
-                row = _row(route, verb, HTTP_ACTIONS[verb], specialized_code, "specialized_catalog_permission", names, owner)
+                    rows.append(_row(route, verb, action, specialized_code, "catalog_declaration_missing", names, owner)); continue
+                row = _row(route, verb, action, specialized_code, "specialized_catalog_permission", names, owner)
                 row["permission_logic"] = "existing_specialized_guard"
                 guard_sources = []
                 for cls in getattr(view, "permission_classes", ()):

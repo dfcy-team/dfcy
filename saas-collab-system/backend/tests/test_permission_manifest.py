@@ -62,6 +62,20 @@ def test_unimplemented_methods_are_not_emitted_and_options_are_exempt():
     assert all(r["policy"] == "public_handler_guard" for r in rows if r["method"] != "OPTIONS")
 
 
+def test_declared_method_action_override_is_applied_and_invalid_declarations_fail():
+    class ReadOnlyPostView(SampleView):
+        method_action_overrides = {"POST": "read"}
+    callback = type("Callback", (), {"cls": ReadOnlyPostView})
+    rows = classify_endpoint("search/", callback, {"sample.view": {}, "sample.manage": {}})
+    post = next(row for row in rows if row["method"] == "POST")
+    assert (post["action"], post["permission_code"]) == ("read", "sample.manage")
+    for invalid in ({"PATCH": "read"}, {"POST": "unsafe"}):
+        class InvalidOverrideView(SampleView):
+            method_action_overrides = invalid
+        with pytest.raises(ValueError):
+            classify_endpoint("search/", type("Callback", (), {"cls": InvalidOverrideView}), {})
+
+
 def test_specialized_method_and_or_codes_are_checked_against_catalog():
     class Guard:
         read_permission_code = "example.view"

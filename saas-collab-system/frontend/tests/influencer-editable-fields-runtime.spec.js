@@ -6,7 +6,7 @@ const request = vi.hoisted(() => vi.fn());
 const messages = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn(), success: vi.fn() }));
 const permissions = vi.hoisted(() => ({ check: () => true }));
 vi.mock('../src/api/request', () => ({ requestApi: request, requestWithMockFallback: request }));
-vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ hasPermission: (code) => permissions.check(code) }) }));
+vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ hasPermission: (code) => permissions.check(code), currentUser: {id:1,tenant_id:1}, authorizationStale:false }) }));
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ replace: vi.fn() }) }));
 vi.mock('element-plus', async (importOriginal) => ({
   ...await importOriginal(), ElMessage: messages, ElMessageBox: { confirm: vi.fn().mockResolvedValue(true) }
@@ -63,6 +63,56 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('distinguishes writer verification from historical links and renders completion time', () => {
+    const wrapper=render(SampleFulfillmentList);
+    const at='2026-11-28T02:30:00Z';
+    expect(wrapper.vm.completionEvidenceLabel({kind:'linked',video_id:'V1',at})).toContain('来源未核验');
+    expect(wrapper.vm.completionEvidenceLabel({kind:'linked',video_id:'V1',at})).not.toContain('系统核验');
+    expect(wrapper.vm.completionEvidenceLabel({kind:'system',video_id:'V1',at})).toContain('系统核验');
+    expect(wrapper.vm.completionEvidenceLabel({kind:'system',video_id:'V1',at})).toContain('10:30');
+    expect(wrapper.vm.completionEvidenceLabel({kind:'manual',actor:'Actor',at})).toContain('Actor');
+    wrapper.unmount();
+  });
+
+  it.each([[OutreachTaskList,'sampleVisible','sampleForm'],[SampleFulfillmentList,'visible','form']])('reads duplicate guidance only while the actual create-sample dialog is open', async (component, visibility, formName) => {
+    const fallback=request.getMockImplementation();
+    request.mockImplementation(config=>config.url.endsWith('/resolve/') && config.params?.duplicate_influencer
+      ? Promise.resolve({success:true,data:{records:[{fulfillment_no:'EXISTING',status:'delivered'}]}}) : fallback(config));
+    const wrapper=render(component);await flushPromises();
+    wrapper.vm.influencerOptions=[{id:7,handle:'synthetic'}];wrapper.vm[formName].influencer=7;
+    await flushPromises();
+    const reads=()=>request.mock.calls.map(([c])=>c).filter(c=>c.params?.duplicate_influencer);
+    expect(reads()).toHaveLength(0);
+    wrapper.vm[visibility]=true;await flushPromises();
+    expect(reads()).toHaveLength(1);expect(wrapper.vm.duplicateSampleWarning).toContain('EXISTING');
+    wrapper.vm[visibility]=false;await flushPromises();expect(wrapper.vm.duplicateSampleWarning).toBe('');
+    wrapper.unmount();
+  });
+
+  it('combines selected sample owners, resets owner, and batches only current-page eligible rows with versions', async () => {
+    const fallback = request.getMockImplementation();
+    request.mockImplementation(config => config.url.endsWith('/sample-fulfillment-options/')
+      ? Promise.resolve({ success: true, data: { stores: [], owners: [{ id: 9, username: 'A' }, { id: 10, username: 'B' }] } })
+      : fallback(config));
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    const latest = () => request.mock.calls.map(([config]) => config)
+      .findLast(config => config.url.endsWith('/sample-fulfillments/')).params;
+    const filter = wrapper.get('select[placeholder="全部送样负责人"]');
+    await filter.setValue(['9', '10']);
+    await flushPromises();
+    expect(latest().owner).toBe('9,10');
+    expect(latest().page_size).toBe(50);
+
+    const overdue = { ...sample, id: 24, status: 'overdue', version: 6 };
+    const cancelled = { ...sample, id: 25, status: 'cancelled', version: 7 };
+    wrapper.vm.rows = [sample, overdue, cancelled];
+    wrapper.vm.selectedSamples = [sample, overdue, cancelled, { ...sample, id: 90 }];
+    await wrapper.vm.completeSelectedSamples();
+    expect(writes().map(config => [config.url.split('/').at(-2), config.headers['If-Match']])).toEqual([['23', '"5"'], ['24', '"6"']]);
+    expect(writes().every(config => config.data.status === 'completed' && config.data.confirm_terminal)).toBe(true);
+    wrapper.unmount();
+  });
   it('offers blacklist filtering and links the status-only action to the archive', async () => {
     const wrapper = render(SampleFulfillmentList);
     await flushPromises();
@@ -140,6 +190,35 @@ describe('editable task number and sample type', () => {
     wrapper.unmount();
   });
 
+  it('uses 50-row defaults and requests 200 rows from page one after a size change', async () => {
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    expect(request.mock.calls.find(([config]) => config.url.endsWith('/outreach-tasks/') && config.params?.page_size)[0].params).toMatchObject({ page: 1, page_size: 50 });
+    wrapper.vm.page = 4;
+    wrapper.vm.pageSize = 200;
+    wrapper.vm.filters.search = 'synthetic';
+    wrapper.vm.onPageSizeChange();
+    await flushPromises();
+    expect(request.mock.calls.filter(([config]) => config.url.endsWith('/outreach-tasks/') && config.params?.page_size).at(-1)[0].params).toMatchObject({ page: 1, page_size: 200, search: 'synthetic' });
+    wrapper.unmount();
+    const samples = render(SampleFulfillmentList);
+    await flushPromises();
+    expect(request.mock.calls.find(([config]) => config.url.endsWith('/sample-fulfillments/') && config.params?.page_size)[0].params).toMatchObject({ page: 1, page_size: 50 });
+    samples.vm.page = 3;
+    samples.vm.pageSize = 200;
+    samples.vm.filters.search = 'synthetic';
+    samples.vm.onPageSizeChange();
+    await flushPromises();
+    expect(request.mock.calls.filter(([config]) => config.url.endsWith('/sample-fulfillments/') && config.params?.page_size).at(-1)[0].params).toMatchObject({ page: 1, page_size: 200, search: 'synthetic' });
+    samples.unmount();
+  });
+
+  it('exposes copy only for managers and nondeleted rows', async () => {
+    const source = await import('../src/views/influencers/OutreachTaskList.vue?raw');
+    expect(source.default).toContain('v-if="TASK_REUSE_ENABLED && !row.is_deleted"');
+    expect(source.default).toContain(':disabled="!canManage" @click.stop="openReuse(row)"');
+    expect(source.default).toContain('const TASK_REUSE_ENABLED = true;');
+  });
   it('reuses editable task details without copying task identity, state or progress', async () => {
     const wrapper = render(OutreachTaskList);
     await flushPromises();

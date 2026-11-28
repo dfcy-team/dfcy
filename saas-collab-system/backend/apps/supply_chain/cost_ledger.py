@@ -29,7 +29,12 @@ def fingerprints_for_entries(entries):
     ids = {pk for group in quantities.values() for pk in group}
     lines = list(ShipmentLine.objects.filter(tenant_id=entries[0].tenant_id, is_active=True).filter(
         Q(pk__in=ids) | Q(shipment_id__in=shipments)).select_related('shipment').order_by('pk'))
-    grouped = {key: [line for line in lines if (line.shipment_id == key[1] if key[0] == 'shipment' else line.pk in quantities.get(key[1], {}))] for key in owners}
+    by_shipment, by_id = {}, {}
+    for line in lines:
+        by_shipment.setdefault(line.shipment_id, []).append(line)
+        by_id[line.pk] = line
+    grouped = {key: by_shipment.get(key[1], []) if key[0] == 'shipment' else
+        [by_id[pk] for pk in sorted(quantities.get(key[1], {})) if pk in by_id] for key in owners}
     inbounds, inbound_lines, terminations = {}, {}, {}
     for row in InboundOrder.objects.filter(batch_id__in=batches).order_by('pk'):
         inbounds.setdefault(row.batch_id, []).append(row)
@@ -194,7 +199,10 @@ def serialize_many(entries, fingerprints):
     from django.db.models import Q
     from .models import SettlementRecord, PaymentRecord, PaymentApplication
     entries = list(entries)
-    missing_fingerprints = [entry for entry in entries if
+    # Historical/inactive owners never use fingerprint status validation in serialize().
+    missing_fingerprints = [entry for entry in entries if not entry.has_newer and
+        ((entry.cost_version.batch_id and entry.cost_version.batch.status == 'active' and entry.in_owner_batch) or
+         (entry.cost_version.shipment_id and entry.cost_version.shipment.status == 'submitted' and not entry.has_active_batch)) and
         (('batch', entry.cost_version.batch_id) if entry.cost_version.batch_id else
          ('shipment', entry.cost_version.shipment_id)) not in fingerprints]
     if missing_fingerprints:

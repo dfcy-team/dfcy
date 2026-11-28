@@ -17,10 +17,12 @@
           </div>
           <button class="balance" @click="openGroup(key)"><small>剩余应付</small><strong>{{money(key==='supplier'?data.groups[key].payable_amount:data.groups[key].unsettled)}}</strong><small v-if="key==='deposit'">可用余额 {{money(data.groups[key].available_prepayment??data.groups[key].available)}}</small></button>
           <p v-if="key==='supplier'" class="hint">采购待核对 {{data.groups[key].purchase_unknown_documents||0}} 张 · 发货待核对 {{data.groups[key].unknown_documents||0}} 张 · 待核对付款 {{money(data.groups[key].unknown_payment_amount)}} · 预付余额 {{money(data.groups[key].advance_balance)}}</p><p v-else class="hint">待核对 {{data.groups[key].unknown_documents||0}} 张 · 超额 {{money(data.groups[key].over_recorded)}}</p>
+          <p v-if="key==='domestic'" class="hint">{{currencyDescription(data.groups[key])}}<span v-if="data.groups[key].mixed_currency || data.groups[key].unresolved_currency_nonzero"> · 原币总额：{{currencyBreakdown(data.groups[key], 'amount')}}</span></p>
           <details><summary>未结金额排行 · 前 10</summary><div class="ranking-scroll"><el-table :data="data.groups[key].ranking||[]" border>
             <el-table-column label="供应商 / 货运公司" min-width="160"><template #default="{row}"><el-button v-if="row.party_id||row.id" link type="primary" @click="openGroup(key,row)">{{row.name}}</el-button><span v-else>未选择国内承运商</span></template></el-table-column>
             <template v-if="key==='supplier'"><el-table-column label="总采购金额" min-width="130"><template #default="{row}">{{money(row.purchase_total_amount)}}</template></el-table-column><el-table-column label="总发货金额" min-width="130"><template #default="{row}">{{money(row.shipment_total_amount)}}</template></el-table-column></template>
-            <el-table-column v-else :label="totalLabels[key]" min-width="130"><template #default="{row}">{{money(row.amount)}}</template></el-table-column>
+            <el-table-column v-if="key==='domestic'" label="币种" min-width="95"><template #default="{row}">{{row.currency || '待核对'}}</template></el-table-column>
+            <el-table-column v-if="key!=='supplier'" :label="totalLabels[key]" min-width="130"><template #default="{row}">{{money(row.amount)}}</template></el-table-column>
             <el-table-column label="已付款金额" min-width="130"><template #default="{row}">{{money(row.cash_paid_amount)}}</template></el-table-column>
             <el-table-column v-if="key==='deposit'" label="已抵扣" min-width="110"><template #default="{row}">{{money(row.applied)}}</template></el-table-column>
             <el-table-column v-if="key==='deposit'" label="可用余额" min-width="110"><template #default="{row}">{{money(row.available_prepayment??row.available)}}</template></el-table-column>
@@ -32,8 +34,9 @@
       <SupplierDepositLedgerV2 class="summary-card" :country-id="country" />
     </div>
     <section v-if="opened" class="document-list">
-      <h3>{{labels[queue]}} · {{partyName||'全部往来单位'}}单据</h3><el-button @click="openMonthly(queue,partyId,partyName,monthlyPartyType)">月份对账</el-button><el-button v-if="partyId && queue!=='deposit'" type="primary" @click="goPay(queue,partyId,partyName)">批量申请付款</el-button>
+      <h3>{{labels[queue]}} · {{partyName||'全部往来单位'}}单据</h3><el-button @click="openMonthly(queue,partyId,partyName,monthlyPartyType)">月份对账</el-button><el-button v-if="partyId && queue!=='deposit'" type="primary" @click="goPay(queue,partyId,partyName,monthlyPartyType)">批量申请付款</el-button>
       <div class="filters"><el-select v-model="queue" aria-label="结算类别" @change="changeKind"><el-option v-for="(label,key) in labels" :key="key" :value="key" :label="label"/></el-select><el-select v-model="status" aria-label="结算状态" @change="resetList"><el-option label="全部单据" value="all"/><el-option label="待核对 / 未结清" value="pending"/><el-option label="已结清" value="settled"/></el-select><el-input v-model="search" clearable placeholder="单号 / 供应商 / 货运公司" @keyup.enter="resetList"/><el-button @click="resetList">查询</el-button><el-button v-if="partyId" @click="clearParty">清除单位筛选</el-button></div>
+      <p v-if="queue==='domestic' && listSummary" class="hint">{{currencyDescription(listSummary)}} · 原币应付：{{currencyBreakdown(listSummary, 'due_amount')}} · 金额排序按币种分组。</p>
       <div v-if="listSummary" class="metrics query-totals"><span>查询范围 {{listSummary.documents}} 张 · 待核对 {{listSummary.unknown_documents}} 张</span><span v-for="f in columns" :key="f.key">{{f.label}}<b>{{money(listSummary[f.key])}}</b></span><span v-if="queue==='deposit'">可用预付款<b>{{money(listSummary.available_prepayment)}}</b></span></div>
       <div class="filters"><el-select v-model="paymentNature" aria-label="实际付款性质" clearable placeholder="全部实际付款性质" @change="resetList"><el-option label="含对公付款" value="corporate"/><el-option label="含对私付款" value="personal"/><el-option label="对公对私混合付款" value="mixed"/><el-option label="未付款或含未分类已付" value="unknown"/></el-select><el-select v-if="['carrier','clearance'].includes(queue)" v-model="itemStatus" aria-label="费用项目付款状态" @change="resetList"><el-option label="按已付款记录筛选" value=""/><el-option label="全部费用项目" value="all"/><el-option label="未付款项目" value="unpaid"/><el-option label="部分付款项目" value="partial"/><el-option label="已结清项目" value="settled"/></el-select><el-input v-model="paymentItem" clearable :placeholder="itemStatus?'费用项目名称':'已付费用项目名称'" @keyup.enter="resetList"/><el-button @click="resetList">筛选付款</el-button></div>
       <p class="hint">付款性质按有效付款时的收款账户统计；混合付款单可同时出现在对公、对私结果中。选择费用项目状态后，按当前费用明细及有效付款筛选，包含从未付款的项目；历史未分项付款不推定归属。筛选后金额仍为整单金额，未分类含历史期初，预付款抵扣不计入现金分类。</p>
@@ -43,7 +46,8 @@
       <el-table :data="rows" @sort-change="tableSortChanged" border v-loading="listLoading" empty-text="当前范围没有单据">
         <el-table-column prop="number" sortable="custom" label="单号" min-width="180"><template #header><span>单号</span></template><template #default="{row}"><el-button link type="primary" @click="emit('open',row)">{{row.number}}</el-button></template></el-table-column>
         <el-table-column prop="document_time" sortable="custom" label="单据时间" min-width="175"><template #header><span>单据时间</span></template><template #default="{row}">{{formatDocumentTime(row.document_time)}}</template></el-table-column>
-        <el-table-column prop="country_name" sortable="custom" label="国家" min-width="110"><template #header><span>国家</span></template></el-table-column><el-table-column prop="party_name" sortable="custom" label="供应商 / 货运公司" min-width="150"><template #header><span>供应商 / 货运公司</span></template><template #default="{row}"><el-button v-if="row.party_id" link type="primary" @click="openGroup(queue,{party_id:row.party_id,name:row.party_name})">{{row.party_name}}</el-button><span v-else>{{row.party_name}}</span></template></el-table-column>
+        <el-table-column prop="country_name" sortable="custom" label="国家" min-width="110"><template #header><span>国家</span></template></el-table-column><el-table-column prop="party_name" sortable="custom" label="供应商 / 货运公司" min-width="150"><template #header><span>供应商 / 货运公司</span></template><template #default="{row}"><el-button v-if="row.party_id" link type="primary" @click="openGroup(queue,{party_id:row.party_id,name:row.party_name,party_type:row.party_type})">{{row.party_name}}</el-button><span v-else>{{row.party_name}}</span></template></el-table-column>
+        <el-table-column v-if="queue==='domestic'" label="币种" min-width="160"><template #default="{row}"><div>{{row.currency || '待核对'}}</div><small v-if="row.monetary_currency_conflict" class="hint">{{currencyEvidence(row)}}</small></template></el-table-column>
         <el-table-column v-for="f in columns" :key="f.key" :prop="f.key" sortable="custom" :label="f.label" min-width="125"><template #header><span>{{f.label}}</span></template><template #default="{row}">{{money(row[f.key])}}</template></el-table-column>
         <el-table-column label="实际付款构成" min-width="185">
           <template #default="{row}">
@@ -52,7 +56,8 @@
             <el-button v-if="isNonzero(row.unknown_paid)" link type="primary" @click="openPayment(row)">
               待确认付款性质 {{money(row.unknown_paid)}}
             </el-button>
-            <template v-if="!isNonzero(row.corporate_paid) && !isNonzero(row.personal_paid) && !isNonzero(row.unknown_paid)">
+            <el-button v-if="row.monetary_currency_conflict" link type="primary" @click="openPayment(row)">付款币种待核对</el-button>
+            <template v-else-if="!isNonzero(row.corporate_paid) && !isNonzero(row.personal_paid) && !isNonzero(row.unknown_paid)">
               <el-button v-if="row.has_payment_history" link type="primary" @click="openPayment(row)">净付款 0.00</el-button>
               <span v-else>暂无付款</span>
             </template>
@@ -87,6 +92,9 @@ const props=defineProps({overview:Object,countryId:[String,Number]});
 const emit=defineEmits(['open']);
 const reminders=ref(null),receiptDifferencesOpen=ref(false);
 const monthlyOpen=ref(false),monthlyQueue=ref('supplier'),monthlyPartyId=ref(null),monthlyPartyName=ref(''),monthlyPartyType=ref('');
+function currencyDescription(value){if(value?.mixed_currency)return '不同币种分别汇总，合计待核对（未换算）';if(value?.unresolved_currency_nonzero)return '存在币种待核对的非零金额，合计待核对';return value?.currency?`原币：${value.currency}（未换算）`:'原币金额（未换算）';}
+function currencyEvidence(row){const due=row.original_due||{};const label=row.payment_currency_evidence_sources?.includes('legacy_confirmation')?'付款币种（含历史确认）':'入账原币';return `应付原币 ${due.currency||'待核对'} ${money(due.amount)}；${label} ${currencyBreakdown({totals_by_currency:row.payment_totals_by_currency},'paid_amount')}；余额待核对`; }
+function currencyBreakdown(value,field){return Object.entries(value?.totals_by_currency||{}).map(([unit,totals])=>`${unit==='UNKNOWN'?'币种待核对':unit} ${money(totals[field])}`).join('；')||'0';}
 const router=useRouter(),route=useRoute(),batchParty=ref(null),batchRequestId=ref(null);
 function goPay(queue,id,name,partyType=''){const partyKind=queue==='supplier'||(queue==='domestic'&&partyType==='supplier')?'supplier':'freight_company';if(props.overview){router.push({path:'/supply-chain/costs',query:{tab:'reconciliation',party_kind:partyKind,party_id:id,party_name:name||''}});return;}batchParty.value={kind:partyKind,id,name};batchRequestId.value=null;}
 watch(()=>route?.fullPath,()=>{const q=route?.query||{};if(['supplier','freight_company'].includes(q.party_kind)&&/^\d+$/.test(String(q.party_id)))batchParty.value={kind:q.party_kind,id:Number(q.party_id),name:q.party_name||''};if(/^\d+$/.test(String(q.payment_batch_id)))batchRequestId.value=Number(q.payment_batch_id);},{immediate:true});

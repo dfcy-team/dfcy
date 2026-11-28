@@ -44,7 +44,7 @@
       <p>默认汇总同店铺、同币种、同时区的已存广告户报表，不要求配置主广告户。收入及订单为广告报表口径合计，不代表跨广告户去重的商城成交。ROI=收入合计/消耗合计；不同平台店铺身份、币种、时区分开，不与 BASIC 或商城 GMV 相加。</p>
       <TikTokGmvCampaignDrilldown v-if="performance" ref="campaignDrilldown" :subjects="report.selected_subjects" :date-from="report.date_from || from" :date-to="report.date_to || to" :advertiser-id="advertiser" />
       <h2>广告户每日明细与来源</h2>
-      <el-table :data="report.gmv_max_snapshots || []" border :empty-text="report.gmv_max_snapshots === null ? 'GMV Max 快照过多，缩小日期范围或店铺后重试；当前不显示金额。' : '尚无 GMV Max 快照，不代表零消耗。'">
+      <PagedReportTable :data="report.gmv_max_snapshots || []" border :empty-text="report.gmv_max_snapshots === null ? 'GMV Max 快照过多，缩小日期范围或店铺后重试；当前不显示金额。' : '尚无 GMV Max 快照，不代表零消耗。'">
         <el-table-column prop="date" label="日期" />
         <el-table-column prop="store_code" label="店铺" />
         <el-table-column prop="advertiser_name" label="广告户名称" />
@@ -57,7 +57,7 @@
         <el-table-column label="平均订单成本" :formatter="row => advertisingRatio(row.cost, row.orders)" />
         <el-table-column prop="campaign_count" label="计划数" />
         <el-table-column prop="timezone" label="报表时区" />
-      </el-table>
+      </PagedReportTable>
       <h3>当前店铺授权核验（不倒推历史）</h3>
       <el-table :data="report.gmv_max_relationships || []" border max-height="360" empty-text="尚无成功的 API 关联核验记录；不会根据时区或名称猜测。">
         <el-table-column prop="store_code" label="店铺" />
@@ -70,7 +70,7 @@
         <el-table-column prop="observed_at" label="核验时间（含时区）" min-width="240" />
       </el-table>
       <h3>广告户每日采集状态</h3>
-      <el-table :data="report.gmv_max_collection_days || []" border max-height="420" empty-text="暂无采集状态证据；不能判断为无广告数据。">
+      <PagedReportTable :data="report.gmv_max_collection_days || []" border max-height="420" empty-text="暂无采集状态证据；不能判断为无广告数据。">
         <el-table-column prop="store_code" label="店铺" />
         <el-table-column prop="advertiser_id" label="广告户 ID" min-width="180" />
         <el-table-column prop="date" label="日期" min-width="120" />
@@ -78,7 +78,7 @@
           <el-tag :type="row.status === 'failed' ? 'danger' : row.status === 'not_collected' ? 'warning' : 'success'">{{ collectionLabels[row.status] || '待核验' }}</el-tag>
         </template></el-table-column>
         <el-table-column label="原因" min-width="200"><template #default="{ row }">{{ collectionErrors[row.error_code] || (row.error_code ? '校验或采集失败，需检查同步记录' : '—') }}</template></el-table-column>
-      </el-table>
+      </PagedReportTable>
       <el-alert v-for="warning in report.warnings" :key="warning" :title="warningLabels[warning] || warning" type="warning" :closable="false" show-icon class="notice" />
       <el-table :data="report.selected_subjects" border class="notice" empty-text="无可见账户">
         <el-table-column prop="store_code" label="店铺" />
@@ -94,11 +94,15 @@
 
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { ElTable } from 'element-plus';
 import AppPage from './AppPage.vue';
 import TikTokGmvCampaignDrilldown from './TikTokGmvCampaignDrilldown.vue';
 import { fetchTikTokDailySpend } from '../api/advertising';
 import { advertisingRatio } from '../utils/advertisingRatio';
 import { gmvCoverageLabel } from '../utils/gmvCoverageLabel';
+import { pagedTable } from '../utils/gmvReportTable';
+
+const PagedReportTable = pagedTable(ElTable);
 
 const props = defineProps({ active: { type: Boolean, default: false }, performance: Boolean });
 const campaignDrilldown = ref(null);
@@ -160,8 +164,8 @@ async function load(page = 1) {
   const requestSequence = sequence;
   if (page === 1) {
     const days = (Date.parse(to.value) - Date.parse(from.value)) / 86400000;
-    if (!Number.isFinite(days) || days < 0 || days >= 31) {
-      error.value = '请选择明确的 1 至 31 天日期范围。';
+    if (!Number.isFinite(days) || days < 0 || days >= 90) {
+      error.value = '请选择明确的 1 至 90 天日期范围。';
       return;
     }
     appliedQuery = { date_from: from.value, date_to: to.value,

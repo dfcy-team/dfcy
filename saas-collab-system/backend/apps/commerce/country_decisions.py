@@ -361,6 +361,31 @@ def _country_inventory_source(actor, country, now):
     return source.filter(source_run_id__in=run_ids, warehouse_id__in=warehouse_ids)
 
 
+def _best_country_inventory_source(actor, country, now, country_warehouses):
+    """Resolve BEST's joined tenant/provider dimensions with bounded ID lists."""
+    run_ids = list(SyncRun.objects.filter(
+        tenant_id=actor.tenant_id, sync_job__tenant_id=actor.tenant_id,
+        sync_job__integration_config__tenant_id=actor.tenant_id,
+        sync_job__resource_type='inventory_snapshot',
+        sync_job__integration_config__platform=BEST,
+    ).values_list('pk', flat=True)[:2001])
+    warehouse_ids = list(country_warehouses.values_list('pk', flat=True)[:1001])
+    source = InventorySnapshot.objects.filter(tenant_id=actor.tenant_id, snapshot_at_utc__lte=now)
+    if not run_ids or not warehouse_ids:
+        return source.none()
+    if len(run_ids) > 2000 or len(warehouse_ids) > 1000:
+        return _provider_facts(actor, (BEST,)).filter(
+            warehouse__in=country_warehouses, snapshot_at_utc__lte=now)
+    return source.filter(source_run_id__in=run_ids, warehouse_id__in=warehouse_ids)
+
+
+def _latest_country_inventory_for_provider(provider, source):
+    from apps.sales_management.inventory_queries import latest_country_inventory, materialized_latest_inventory
+    if provider == BEST:
+        return materialized_latest_inventory(source)
+    return latest_country_inventory(source)
+
+
 def sales_platform_options(actor, country):
     """Platform names available from this actor's authorized active country stores."""
     require_metrics(actor)
@@ -381,7 +406,6 @@ def _inventory_identity(actor, country):
 
 def inventory_context_for(actor, country, *, include_best=False, permission_cache=None, sku_ids=None, now=None):
     """Read each provider's latest identities before checking product mappings."""
-    from apps.sales_management.inventory_queries import latest_country_inventory
     require_metrics(actor, permission_cache)
     branches = _inventory_branches(actor, permission_cache, include_best=include_best)
     now = now or timezone.now()
@@ -393,7 +417,7 @@ def inventory_context_for(actor, country, *, include_best=False, permission_cach
     for provider in sorted(providers):
         provider_branches = [branch for branch in branches if provider in branch.providers]
         source = (_country_inventory_source(actor, country, now) if provider == JIFENG else
-                  _provider_facts(actor, (BEST,)).filter(warehouse__in=country_warehouses, snapshot_at_utc__lte=now))
+                  _best_country_inventory_source(actor, country, now, country_warehouses))
         envelope, mapped = Q(pk__in=[]), Q(pk__in=[])
         for branch in provider_branches:
             source_filter = branch.source_filter()
@@ -403,7 +427,7 @@ def inventory_context_for(actor, country, *, include_best=False, permission_cach
             mapped |= (source_filter & branch.product_filter(inventory=True)) or Q(pk__isnull=False)
         if not any(not branch.source_filter() for branch in provider_branches):
             source = source.filter(envelope)
-        raw = latest_country_inventory(source)
+        raw = _latest_country_inventory_for_provider(provider, source)
         facts = raw.order_by().values('warehouse_id', 'site_code').annotate(
             unmapped_count=Count('pk', filter=Q(internal_sku__isnull=True)))
         for fact in facts:

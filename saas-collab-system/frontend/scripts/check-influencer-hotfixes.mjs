@@ -8,9 +8,9 @@ export function checkInfluencerHotfixes({ frontendRoot, backendRoot }) {
   const required = [
     [frontendRoot, 'src/views/influencers/OutreachTaskList.vue', [
       "import PriorityTaskCarousel from './PriorityTaskCarousel.vue'", '<PriorityTaskCarousel ', "priority_only: 'true'",
-      'async function openDetail(', 'detailVisible.value = true',
+      'async function openDetail(', 'detailVisible.value = true', 'paused_from_pending', 'pending: [\'in_progress\', \'paused\', \'cancelled\']',
     ]],
-    [frontendRoot, 'src/views/influencers/PriorityTaskCarousel.vue', ['上一条重点任务', '下一条重点任务', 'class="task"']],
+    [frontendRoot, 'src/views/influencers/PriorityTaskCarousel.vue', ['上一组重点任务', '下一组重点任务', 'const pageSize = 3;', 'class="task"', 'visibleTasks']],
     [frontendRoot, 'src/views/influencers/InfluencerRequirements.vue', ['type="file"', 'new FormData()', "data.append('images'", 'fetchApiFile(']],
     [backendRoot, 'apps/influencers/requirement_feedback.py', ['class InfluencerRequirementImageView', 'scoped_requirements(request.user)', 'transaction.atomic()', 'image_content(upload)']],
     [backendRoot, 'apps/influencers/views.py', ['"priority_only"', '"priority_tasks"']],

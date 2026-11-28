@@ -547,6 +547,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             "product_match_source", "product_matched_at", "priority", "target_count", "linked_count", "dispatcher_id",
             "owner", "owner_name", "owners", "owner_names", "dispatcher_name", "source_owner_name_snapshot", "source_dispatcher_name_snapshot",
             "dispatch_time", "outreach_at", "status", "started_at", "finalized_at",
+            "paused_from_pending",
             "is_deleted", "deleted_at", "source", "external_id", "version", "notes", "dispatch_requirements",
             "sample_status_summary", "sample_fulfillment_status_summary", "sample_fulfillment_count",
             "sample_fulfillment_influencer_count",
@@ -555,7 +556,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
         )
         read_only_fields = (
             "id", "tenant_id", "task_no", "dispatcher_id", "linked_count", "status", "dispatch_time", "outreach_at",
-            "started_at", "finalized_at", "product_matched_at", "is_deleted", "deleted_at", "version",
+            "started_at", "finalized_at", "product_matched_at", "is_deleted", "deleted_at", "version", "paused_from_pending",
             "source_owner_name_snapshot", "source_dispatcher_name_snapshot", "created_at", "updated_at",
         )
 
@@ -683,6 +684,15 @@ class SampleItemSerializer(serializers.ModelSerializer):
         return value.strip() or None if value is not None else None
 
 
+class SampleCompletionListSerializer(serializers.ListSerializer):
+    def to_representation(self, data):
+        from django.db.models.manager import BaseManager
+        from .sample_completion_evidence import attach_completion_evidence
+        rows = list(data.all() if isinstance(data, BaseManager) else data)
+        attach_completion_evidence(rows)
+        return super().to_representation(rows)
+
+
 class SampleFulfillmentSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(read_only=True)
     outreach_task = serializers.PrimaryKeyRelatedField(
@@ -718,6 +728,16 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
     deleted_by_name = serializers.SerializerMethodField()
     video_match_count = serializers.SerializerMethodField()
     video_matches = serializers.SerializerMethodField()
+    completion_evidence = serializers.SerializerMethodField()
+
+    def get_completion_evidence(self, obj):
+        if obj.status != 'completed':
+            return None
+        if getattr(obj, '_completion_evidence_version', None) != obj.version:
+            from .sample_completion_evidence import attach_completion_evidence
+            attach_completion_evidence([obj])
+        return obj._completion_evidence
+
 
     @staticmethod
     def _display_name(value):
@@ -808,6 +828,7 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
         return attrs
 
     class Meta:
+        list_serializer_class = SampleCompletionListSerializer
         model = SampleFulfillment
         fields = (
             "id", "tenant_id", "fulfillment_no", "type_no", "outreach_task", "outreach_task_no", "outreach_task_name", "outreach_task_priority",
@@ -817,7 +838,7 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
             "product_name_snapshot", "external_product_id", "sample_order_no",
             "link_type", "quick_tags", "sample_sent_at", "shipped_at", "video_deadline_at", "status", "source", "external_id", "version",
             "notes", "finalized_at", "sku_quantity", "calculated_cost",
-            "is_deleted", "deleted_at", "deleted_by", "deleted_by_name", "video_match_count", "video_matches",
+            "is_deleted", "deleted_at", "deleted_by", "deleted_by_name", "video_match_count", "video_matches", "completion_evidence",
             "items", "created_at", "updated_at",
         )
         read_only_fields = (

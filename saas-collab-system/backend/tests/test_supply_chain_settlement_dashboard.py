@@ -45,10 +45,10 @@ def test_dashboard_domestic_freight_is_separate_and_unselected_carrier_is_visibl
     shipment = save_domestic_transport(buyer, shipment.pk, {'expected_version':shipment.version,
         'domestic_carrier_id':carrier.pk,'domestic_tracking_number':''}, 'set-domestic-carrier')
     shipment = mark(buyer, shipment)
-    fee(api, 'shipment', shipment, '6')
+    fee(api, 'shipment', shipment, '6', cost_exchange={'currency': 'CNY'})
     with domain_write():
         PaymentRecord.objects.create(tenant=world['tenant'], created_by=buyer, shipment=shipment,
-            amount=Decimal('4'), purpose='domestic_freight', date='2026-10-14', idempotency_key='domestic-cash')
+            amount=Decimal('4'), purpose='domestic_freight', date='2026-10-14', idempotency_key='domestic-cash', account_snapshot={'currency': 'CNY'})
     base = api.get(BASE + 'dashboard/?section=costs').data['data']['groups']
     assert Decimal(base['supplier']['paid']) == 0
     assert Decimal(base['domestic']['paid']) == 4

@@ -1,3 +1,4 @@
+from .permissions import IsProductCategoryStyleReadOrManage
 import hashlib
 import csv
 import io
@@ -530,7 +531,7 @@ def product_category_detail(request, pk):
 
 
 @api_view(["GET", "PUT"])
-@permission_classes([IsMasterdataSettingsReadOrManage])
+@permission_classes([IsProductCategoryStyleReadOrManage])
 def product_category_background_colors(request):
     queryset = ProductCategory.objects.filter(
         tenant=request.user.tenant,
