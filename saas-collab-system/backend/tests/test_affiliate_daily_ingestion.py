@@ -182,14 +182,15 @@ def test_newer_unknown_amounts_do_not_erase_known_and_late_refund_creates_revisi
     assert row.settlement_status == "\u4e0d\u7b26\u5408\u6761\u4ef6" and AffiliateOrderRevision.objects.count() == 1
 
 
-def test_ambiguous_or_changed_creator_cannot_reassociate(trial):
+def test_creator_account_change_with_newer_platform_evidence_is_revised(trial):
     write(trial, fetch(trial))
     trial.adapter.scope["affiliate_plan"]["snapshot_source"] = "changed-source"
     page = fetch(trial, [order(creator_username="different-creator")])
-    with pytest.raises(ReadonlyConfigurationError, match="PROTECTED_IDENTITY"):
-        write(trial, page)
-    assert AffiliateOrderSnapshot.objects.get().creator_username == "creator-account"
-    assert not AffiliateOrderRevision.objects.exists()
+    assert write(trial, page)[0]["action"] == "updated"
+    row = AffiliateOrderSnapshot.objects.get()
+    assert row.creator_username == "different-creator"
+    revision = AffiliateOrderRevision.objects.get()
+    assert revision.order_snapshot_id == row.pk
 
 
 def test_raw_envelope_cannot_bypass_complete_day_proof(trial):
