@@ -7,10 +7,10 @@ import { pathToFileURL } from 'node:url';
 export function checkInfluencerHotfixes({ frontendRoot, backendRoot }) {
   const required = [
     [frontendRoot, 'src/views/influencers/OutreachTaskList.vue', [
-      "import PriorityTaskCarousel from './PriorityTaskCarousel.vue'", '<PriorityTaskCarousel ', "priority_only: 'true'",
+      "import PriorityTaskCarousel from './PriorityTaskCarousel.vue'", '<PriorityTaskCarousel ', "recent_requirements: 'true'",
       'async function openDetail(', 'detailVisible.value = true',
     ]],
-    [frontendRoot, 'src/views/influencers/PriorityTaskCarousel.vue', ['上一条重点任务', '下一条重点任务', 'class="task"']],
+    [frontendRoot, 'src/views/influencers/PriorityTaskCarousel.vue', ['上一组重点任务', '下一组重点任务', 'class="task"']],
     [frontendRoot, 'src/views/influencers/InfluencerRequirements.vue', ['type="file"', 'new FormData()', "data.append('images'", 'fetchApiFile(']],
     [backendRoot, 'apps/influencers/requirement_feedback.py', ['class InfluencerRequirementImageView', 'scoped_requirements(request.user)', 'transaction.atomic()', 'image_content(upload)']],
     [backendRoot, 'apps/influencers/views.py', ['"priority_only"', '"priority_tasks"']],
