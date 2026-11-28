@@ -91,7 +91,7 @@ def test_details_reuse_original_scope_and_settings_change_invalidates_result(con
     job = first.data['data']['job']['id']
     run_calculation(job)
     response = client.get(URL + 'query-detail/', {'query_context': job, 'row_key': 'test', 'kind': 'sales',
-                                                'filter_store': '9999999', 'filter_month': '2025-01'})
+                                                'filter_store': '9999999', 'filter_month': '2025-01', 'include_records': 1})
     assert response.status_code == 202
     detail = FinanceSummaryCalculation.objects.get(pk=response.data['data']['job']['id'])
     assert detail.request['filters']['month'] == '2026-10'
@@ -101,6 +101,28 @@ def test_details_reuse_original_scope_and_settings_change_invalidates_result(con
     run_calculation(detail.pk)
     detail.refresh_from_db()
     assert detail.status == 'superseded'
+
+
+def test_composition_is_read_from_parent_without_a_new_calculation(context, monkeypatch):
+    client, _, _, state = context
+    composition = {'title': '销售额 · 构成', 'amount': '100.000000', 'rate': '100.00%',
+                   'parts': [{'label': '商品金额', 'amount': '100.000000', 'rate': '100.00%'}],
+                   'records': [], 'records_total': 200}
+    monkeypatch.setattr('apps.finance.summary_read_query.execute',
+        Mock(return_value={'rows': [{'key': 'test', 'compositions': {'sales': composition}}], 'total': 1}))
+    job = client.get(URL + 'query/', {'filter_month': '2026-10'}).data['data']['job']['id']
+    run_calculation(job)
+    count = FinanceSummaryCalculation.objects.count()
+    for kind in ['sales', 'rate:sales']:
+        response = client.get(URL + 'query-detail/', {'query_context': job, 'row_key': 'test', 'kind': kind})
+        assert response.status_code == 200
+        assert response.data['data']['parts'] == composition['parts']
+        assert response.data['data']['query_context'] == job
+        assert FinanceSummaryCalculation.objects.count() == count
+    assert client.get(URL + 'query-detail/', {'query_context': job, 'row_key': 'foreign', 'kind': 'sales'}).status_code == 400
+    state.revision += 1
+    state.save()
+    assert client.get(URL + 'query-detail/', {'query_context': job, 'row_key': 'test', 'kind': 'sales'}).status_code == 400
 
 
 def test_view_switch_preserves_the_explicit_refresh_snapshot(context, monkeypatch):
@@ -131,6 +153,7 @@ def test_switching_views_cannot_keep_an_old_source_generation_alive(context, mon
 
 
 def test_source_materialization_is_reused_across_views_and_pages(context, monkeypatch):
+    from types import SimpleNamespace
     from apps.finance.summary_read_query import seed_for
     from apps.finance.summary_service import private_root
     _, user, dataset, _ = context
@@ -139,13 +162,18 @@ def test_source_materialization_is_reused_across_views_and_pages(context, monkey
     collect = Mock(return_value=source)
     monkeypatch.setattr('apps.finance.summary_database.collect', collect)
     monkeypatch.setattr('apps.finance.summary_database_document.render', lambda template, source, **kwargs: '<html>synthetic</html>')
-    native = Mock(return_value={'rows': []})
+    native = Mock(side_effect=lambda *a: {'rows': []})
     monkeypatch.setattr('apps.finance.summary_native.query', native)
+    monkeypatch.setattr('apps.finance.summary_read_query.time', SimpleNamespace(monotonic=Mock(side_effect=[10,10.12,10.2])))
     spec = {'scope': {'from': '2026-10-01', 'to': '2026-10-31', 'stores': dataset.metadata['store_ids']},
             'settings': None, 'generation': 1, 'refresh': False}
-    execute(seed, user, {'_database_query': spec, 'view': 'store'})
-    execute(seed, user, {'_database_query': spec, 'view': 'order', 'page': 2})
+    first = execute(seed, user, {'_database_query': spec, 'view': 'store'})
+    second = execute(seed, user, {'_database_query': spec, 'view': 'order', 'page': 2})
     assert collect.call_count == 1 and native.call_count == 2
+    assert first['source_cache_reused'] is False and second['source_cache_reused'] is True
+    assert first['source_collect_ms'] == second['source_collect_ms'] == 120
+    assert first['source_document_ms'] == second['source_document_ms'] == 80
+    assert first['source_read_ms'] == 200
     assert gzip.decompress(next(private_root().glob('read-query-*.html.gz')).read_bytes()) == b'<html>synthetic</html>'
 
 
@@ -328,6 +356,8 @@ def test_native_historical_title_keeps_first_item_across_order_read_batches(cont
         raw_status='completed', normalized_status='completed', status_mapping_version='test',
         created_at_utc=stamp, updated_at_utc=stamp, business_date='2026-08-01', currency=store.currency,
         payload_hash='e'*64) for i in range(501)])
+    orders = list(SalesOrder.objects.filter(tenant=user.tenant, store=store,
+        external_order_id__startswith='title-order-').order_by('pk'))
     for order, title in [(orders[-1], 'Earlier source title'), (orders[0], 'Later source title')]:
         SalesOrderItem.objects.create(sales_order=order, external_line_id='title-line', platform_product_id='missing-title-product',
             item_name_snapshot=title, quantity=1, currency=store.currency)
@@ -354,6 +384,7 @@ def test_chunked_query_document_matches_existing_renderer_bytes(context, tmp_pat
     path = tmp_path/'query.html.gz'
     digest = write_document(path, template, source)
     assert gzip.decompress(path.read_bytes()) == expected
+    assert path.read_bytes()[8] == 4  # gzip XFL marks fast compression.
     assert digest == hashlib.sha256(expected).hexdigest()
 
 
@@ -381,3 +412,12 @@ def test_source_child_protocol_is_bounded_and_fail_closed(monkeypatch, reply, re
     assert args[0][1:] == ['-m', 'apps.finance.summary_source_worker']
     assert json.loads(options['input']) == request
     assert options['timeout'] == 600 and options['stderr'] == subprocess.DEVNULL
+
+
+def test_source_child_timeout_preserves_cloud_timeout_result(monkeypatch):
+    import subprocess
+    from apps.finance.summary_read_query import SourceReadTimeout
+    monkeypatch.setattr('apps.finance.summary_read_query.subprocess.run',
+        Mock(side_effect=subprocess.TimeoutExpired('synthetic-source',600)))
+    with pytest.raises(SourceReadTimeout):
+        launch_process({'user':1,'tenant':1,'scope':{'stores':[2]}})

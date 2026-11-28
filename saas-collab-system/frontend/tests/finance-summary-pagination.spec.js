@@ -7,7 +7,7 @@ const {micro,fixed}=require('../../backend/apps/finance/summary_allocation.cjs')
 function session(){
  const facts=[1,2].map(id=>({source_id:'sale:'+id,store_id:id,store_code:'S'+id,country:'PH',external_order_id:'order'+id,kind:'sales',amount:String(id*100),currency:'PHP',date:'2026-09-01',month:'2026-09'}));
  return {countries:{PH:'菲律宾'},labels:{sales:'销售额'},counted:()=>true,
-  c:{HTML2_STORE_HIERARCHY:{setMode(){}},LEDGER_FEES:{editable:()=>false}},
+  c:{HTML2_STORE_HIERARCHY:{setMode(){}},LEDGER_FEES:{editable:()=>false},FINANCE_COMPOSITION:{fromEntries:(rows,target)=>[{label:'原额',amount:target}]}},
   p:{micro,fixed,localFact:f=>f,matches:(f,filters)=>!filters.month||f.month===filters.month,entriesFor:()=>facts,
    groupRows:rows=>rows.map(f=>({...f,cells:{sales:{amount:micro(f.amount),entries:[f]}}}))},
   rates:{fields:[],displayAmount:n=>n,read:vi.fn((g,k)=>({amount:g?.cells[k]?.amount??0n,partial:false})),profit:g=>g?.cells.sales.amount??0n},
@@ -64,4 +64,30 @@ it('构成来源每页50笔，保留全量构成、金额、总数及稳定来�
  expect(pages.map(p=>p.records.length)).toEqual([50,50,1]);
  expect(pages.flatMap(p=>p.records.map(r=>r.key))).toEqual(legacy.records.map(r=>r.key));
  for(const page of pages){expect(page.records_total).toBe(101);expect(page.parts).toEqual(legacy.parts);expect(page.amount).toBe(legacy.amount);}
+});
+
+it('只随当前页生成构成，子项合计和费率沿用本次汇总，原始记录不预载',()=>{
+ const s=session(),first=table(s,{view:'store',filters:{month:'2026-09'},page:1,page_size:1}),second=table(s,{view:'store',filters:{month:'2026-09'},page:2,page_size:1});
+ expect(first.rows).toHaveLength(1);expect(second.rows).toHaveLength(1);
+ for(const row of [...first.rows,...second.rows]){
+  const parts=row.compositions.sales;expect(parts.amount).toBe(row.values.sales);expect(parts.rate).toBe(row.rates.sales);expect(parts.parts[0].amount).toBe(row.values.sales);expect(parts.records).toEqual([]);expect(parts.records_total).toBe(1);
+  expect(Object.keys(row.compositions)).toHaveLength(16);
+ }
+ expect(first.rows[0].compositions.sales.amount).not.toBe(second.rows[0].compositions.sales.amount);
+});
+
+it('页尾构成复用汇总分组，不为每个科目重新扫描全部行',()=>{
+ const s=session(),filters={month:'2026-09'},readKey=vi.fn();
+ const groups=Array.from({length:500},(_,i)=>({get key(){readKey();return 'group:'+i;},
+  currency:'PHP',store_id:1,store_code:'S1',cells:{sales:{amount:micro('100'),entries:[]}}}));
+ s.queryGroup=JSON.stringify(['store',filters,'store']);
+ for(const mode of ['operations','finance'])s.queries.set(JSON.stringify(['store',filters,mode,'store']),groups);
+ const result=table(s,{view:'store',filters,page:25,page_size:20});
+ expect(result.rows).toHaveLength(20);expect(result.rows[0].key).toBe('group:480');
+ expect(readKey.mock.calls.length).toBeLessThan(5000);
+ const {detail}=require('../../backend/apps/finance/summary_native.cjs');
+ s.queryGroup=JSON.stringify(['store',filters,'store']);
+ for(const mode of ['operations','finance'])s.queries.set(JSON.stringify(['store',filters,mode,'store']),groups);
+ for(const [kind,parts] of Object.entries(result.rows[19].compositions))expect(parts).toEqual(detail(s,{
+  view:'store',filters,row_key:'group:499',kind,flow_page:1,cost_page:1,composition_only:true}));
 });

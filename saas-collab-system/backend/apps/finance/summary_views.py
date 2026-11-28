@@ -433,7 +433,7 @@ def summary_direct_detail(request):
     context = serializers.IntegerField(min_value=1).run_validation(request.query_params.get('query_context'))
     parent = get_object_or_404(FinanceSummaryCalculation, pk=context, tenant=request.user.tenant,
                              kind='query', status='ready')
-    job_data(parent, request.user)
+    parent_data = job_data(parent, request.user)
     dataset = current_dataset(parent)
     if not dataset or '_database_query' not in parent.request:
         raise ValidationError('查询来源或权限已变化，请重新查询汇总。')
@@ -441,6 +441,22 @@ def summary_direct_detail(request):
     detail.is_valid(raise_exception=True)
     if not detail.validated_data.get('row_key') or not detail.validated_data.get('kind'):
         raise ValidationError('请选择金额或费率。')
+    values = detail.validated_data
+    if not values.get('source_key') and values.get('cost_page', 1) == 1 and values.get('flow_page', 1) == 1 and request.query_params.get('include_records') != '1':
+        row = next((row for row in (parent_data.get('result') or {}).get('rows', [])
+                    if row.get('key') == values['row_key']), {})
+        kind = values['kind']
+        parts = row.get('compositions') or {}
+        composition = parts.get(kind) or parts.get(kind.removeprefix('rate:'))
+        if composition is None:
+            raise ValidationError('构成未随本次汇总生成，请重新查询汇总。')
+        result = {**composition, 'query_context': parent.pk}
+        if kind.startswith('rate:'):
+            result = {key: value for key, value in result.items() if key != 'cost'}
+            result.update(title='费率 · ' + result['title'], records=[], records_total=0)
+        response = success_response(result)
+        response['Cache-Control'] = 'no-store'
+        return response
     payload = {**logical_payload(parent.request), 'action': 'table_detail'}
     for key in ('row_key', 'kind', 'source_key', 'cost_page', 'flow_page'):
         if key in detail.validated_data:

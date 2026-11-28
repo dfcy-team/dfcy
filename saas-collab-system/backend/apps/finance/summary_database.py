@@ -270,16 +270,18 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
             ids = finance.filter(store_id=store_id, platform='shopee', raw_envelope_id__isnull=False).order_by().values_list('raw_envelope_id', flat=True).distinct()
             if connection.vendor == 'mysql':
                 upper = upper_value(finance.filter(store_id=store_id, platform='shopee'), 'raw_envelope_id')
-                last = 0
-                while upper is not None and last < upper:
-                    page = ids.filter(raw_envelope_id__gt=last, raw_envelope_id__lte=upper).order_by('raw_envelope_id')[:500]
-                    with connection.cursor() as cursor:
-                        cursor.execute(*read_sql(page))
-                        batch = cursor.fetchall()
-                    if not batch:
-                        break
-                    envelope_ids.update(row[0] for row in batch)
-                    last = batch[-1][0]
+                if upper is not None:
+                    from MySQLdb.cursors import SSCursor
+                    from django.db.backends.mysql.base import CursorWrapper
+                    last = None
+                    query = ids.filter(raw_envelope_id__lte=upper).order_by('raw_envelope_id')
+                    with connection.make_cursor(CursorWrapper(connection.connection.cursor(SSCursor))) as cursor:
+                        cursor.execute(*read_sql(query))
+                        while batch := cursor.fetchmany(500):
+                            envelope_ids.update(row[0] for row in batch)
+                            last = batch[-1][0]
+                    if last != upper:
+                        raise ValidationError('结算来源版本读取不完整，请重试；未生成部分账单。')
             else:
                 envelope_ids.update(ids)
         group_order = ['store_id', 'external_order_id', 'business_date', 'currency', 'pk']
@@ -301,26 +303,35 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                         yield FinanceRow(*values)
                     continue
                 upper = upper_value(query, 'id')
-                last = None
-                table = connection.ops.quote_name(query.model._meta.db_table)
-                while upper is not None:
-                    page = query.filter(pk__lte=upper)
-                    if last is not None:
-                        page = page.extra(where=[
-                            '(BINARY %s, %s, BINARY %s, %s) > (%%s, %%s, %%s, %%s)' %
-                            tuple(table + '.' + connection.ops.quote_name(name) for name in
-                                ('external_order_id', 'business_date', 'currency', 'id'))
-                        ], params=last)
-                    page = page[:500]
+                expected = 0
+                if upper is not None:
+                    sql, params = read_sql(query.filter(pk__lte=upper).order_by().values_list('pk'))
                     with connection.cursor() as cursor:
-                        cursor.execute(*read_sql(page))
-                        batch = cursor.fetchall()
-                    if not batch:
-                        break
-                    for values in batch:
-                        yield FinanceRow(*values)
-                    row = batch[-1]
-                    last = (row[3], row[2], row[7], row[0])
+                        cursor.execute('SELECT COUNT(*) FROM ('+sql+') AS finance_count', params)
+                        expected = cursor.fetchone()[0]
+                read_count, last = 0, None
+                if upper is not None:
+                    from MySQLdb.cursors import SSCursor
+                    from django.db.backends.mysql.base import CursorWrapper
+                    # Sort once on MySQL; the unbuffered driver retains only this chunk.
+                    # No database queries may run while these rows are being consumed.
+                    raw_cursor = CursorWrapper(connection.connection.cursor(SSCursor))
+                    with connection.make_cursor(raw_cursor) as cursor:
+                        cursor.execute(*read_sql(query.filter(pk__lte=upper)))
+                        while True:
+                            batch = cursor.fetchmany(500)
+                            if not batch:
+                                break
+                            read_count += len(batch)
+                            row = FinanceRow(*batch[-1])
+                            next_last = (row.external_order_id, row.business_date, row.currency, row.pk)
+                            if read_count > expected or next_last == last:
+                                raise ValidationError('结算来源分页异常，未生成部分账单。')
+                            for values in batch:
+                                yield FinanceRow(*values)
+                            last = next_last
+                if read_count != expected:
+                    raise ValidationError('结算来源读取不完整，请重试；未生成部分账单。')
         iterator = read_finance()
         grouped = ((key, list(rows)) for key, rows in groupby(iterator,
             lambda row: (row.store_id, row.external_order_id, str(row.business_date), row.currency)))
@@ -341,8 +352,16 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
 
     # Read exact provider escrow versions referenced by posted financial facts.
     envelopes = SyncRawEnvelope.objects.filter(tenant=user.tenant, pk__in=envelope_ids).order_by()
+    if native:
+        from itertools import chain
+        ids = sorted(envelope_ids)
+        # Keep JSON batches small without repeating the entire ID list in each SQL.
+        envelope_rows = chain.from_iterable(SyncRawEnvelope.objects.filter(tenant=user.tenant,
+            pk__in=ids[offset:offset+20]).order_by('pk') for offset in range(0, len(ids), 20))
+    else:
+        envelope_rows = envelopes.iterator(chunk_size=20)
     escrow = {}
-    for envelope in bounded_raw_envelopes(envelopes) if native else envelopes.iterator(chunk_size=20):
+    for envelope in envelope_rows:
         for index, trace in enumerate(envelope.payload.get('responses') or []):
             body = (trace.get('payload') or {}).get('response') or {}
             if not body.get('order_sn') or not body.get('order_income'):
@@ -427,9 +446,11 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                 sp6th_components=components if kind == 'order_fee' else None, description='SaaS保存的官方订单结算响应；构成必须与净结算额对平。')
         if source:shopee_income.append({'store_id': store_id, 'order': order, 'date': day, 'currency': currency, **source})
 
-    financial_flows = [{'native_fact_index': index} for index in range(len(facts))] if native else []
+    financial_fact_count = len(facts) if native else 0
     if native:
         escrow.clear()
+        envelope_ids.clear()
+        ids.clear()
         component_pool.clear()
         text_pool.clear()
 
@@ -451,6 +472,7 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
     shipment_lookups = None
     related_ids = set()
     if native:
+        from django.db.models import F
         from apps.sales_management.warehouse_order_models import OrderWarehouseLookup
         from apps.sales_management.aftersales_models import ReturnAllocation
         registrations = list(OrderRegistration.objects.filter(tenant=user.tenant, store_id__in=stores,
@@ -464,9 +486,10 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                 related_ids.add(registration.order_id)
         before = date.fromordinal(max(date.min.toordinal(), start.toordinal()-2))
         after = date.fromordinal(min(date.max.toordinal(), end.toordinal()+2))
-        related_ids.update(ReturnAllocation.objects.filter(case__tenant=user.tenant, case__store_id__in=stores,
+        return_order_ids = set(ReturnAllocation.objects.filter(case__tenant=user.tenant, case__store_id__in=stores,
             line__receipt__tenant=user.tenant, line__receipt__received_at__date__range=(before, after)
             ).order_by().values_list('case__order_id', flat=True).distinct())
+        related_ids.update(return_order_ids)
         financial_orders = {f['external_order_id'] for f in facts if f.get('external_order_id')}
         selected = Q(order__external_order_id__in=financial_orders) | Q(order_id__in=related_ids)
         shipped = Q(status='matched', warehouse_id__isnull=False)
@@ -477,12 +500,15 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                 dates |= Q(snapshot__packages__icontains=f'{month//12:04d}-{month%12+1:02d}')
             shipped &= dates
         lookup_query = OrderWarehouseLookup.objects.filter(order__tenant=user.tenant, order__store_id__in=stores
-            ).filter(selected | shipped).order_by().only('id', 'order_id', 'status', 'warehouse_id', 'snapshot')
-        shipment_lookups = {row.order_id: row for row in lookup_query.iterator(chunk_size=500)}
+            ).filter(selected | shipped).order_by().only('id', 'order_id', 'status', 'warehouse_id'
+            ).annotate(_read_packages=F('snapshot__packages'))
+        shipment_lookups = {}
+        for row in lookup_query.iterator(chunk_size=500):
+            row.snapshot = {'packages': row._read_packages}
+            shipment_lookups[row.order_id] = row
         related_ids.update(shipment_lookups)
     order_query = SalesOrder.objects.filter(tenant=user.tenant, store_id__in=stores)
     if native:
-        from django.db.models import F
         order_query = order_query.filter(Q(pk__in=related_ids) | Q(external_order_id__in=financial_orders)).order_by().only('id', 'store_id', 'platform_id', 'external_order_id',
             'raw_status', 'normalized_status', 'delivered_at_utc').annotate(
                 _read_logistics=F('source_details__platform_logistics'),
@@ -493,11 +519,32 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
             order.source_details = {'platform_logistics': order._read_logistics,
                                     'platform_pickup_at_utc': order._read_pickup}
     orders_by_key = {(r.store_id, r.external_order_id): r for r in orders}
-    order_dates = shipping_dates(orders, ShipmentRecord.objects.filter(tenant=user.tenant,
+    shipments = ShipmentRecord.objects.filter(tenant=user.tenant,
         store_id__in=stores, sales_order__isnull=False).values(
-            'sales_order_id', 'store_id', 'platform_id', 'shipped_at_utc'))
+            'sales_order_id', 'store_id', 'platform_id', 'shipped_at_utc')
+    if native:
+        from itertools import chain
+        order_ids = [o.pk for o in orders]
+        shipment_query = shipments
+        shipments = chain.from_iterable(shipment_query.filter(sales_order_id__in=order_ids[offset:offset+500]
+            ).iterator(chunk_size=500) for offset in range(0, len(order_ids), 500))
+    order_dates = shipping_dates(orders, shipments)
+    del shipments
     from .summary_cost_classification import collect_classifications, classify
-    classifications = collect_classifications(user, stores, orders, facts, native=native)
+    classification_orders = [o for o in orders if (o.store_id, o.external_order_id) in first
+        and (o.store_id, o.external_order_id) not in prior_keys] if native else orders
+    classifications = collect_classifications(user, stores, classification_orders, facts, native=native)
+    if native:
+        # Shipping-date and classification proofs have consumed these JSON projections.
+        for order in orders:
+            order.source_details = None
+            del order._read_logistics, order._read_pickup
+        from collections import namedtuple
+        identity = namedtuple('OrderIdentity', 'pk store_id platform_id external_order_id')
+        orders = [identity(o.pk, o.store_id, o.platform_id, o.external_order_id) for o in orders]
+        orders_by_key = {(o.store_id, o.external_order_id): o for o in orders}
+        if orders:del order
+        del classification_orders, order_query, lookup_query, selected, financial_orders, related_ids
     sku_sales = {'source': 'SaaS SalesOrderItem', 'orders': {}, 'exchanges': {}}
     products = {}; catalogue = []
     provider_shops = defaultdict(set)
@@ -517,34 +564,60 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
     for key, product in saved_products.items():
         if product['title']:products[key] = product
     if native:
-        # Retain the same historical title fallback without loading unrelated item payloads.
+        # Resolve the earliest historical item per product in SQL. MySQL's
+        # default collation may collapse distinct provider identifiers.
         from itertools import islice
+        from django.db import connection
+        from django.db.models import BinaryField, F, Func, Min
+
+        product_key = F('platform_product_id')
+        if connection.vendor == 'mysql':
+            product_key = Func(product_key, template='CAST(%(expressions)s AS BINARY)', output_field=BinaryField())
         for sid in sorted(stores):
-            historical_orders = iter(SalesOrder.objects.filter(tenant=user.tenant, store_id=sid
-                ).order_by().values_list('pk', flat=True).iterator(chunk_size=500))
-            fallback = {}
-            while True:
-                batch = list(islice(historical_orders, 500))
-                if not batch:break
-                titles = SalesOrderItem.objects.filter(sales_order_id__in=batch).order_by().values_list(
-                    'pk', 'platform_product_id', 'item_name_snapshot')
-                for item_id, pid, title in titles.iterator(chunk_size=500):
-                    if (sid, pid) not in products and (pid not in fallback or item_id < fallback[pid][0]):
-                        fallback[pid] = (item_id, title)
-            for pid, (_, title) in fallback.items():
-                products[(sid, pid)] = {'store_id': sid, 'platform_product_id': pid, 'title': title, 'url': ''}
+            items = SalesOrderItem.objects.filter(sales_order__tenant=user.tenant, sales_order__store_id=sid)
+            first_ids = iter(items.order_by().values(key=product_key).annotate(first_id=Min('pk'))
+                             .values_list('first_id', flat=True).iterator(chunk_size=500))
+            while batch := list(islice(first_ids, 500)):
+                titles = items.filter(pk__in=batch).values_list('platform_product_id', 'item_name_snapshot')
+                for pid, title in titles:
+                    products.setdefault((sid, pid), {
+                        'store_id': sid, 'platform_product_id': pid, 'title': title, 'url': '',
+                    })
     item_query = SalesOrderItem.objects.filter(sales_order__tenant=user.tenant, sales_order__store_id__in=stores).select_related('sales_order').order_by('pk')
     if native:
+        from django.db.models import Case, When, Value, BooleanField
         item_query = item_query.only('id', 'sales_order_id', 'internal_sku_id', 'platform_product_id',
-            'platform_variant_id', 'seller_sku', 'quantity', 'source_details', 'original_unit_price',
+            'platform_variant_id', 'seller_sku', 'quantity', 'original_unit_price',
             'sale_unit_price', 'line_total_amount', 'currency', 'item_name_snapshot',
-            'sales_order__id', 'sales_order__store_id', 'sales_order__external_order_id')
-        from itertools import chain
+            'sales_order__id', 'sales_order__store_id', 'sales_order__external_order_id').annotate(
+                _read_price_source=F('source_details__api_price_source'),
+                _read_unverified=F('source_details__api_price_unverified_zero'),
+                _read_reported_amount=F('source_details__reported_line_amount'),
+                _read_unit_price=F('source_details__sale_unit_price'),
+                _read_unit_price_present=Case(When(source_details__has_key='sale_unit_price', then=Value(True)),
+                    default=Value(False), output_field=BooleanField()))
         order_ids = [order.pk for order in orders]
         item_rows = item_query
-        item_query = chain.from_iterable(item_rows.filter(sales_order_id__in=order_ids[offset:offset+500]).iterator(chunk_size=500)
-            for offset in range(0, len(order_ids), 500))
+        def read_items():
+            for offset in range(0, len(order_ids), 500):
+                query = item_rows.filter(sales_order_id__in=order_ids[offset:offset+500])
+                upper = query.order_by('-pk').values_list('pk', flat=True).first()
+                last = 0
+                while upper is not None and last < upper:
+                    batch = list(query.filter(pk__gt=last, pk__lte=upper).order_by('pk')[:500])
+                    if not batch:
+                        raise ValidationError('订单商品来源读取不完整，请重试。')
+                    last = batch[-1].pk
+                    yield from batch
+                    batch.clear()
+        item_query = read_items()
     for item in item_query:
+        if native:
+            item.source_details = {'api_price_source': item._read_price_source,
+                'api_price_unverified_zero': item._read_unverified,
+                'reported_line_amount': item._read_reported_amount}
+            if item._read_unit_price_present:
+                item.source_details['sale_unit_price'] = item._read_unit_price
         order = item.sales_order;key = str(order.store_id)+'|'+order.external_order_id
         line = {'item_id': item.pk, 'internal_sku_id': item.internal_sku_id, 'platform_product_id': item.platform_product_id,
                 'platform_variant_id': item.platform_variant_id, 'seller_sku': item.seller_sku, 'quantity': item.quantity,
@@ -558,6 +631,8 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                         current_price_fresh=(timezone.now()-quote['captured_at']).total_seconds() <= 86400)
         sku_sales['orders'].setdefault(key, []).append(line)
         products.setdefault((order.store_id, item.platform_product_id), {'store_id': order.store_id, 'platform_product_id': item.platform_product_id, 'title': item.item_name_snapshot, 'url': ''})
+    if native:
+        del quotes, saved_products
     if registrations is None:
         registrations = list(OrderRegistration.objects.filter(tenant=user.tenant, store_id__in=stores,
             deleted_at__isnull=True, status__in=['registered', 'historical_recorded', 'completed', 'applied']).order_by('version', 'pk'))
@@ -565,12 +640,21 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
     from .summary_shipped_items import shipped_items
     if shipment_lookups is None:
         shipment_lookups = {r.order_id: r for r in OrderWarehouseLookup.objects.filter(order__tenant=user.tenant, order__store_id__in=stores)}
-    skus = {s.pk: s for s in ProductSKU.objects.filter(tenant=user.tenant)}
+    sku_query = ProductSKU.objects.filter(tenant=user.tenant)
+    if native:
+        sku_query = sku_query.values_list('pk', 'sku_code', 'legacy_sku_code', named=True).iterator(chunk_size=500)
+    skus = {sku.pk: sku for sku in sku_query}
     aliases = defaultdict(set)
     for sku in skus.values():
         for code in [sku.sku_code, sku.legacy_sku_code]:
             if code:aliases[code.strip().casefold()].add(sku.pk)
-    cost_versions = list(ProductCostVersion.objects.filter(tenant=user.tenant).select_related('warehouse'))
+    cost_query = ProductCostVersion.objects.filter(tenant=user.tenant).select_related('warehouse')
+    if native:
+        cost_query = cost_query.only(
+            'id', 'sku_id', 'warehouse_id', 'warehouse__country_code', 'status',
+            'confirmed_cost', 'currency', 'version_no', 'effective_from', 'effective_to',
+        )
+    cost_versions = list(cost_query)
     costs_by_sku = defaultdict(lambda: defaultdict(list))
     for version in cost_versions:
         costs_by_sku[version.sku_id][version.warehouse_id].append(version)
@@ -581,8 +665,11 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
     for store_id, external in sorted(cost_orders):
         day = first.get((store_id, external))
         store = stores[store_id];order = orders_by_key.get((store_id, external));key = str(store_id)+'|'+external
-        lookup = shipment_lookups.get(order.pk) if order else None
+        lookup = (shipment_lookups.pop(order.pk, None) if native else shipment_lookups.get(order.pk)) if order else None
         final, reasons = shipped_items(lookup, store.timezone)
+        if native and lookup:
+            lookup.snapshot = {}
+            del lookup._read_packages
         components, cost = [], ZERO
         for line in final:
             sku_id = line.get('sku_id') or line.get('internal_sku_id');code = line.get('source_sku') or ''
@@ -627,7 +714,7 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
                     'cost_version_id': component['cost_version_id']},
                 'cost_calculation': {'components': [component], 'state': 'pending' if component['reasons'] else 'calculated',
                     'reasons': component['reasons'], 'time_basis': 'warehouse_shipped_date'}})
-        if order:outbound_components[order.pk] = components
+        if order and (not native or order.pk in return_order_ids):outbound_components[order.pk] = components
         if day is None or (store_id, external) in prior_keys:continue
         f = add(store, 'product_cost', -cost if components and any(not c['reasons'] for c in components) else None, day, external, 'database:cost:'+str(store_id)+':'+external,
             currency='CNY', source='SaaS仓库实际出库商品成本', status='pending' if reasons else 'confirmed',
@@ -719,9 +806,12 @@ def collect(user, scope, *, allow_legacy_zero=True, native=False):
             key = '|'.join([p['country'], p['bill_month'], p.get('currency') or 'CNY'])
             basis[key] = {'total': str(p['order_detail_sum']), 'file': r.file_name, 'sha256': r.file_hash}
     from .summary_raw_flows import source_flows
-    raw_flows = financial_flows + source_flows(stores, financial_rows, fees, registrations,
+    raw_flows = [{'native_fact_index': index} for index in range(financial_fact_count)]
+    raw_flows.extend(source_flows(stores, financial_rows, fees, registrations,
         FinanceSummaryInput.objects.filter(tenant=user.tenant, kind='adjustment', store_id__in=stores),
-        facts, start, end) + cost_flows + [dict(r) for r in returns]
+        facts, start, end))
+    raw_flows.extend(cost_flows)
+    raw_flows.extend(dict(row) for row in returns)
     convert_costs(facts, stores, rates)
     shares = warehouse_shares(facts, basis, rates)
     members = [] if native else _sku_members(facts, rates)

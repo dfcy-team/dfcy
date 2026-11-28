@@ -189,7 +189,9 @@ function table(s,input){
   for(const mode of ['operations','finance'])field_issues['profit_'+mode]=labeledIssues(feeKinds.filter(k=>!['operations','finance'].includes(k)||k===mode));
   for(const [kind]of s.rates.fields)rates[kind]=summaryRatio(s,kind==='gross_margin'?sales.amount==null?null:s.rates.displayAmount(sales.amount)+s.rates.displayAmount(cost.amount||0n):kind.startsWith('profit_')?profits[kind.slice(7)]:values[kind]==null?null:s.p.micro(values[kind]),denominator);
   for(const kind of feeKinds)if(!Object.hasOwn(rates,kind))rates[kind]=summaryRatio(s,values[kind]==null?null:s.p.micro(values[kind]),denominator);
-  return{key,identity:identity(s,g,view),values,partial,field_issues,profits:{operations:amount(s,profits.operations),finance:amount(s,profits.finance)},rates,pending:boundary||!!g.pending||Object.values(values).some(x=>x==null)||Object.values(partial).some(Boolean)};
+  const compositions={};
+  for(const kind of [...feeKinds,'gross_margin','profit_operations','profit_finance','rate:product_cost'])compositions[kind]=detail(s,{...input,row_key:key,kind,source_key:undefined,cost_page:1,flow_page:1,composition_only:true},{operations:opMap,finance:finMap});
+  return{key,identity:identity(s,g,view),values,partial,field_issues,compositions,profits:{operations:amount(s,profits.operations),finance:amount(s,profits.finance)},rates,pending:boundary||!!g.pending||Object.values(values).some(x=>x==null)||Object.values(partial).some(Boolean)};
  });
  if(!stats.attribution){
  stats.undated=query(s,'detail',{...filters,from:'',to:'',kind:'warehouse_order',status:'',keyword:'',editable:''},mode).filter(f=>f.statistics_date_reason).length;
@@ -216,13 +218,14 @@ function table(s,input){
  if(view!=='detail')for(const row of rows)if(itemGaps.some(g=>row.identity.shop===g.store||view==='country'&&s.options.stores.some(shop=>shop.code===g.store&&s.countries[shop.country]===row.identity.country)))row.pending=true;
  return{view,mode,rows,total:base.length,page:current,page_size,summary_totals,options:scopedOptions(s,filters),labels:s.labels,rate_fields:s.rates.fields,attribution,allocation_version:'order-ledger-v3',period_warning:boundary?`本周期超出已接入范围（${s.sourceScope.from} — ${s.sourceScope.to}），仅计算已载入部分，不认定完整周期；未自动补采数据。`:'',period_note:'正式汇总共用已归属订单明细。未关联／未分摊的仓库处理费及仓库其他费不参与本次汇总，也不进入待核对；原登记保留不动。无订单的订单调整、公共订单费用及店铺调整按同店同币种所选月／自然周／半月的有效结算销售额分摊，直接关联订单的调整不重摊。其他来源确实缺金额、日期或同期分母时才保留待核对；订单内缺商品依据仍明确标记。已关联仓库费用、成本及汇率规则不变。',date_warning:undated?`${undated}笔已关联出库处理费缺少唯一发货／揽收日期，金额保留在原账期及待归期，不混入未关联费用待核对区。已关联仓库其他费沿用对应订单归期。`:''};
 }
-function detail(s,input){
- const {view,filters={},scope='store',mode='operations',row_key,kind}=input,sku=['sku','product_link'].includes(view),rows=query(s,view,filters,mode,scope),g=rows.find((x,i)=>rowKey(x,i)===row_key);
+function detail(s,input,groups){
+ const {view,filters={},scope='store',mode='operations',row_key,kind}=input,sku=['sku','product_link'].includes(view),g=groups?groups[mode]?.get(row_key):query(s,view,filters,mode,scope).find((x,i)=>rowKey(x,i)===row_key);
  if(!g)throw Error('该行已变化，请刷新后重试。');
+ if(groups)s.c.HTML2_STORE_HIERARCHY.setMode(mode);
  if(view==='detail')return{title:(s.labels[g.kind]||g.kind)+' · 来源及核算依据',html:factHtml(s,g,filters),records:[]};
  const isRate=kind.startsWith('rate:'),k=isRate?kind.slice(5):kind,ad=['operations','finance'].includes(k),targetKind=ad?'advertising':k;
- if(ad&&mode!==k)return detail(s,{...input,mode:k});
- if(k.startsWith('profit_')&&mode!==k.slice(7))return detail(s,{...input,mode:k.slice(7)});
+ if(ad&&mode!==k)return detail(s,{...input,mode:k},groups);
+ if(k.startsWith('profit_')&&mode!==k.slice(7))return detail(s,{...input,mode:k.slice(7)},groups);
  const read=cell(s,g,targetKind,sku),sales=cell(s,g,'sales',sku),cost=cell(s,g,'product_cost',sku),net=k.startsWith('profit_'),gross=k==='gross_margin',target=gross?(sales.amount==null||cost.amount==null?null:s.rates.displayAmount(sales.amount)+s.rates.displayAmount(cost.amount)):net?s.rates.profit(g,sku):read.amount;
  if(k==='product_cost'&&!isRate){
   let entries=sku?(g.members||g.skus?.flatMap(x=>x.members)||[]).filter(m=>m.fact?.kind==='product_cost').map((m,i)=>({
@@ -244,6 +247,7 @@ function detail(s,input){
  }
  let parts=[],records=[],recordsTotal=0,recordsPage=1;const recordsSize=50;
  function sourceRecords(items,record){
+  if(input.composition_only){recordsTotal=items.length;return [];}
   if(!input.flow_page)return items.map(record);
   recordsTotal=items.length;recordsPage=Math.max(1,Math.min(input.flow_page,Math.max(1,Math.ceil(recordsTotal/recordsSize))));
   const offset=(recordsPage-1)*recordsSize;return items.slice(offset,offset+recordsSize).map((item,index)=>record(item,offset+index));
