@@ -397,6 +397,8 @@ def test_archive_migrations_cannot_reuse_registered_release():
         'apps/products/migrations/0036_monthly_cost_unknown_closing_amount.py',
         'apps/products/migrations/0037_monthly_cost_adjustments_and_reconciliation.py',
         'apps/supply_chain/migrations/0087_arrival_unreceived_reminder_days.py',
+        # V582 snapshot metadata postdates the frozen archive.
+        'apps/finance/migrations/0021_scheduled_summary_snapshots.py',
     }
     assert all((root / name).is_file() for name in unregistered_migrations)
     registered_digest = sha256()
